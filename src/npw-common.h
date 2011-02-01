@@ -93,6 +93,9 @@ struct _NPW_PluginInstanceClass
 void *
 npw_plugin_instance_new(NPW_PluginInstanceClass *klass) attribute_hidden;
 
+uint32_t
+npw_plugin_instance_get_refcount(void *ptr) attribute_hidden;
+
 void *
 npw_plugin_instance_ref(void *ptr) attribute_hidden;
 

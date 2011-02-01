@@ -47,6 +47,15 @@ npw_plugin_instance_new(NPW_PluginInstanceClass *klass)
   return plugin;
 }
 
+uint32_t
+npw_plugin_instance_get_refcount(void *ptr)
+{
+  NPW_PluginInstance *plugin = (NPW_PluginInstance *)ptr;
+  if (plugin)
+    return plugin->refcount;
+  return 0;
+}
+
 void *
 npw_plugin_instance_ref(void *ptr)
 {
