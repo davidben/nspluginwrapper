@@ -2106,6 +2106,22 @@ int rpc_method_send_reply(rpc_connection_t *connection, ...)
   return ret;
 }
 
+bool rpc_method_in_invoke(rpc_connection_t *connection)
+{
+  D(bug("rpc_method_in_invoke\n"));
+  if (connection == NULL)
+	return false;
+  // Our stack should alternate between handle/dispatch and
+  // invokes. Some calls are only safe to handle called from an event
+  // loop. In this case, we should have values invoke_depth = 0;
+  // handle_depth = 1; dispatch_depth = 1
+  D(bug("invoke_depth = %d; dispatch_depth = %d; handle_depth = %d\n",
+		connection->invoke_depth,
+		connection->dispatch_depth,
+		connection->handle_depth));
+  return connection->invoke_depth > 0;
+}
+
 
 /* ====================================================================== */
 /* === Test Program                                                   === */
