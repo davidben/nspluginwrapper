@@ -76,6 +76,9 @@ ifneq (,$(findstring $(OS),netbsd dragonfly))
 X_LDFLAGS += -Wl,--rpath,$(x11prefix)/$(lib64)
 endif
 
+# HACK
+USE_SYSTEM_LSB=1
+
 ARCH_32 = $(ARCH)
 ifeq ($(biarch), yes)
 ARCH_32 = $(TARGET_ARCH)
