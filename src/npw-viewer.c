@@ -192,8 +192,17 @@ typedef struct _DelayedCall {
 static GList *g_delayed_calls = NULL;
 static guint g_delayed_calls_id = 0;
 
+// We put delayed NPP_Destroy calls on a separate list because, unlike
+// NPN_ReleaseObject, these must be called on a clean stack and have no
+// other cause to get cleared. Otherwise, it is possible for the
+// delayed_calls_process in g_NPP_Destroy_Now to call it early.
+static GList *g_delayed_destroys = NULL;
+static guint g_delayed_destroys_id = 0;
+
 static void g_NPN_ReleaseObject_Now(NPObject *npobj);
+static NPError g_NPP_Destroy_Now(PluginInstance *plugin, NPSavedData **sdata);
 static gboolean delayed_calls_process_cb(gpointer user_data);
+static gboolean delayed_destroys_process_cb(gpointer user_data);
 
 static void delayed_calls_add(int type, gpointer data)
 {
@@ -207,6 +216,15 @@ static void delayed_calls_add(int type, gpointer data)
   if (g_delayed_calls_id == 0)
 	g_delayed_calls_id = g_idle_add_full(G_PRIORITY_LOW,
 										 delayed_calls_process_cb, NULL, NULL);
+}
+
+static void delayed_destroys_add(PluginInstance *plugin)
+{
+  g_delayed_destroys = g_list_append(g_delayed_destroys, plugin);
+
+  if (g_delayed_destroys_id == 0)
+	g_delayed_destroys_id = g_idle_add_full(G_PRIORITY_LOW,
+											delayed_destroys_process_cb, NULL, NULL);
 }
 
 // Returns whether there are pending calls left in the queue
@@ -251,6 +269,24 @@ static gboolean delayed_calls_process_cb(gpointer user_data)
   return delayed_calls_process(NULL, FALSE);
 }
 
+static gboolean delayed_destroys_process_cb(gpointer user_data)
+{
+  while (g_delayed_destroys != NULL) {
+	PluginInstance *plugin = (PluginInstance *)g_delayed_destroys->data;
+	g_delayed_destroys = g_list_delete_link(g_delayed_destroys,
+											g_delayed_destroys);
+	g_NPP_Destroy_Now(plugin, NULL);
+  }
+
+  if (g_delayed_destroys)
+	return TRUE;
+
+  if (g_delayed_destroys_id) {
+	g_source_remove(g_delayed_destroys_id);
+	g_delayed_destroys_id = 0;
+  }
+  return FALSE;
+}
 
 /* ====================================================================== */
 /* === X Toolkit glue                                                 === */
@@ -2955,6 +2991,13 @@ static int handle_NP_Shutdown(rpc_connection_t *connection)
 	return error;
   }
 
+  /* Clear any NPP_Destroys we may have delayed. Although it doesn't
+     really matter, and the plugin is going to die soon.
+
+	 XXX: To be really picky, we should probably delay this and make
+	 sure it is run on a new event loop iteration. */
+  delayed_destroys_process_cb(NULL);
+
   NPError ret = g_NP_Shutdown();
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
@@ -3069,6 +3112,8 @@ static NPError g_NPP_Destroy(NPP instance, NPSavedData **sdata)
 
   // Process all pending calls as the data could become junk afterwards
   // XXX: this also processes delayed calls from other instances
+  // XXX: Also, if this was delayed, the NPN_ReleaseObject calls will
+  // be ignored; the browser thinks we've already died.
   delayed_calls_process(plugin, TRUE);
 
   D(bugiI("NPP_Destroy instance=%p\n", instance));
@@ -3077,6 +3122,22 @@ static NPError g_NPP_Destroy(NPP instance, NPSavedData **sdata)
 
   npw_plugin_instance_invalidate(plugin);
   npw_plugin_instance_unref(plugin);
+  return ret;
+}
+
+static NPError g_NPP_Destroy_Now(PluginInstance *plugin, NPSavedData **save)
+{
+  D(bug("g_NPP_Destroy_Now\n"));
+
+  NPSavedData *save_area = NULL;
+  NPError ret = g_NPP_Destroy(PLUGIN_INSTANCE_NPP(plugin), &save_area);
+  if (save) {
+	*save = save_area;
+  } else if (save_area) {
+	npw_printf("WARNING: NPP_Destroy returned save_area, but it was ignored\n");
+  }
+
+  rpc_connection_unref(g_rpc_connection);
   return ret;
 }
 
@@ -3095,8 +3156,27 @@ static int handle_NPP_Destroy(rpc_connection_t *connection)
 	return error;
   }
 
-  NPSavedData *save_area;
-  NPError ret = g_NPP_Destroy(PLUGIN_INSTANCE_NPP(plugin), &save_area);
+  NPSavedData *save_area = NULL;
+  NPError ret = NPERR_NO_ERROR;
+  /* Take a ref for the rpc_method_send_reply; otherwise the
+   * rpc_connection_unref in g_NPP_Destroy_Now may cause a slight
+   * nuisance. */
+  rpc_connection_ref(connection);
+  if (npw_plugin_instance_get_refcount(plugin) == 1) {
+	/* The plugin is not on the stack; it's safe to call this. */
+	D(bug("NPP_Destroy is fine.\n"));
+	ret = g_NPP_Destroy_Now(plugin, &save_area);
+  } else {
+	/* It is not safe to call NPP_Destroy right now. Delay it until we
+	 * return to the event loop.
+	 *
+	 * NOTE: This means that the browser never sees the real return
+	 * value of NPP_Destroy; the NPSavedData will be discarded, and any
+	 * error code will be ignored. */
+	D(bug("NPP_Destroy raced; delaying it; refcount = %d\n",
+		  npw_plugin_instance_get_refcount(plugin)));
+	delayed_destroys_add(plugin);
+  }
 
   error = rpc_method_send_reply(connection,
 								RPC_TYPE_INT32, ret,
