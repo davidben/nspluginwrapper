@@ -212,10 +212,7 @@ static void delayed_calls_add(int type, gpointer data)
 // Returns whether there are pending calls left in the queue
 static gboolean delayed_calls_process(PluginInstance *plugin, gboolean is_in_NPP_Destroy)
 {
-  GList *l = g_delayed_calls;
-  while (l != NULL) {
-	GList *cl = l;
-	l = l->next;
+  while (g_delayed_calls != NULL) {
 
 	if (!is_in_NPP_Destroy) {
 	  /* Continue later if there is incoming RPC */
@@ -223,7 +220,11 @@ static gboolean delayed_calls_process(PluginInstance *plugin, gboolean is_in_NPP
 		return TRUE;
 	}
 
-	DelayedCall *dcall = (DelayedCall *)cl->data;
+	DelayedCall *dcall = (DelayedCall *)g_delayed_calls->data;
+	/* XXX: Remove the link first; this function /must/ be
+	 * re-entrant. We may be called again while processing the
+	 * delayed call. */
+	g_delayed_calls = g_list_delete_link(g_delayed_calls, g_delayed_calls);
 	switch (dcall->type) {
 	case RPC_DELAYED_NPN_RELEASE_OBJECT:
 	  {
@@ -233,7 +234,6 @@ static gboolean delayed_calls_process(PluginInstance *plugin, gboolean is_in_NPP
 	  }
 	}
 	NPW_MemFree(dcall);
-	g_delayed_calls = g_list_delete_link(g_delayed_calls, cl);
   }
 
   if (g_delayed_calls)
