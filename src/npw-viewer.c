@@ -3172,8 +3172,12 @@ static int handle_NPP_Destroy(rpc_connection_t *connection)
 	 *
 	 * NOTE: This means that the browser never sees the real return
 	 * value of NPP_Destroy; the NPSavedData will be discarded, and any
-	 * error code will be ignored. */
-	D(bug("NPP_Destroy raced; delaying it; refcount = %d\n",
+	 * error code will be ignored.
+	 *
+	 * FIXME: This refcount check is a very poor one because it also
+	 * includes refs taken by NPObjectInfo. While it should always be
+	 * safe to delay the call, we lose NPSavedData. */
+	D(bug("NPP_Destroy (might have) raced; delaying it; refcount = %d\n",
 		  npw_plugin_instance_get_refcount(plugin)));
 	delayed_destroys_add(plugin);
   }
