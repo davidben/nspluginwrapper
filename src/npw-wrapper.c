@@ -1578,7 +1578,7 @@ static int handle_NPN_GetStringIdentifier(rpc_connection_t *connection)
 	free(name);
 
   return rpc_method_send_reply(connection,
-							   RPC_TYPE_NP_IDENTIFIER, ident,
+							   RPC_TYPE_NP_IDENTIFIER, &ident,
 							   RPC_TYPE_INVALID);
 }
 
@@ -1651,7 +1651,7 @@ static int handle_NPN_GetIntIdentifier(rpc_connection_t *connection)
   NPIdentifier ident = g_NPN_GetIntIdentifier(intid);
 
   return rpc_method_send_reply(connection,
-							   RPC_TYPE_NP_IDENTIFIER, ident,
+							   RPC_TYPE_NP_IDENTIFIER, &ident,
 							   RPC_TYPE_INVALID);
 }
 

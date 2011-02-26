@@ -2205,7 +2205,7 @@ invoke_NPN_Invoke(PluginInstance *plugin, NPObject *npobj, NPIdentifier methodNa
 								RPC_METHOD_NPN_INVOKE,
 								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, methodName,
+								RPC_TYPE_NP_IDENTIFIER, &methodName,
 								RPC_TYPE_ARRAY, RPC_TYPE_NP_VARIANT, argCount, args,
 								RPC_TYPE_INVALID);
 
@@ -2395,7 +2395,7 @@ invoke_NPN_GetProperty(PluginInstance *plugin, NPObject *npobj, NPIdentifier pro
 								RPC_METHOD_NPN_GET_PROPERTY,
 								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, propertyName,
+								RPC_TYPE_NP_IDENTIFIER, &propertyName,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -2457,7 +2457,7 @@ invoke_NPN_SetProperty(PluginInstance *plugin, NPObject *npobj, NPIdentifier pro
 								RPC_METHOD_NPN_SET_PROPERTY,
 								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, propertyName,
+								RPC_TYPE_NP_IDENTIFIER, &propertyName,
 								RPC_TYPE_NP_VARIANT, value,
 								RPC_TYPE_INVALID);
 
@@ -2516,7 +2516,7 @@ invoke_NPN_RemoveProperty(PluginInstance *plugin, NPObject *npobj, NPIdentifier 
 								RPC_METHOD_NPN_REMOVE_PROPERTY,
 								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, propertyName,
+								RPC_TYPE_NP_IDENTIFIER, &propertyName,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -2573,7 +2573,7 @@ invoke_NPN_HasProperty(PluginInstance *plugin, NPObject *npobj, NPIdentifier pro
 								RPC_METHOD_NPN_HAS_PROPERTY,
 								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, propertyName,
+								RPC_TYPE_NP_IDENTIFIER, &propertyName,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -2630,7 +2630,7 @@ invoke_NPN_HasMethod(PluginInstance *plugin, NPObject *npobj, NPIdentifier metho
 								RPC_METHOD_NPN_HAS_METHOD,
 								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, methodName,
+								RPC_TYPE_NP_IDENTIFIER, &methodName,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -2930,7 +2930,7 @@ invoke_NPN_IdentifierIsString(NPIdentifier identifier)
 
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_IDENTIFIER_IS_STRING,
-								RPC_TYPE_NP_IDENTIFIER, identifier,
+								RPC_TYPE_NP_IDENTIFIER, &identifier,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -2988,7 +2988,7 @@ invoke_NPN_UTF8FromIdentifier(NPIdentifier identifier)
 
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_UTF8_FROM_IDENTIFIER,
-								RPC_TYPE_NP_IDENTIFIER, identifier,
+								RPC_TYPE_NP_IDENTIFIER, &identifier,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -3051,7 +3051,7 @@ invoke_NPN_IntFromIdentifier(NPIdentifier identifier)
 
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_INT_FROM_IDENTIFIER,
-								RPC_TYPE_NP_IDENTIFIER, identifier,
+								RPC_TYPE_NP_IDENTIFIER, &identifier,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {

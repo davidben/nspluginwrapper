@@ -217,7 +217,7 @@ static bool npclass_invoke_HasMethod(NPObject *npobj, NPIdentifier name)
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_HAS_METHOD,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, name,
+								RPC_TYPE_NP_IDENTIFIER, &name,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -323,7 +323,7 @@ static bool npclass_invoke_Invoke(NPObject *npobj, NPIdentifier name, const NPVa
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_INVOKE,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, name,
+								RPC_TYPE_NP_IDENTIFIER, &name,
 								RPC_TYPE_ARRAY, RPC_TYPE_NP_VARIANT, argCount, args,
 								RPC_TYPE_INVALID);
 
@@ -505,7 +505,7 @@ static bool npclass_invoke_HasProperty(NPObject *npobj, NPIdentifier name)
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_HAS_PROPERTY,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, name,
+								RPC_TYPE_NP_IDENTIFIER, &name,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -595,7 +595,7 @@ static bool npclass_invoke_GetProperty(NPObject *npobj, NPIdentifier name, NPVar
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_GET_PROPERTY,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, name,
+								RPC_TYPE_NP_IDENTIFIER, &name,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -680,7 +680,7 @@ static bool npclass_invoke_SetProperty(NPObject *npobj, NPIdentifier name, const
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_SET_PROPERTY,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, name,
+								RPC_TYPE_NP_IDENTIFIER, &name,
 								RPC_TYPE_NP_VARIANT, value,
 								RPC_TYPE_INVALID);
 
@@ -759,7 +759,7 @@ static bool npclass_invoke_RemoveProperty(NPObject *npobj, NPIdentifier name)
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_REMOVE_PROPERTY,
 								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_NP_IDENTIFIER, name,
+								RPC_TYPE_NP_IDENTIFIER, &name,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {

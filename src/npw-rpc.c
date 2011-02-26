@@ -1252,7 +1252,7 @@ static int do_recv_NPObject(rpc_message_t *message, void *p_value)
 // the browser side
 static int do_send_NPIdentifier(rpc_message_t *message, void *p_value)
 {
-  NPIdentifier ident = (NPIdentifier)p_value;
+  NPIdentifier ident = *(NPIdentifier *)p_value;
   int id = 0;
   if (ident) {
 #ifdef BUILD_WRAPPER
