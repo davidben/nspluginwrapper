@@ -1141,7 +1141,7 @@ static void print_usage(void)
   printf("   -a --auto               flag: set automatic mode for plugins discovery\n");
   printf("   -n --native             flag: allow native plugin(s) to be wrapped\n");
   printf("   -l --list               list plugins currently installed\n");
-  printf("   -u --update             update plugin(s) currently installed\n");
+  printf("   -u --update [FILE(S)]   update plugin(s) currently installed\n");
   printf("   -i --install [FILE(S)]  install plugin(s)\n");
   printf("   -r --remove [FILE(S)]   remove plugin(s)\n");
   printf("\n");
