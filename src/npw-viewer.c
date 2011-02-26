@@ -1277,7 +1277,7 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 	  }
 	  break;
 	}
-	npw_printf("WARNING: unhandled variable %d (%s) in NPN_GetValue()\n", variable, string_of_NPNVariable(variable));
+	D(bug("WARNING: unhandled variable %d (%s) in NPN_GetValue()\n", variable, string_of_NPNVariable(variable)));
 	return NPERR_INVALID_PARAM;
   }
 
@@ -1563,7 +1563,7 @@ invoke_NPN_SetValue(PluginInstance *plugin, NPPVariable variable, void *value)
   case RPC_TYPE_BOOLEAN:
 	break;
   default:
-	npw_printf("WARNING: unhandled variable %d in NPN_SetValue()\n", variable);
+	D(bug("WARNING: unhandled variable %d in NPN_SetValue()\n", variable));
 	return NPERR_INVALID_PARAM;
   }
 

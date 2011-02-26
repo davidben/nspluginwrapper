@@ -2076,7 +2076,7 @@ g_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
   case RPC_TYPE_NP_OBJECT:
 	break;
   default:
-	npw_printf("WARNING: unhandled variable %d in NPP_GetValue()\n", variable);
+	D(bug("WARNING: unhandled variable %d in NPP_GetValue()\n", variable));
 	return NPERR_INVALID_PARAM;
   }
 
@@ -2471,7 +2471,7 @@ static void invoke_NPP_Print(PluginInstance *plugin, NPPrint *PrintInfo)
 	platformPrint = PrintInfo->print.embedPrint.platformPrint;
 	break;
   default:
-	npw_printf("WARNING: PrintInfo mode %d is not supported\n", PrintInfo->mode);
+	D(bug("WARNING: PrintInfo mode %d is not supported\n", PrintInfo->mode));
 	return;
   }
   uint32_t platform_print_id = 0;
@@ -2956,7 +2956,7 @@ g_LONG64_NPP_NewStream(NPP instance, NPMIMEType type, void *stream, NPBool seeka
 
   // Detect broken 64-bit NPAPI
   if (g_use_long64_thunks < 0) {
-	npw_printf("WARNING: function using an NPStream was called too early, could not determine LONG64 data structure\n");
+	D(bug("WARNING: function using an NPStream was called too early, could not determine LONG64 data structure\n"));
 	set_use_long64_thunks(false);
   }
 

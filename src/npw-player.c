@@ -608,7 +608,7 @@ g_NPN_GetValue (NPP instance, NPNVariable variable, void *value)
     *(PRBool *)value = USE_XEMBED;
     break;
   default:
-    npw_printf ("WARNING: unhandled variable %d in NPN_GetValue()\n", variable);
+    D(bug("WARNING: unhandled variable %d in NPN_GetValue()\n", variable));
     return NPERR_INVALID_PARAM;
   }
 
