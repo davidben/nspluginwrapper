@@ -254,11 +254,31 @@ static const char **get_mozilla_plugin_dirs(void)
      ((((x) & 0xff000000) >> 24) | (((x) & 0x00ff0000) >>  8) | \
       (((x) & 0x0000ff00) <<  8) | (((x) & 0x000000ff) << 24))
 
-/* 32-bit ELF base types.  */
-typedef uint16_t Elf32_Half;
-typedef uint32_t Elf32_Word;
-typedef uint32_t Elf32_Addr;
-typedef uint32_t Elf32_Off;
+#undef bswap_64
+#define bswap_64(x) \
+     (              \
+      (((x) & 0xff00000000000000) >> 56)  | (((x) & 0x00ff000000000000) >> 40) | \
+      (((x) & 0x00000000000000ff) << 56)  | (((x) & 0x000000000000ff00) << 40) | \
+      (((x) & 0x0000ff0000000000) >> 24)  | (((x) & 0x000000ff00000000) >>  8) | \
+      (((x) & 0x0000000000ff0000) << 24)  | (((x) & 0x00000000ff000000) <<  8) \
+     )
+
+/* 32-bit ELF base types. */
+typedef uint32_t	Elf32_Addr;
+typedef uint16_t   	Elf32_Half;
+typedef uint32_t	Elf32_Off;
+typedef int32_t		Elf32_Sword;
+typedef uint32_t	Elf32_Word;
+
+/* 64-bit ELF base types. */
+typedef uint64_t	Elf64_Addr;
+typedef uint16_t	Elf64_Half;
+typedef int16_t		Elf64_SHalf;
+typedef uint64_t	Elf64_Off;
+typedef int32_t		Elf64_Sword;
+typedef uint32_t	Elf64_Word;
+typedef uint64_t	Elf64_Xword;
+typedef int64_t		Elf64_Sxword;
 
 /* The ELF file header.  This appears at the start of every ELF file.  */
 #define EI_NIDENT (16)
@@ -280,6 +300,30 @@ typedef struct
   Elf32_Half	e_shnum;		/* Section header table entry count */
   Elf32_Half	e_shstrndx;		/* Section header string table index */
 } Elf32_Ehdr;
+
+typedef struct
+{
+  unsigned char e_ident[EI_NIDENT];     /* ELF "magic number" */
+  Elf64_Half 	e_type;
+  Elf64_Half 	e_machine;
+  Elf64_Word 	e_version;
+  Elf64_Addr 	e_entry;		/* Entry point virtual address */
+  Elf64_Off 	e_phoff;		/* Program header table file offset */
+  Elf64_Off 	e_shoff;		/* Section header table file offset */
+  Elf64_Word 	e_flags;
+  Elf64_Half 	e_ehsize;
+  Elf64_Half 	e_phentsize;
+  Elf64_Half 	e_phnum;
+  Elf64_Half 	e_shentsize;
+  Elf64_Half 	e_shnum;
+  Elf64_Half 	e_shstrndx;
+} Elf64_Ehdr;
+
+/* Base structure - used to distinguish between 32/64 bit version */
+typedef struct
+{
+  unsigned char	e_ident[EI_NIDENT];	/* Magic number and other info */
+} Elf_hdr_base;
 
 #define EI_MAG0		0		/* File identification byte 0 index */
 #define ELFMAG0		0x7f		/* Magic number byte 0 */
@@ -326,6 +370,21 @@ typedef struct
   Elf32_Word	sh_entsize;		/* Entry size if section holds table */
 } Elf32_Shdr;
 
+typedef struct
+{
+  Elf64_Word 	sh_name;           	/* Section name, index in string tbl */
+  Elf64_Word 	sh_type;           	/* Type of section */
+  Elf64_Xword 	sh_flags;         	/* Miscellaneous section attributes */
+  Elf64_Addr 	sh_addr;           	/* Section virtual addr at execution */
+  Elf64_Off 	sh_offset;          	/* Section file offset */
+  Elf64_Xword 	sh_size;          	/* Size of section in bytes */
+  Elf64_Word 	sh_link;           	/* Index of another section */
+  Elf64_Word 	sh_info;           	/* Additional section information */
+  Elf64_Xword 	sh_addralign;     	/* Section alignment */
+  Elf64_Xword 	sh_entsize;       	/* Entry size if section holds table */
+} Elf64_Shdr;
+
+
 #define SHT_NOBITS	  8		/* Program space with no data (bss) */
 #define SHT_DYNSYM	  11		/* Dynamic linker symbol table */
 
@@ -340,17 +399,26 @@ typedef struct
   Elf32_Half	st_shndx;		/* Section index */
 } Elf32_Sym;
 
-#define ELF32_ST_BIND(val)		(((unsigned char) (val)) >> 4)
-#define ELF32_ST_TYPE(val)		((val) & 0xf)
+typedef struct
+{
+  Elf64_Word 	st_name;       		/* Symbol name, index in string tbl */
+  unsigned char st_info;    	   	/* Type and binding attributes */
+  unsigned char st_other;	      	/* No defined meaning, 0 */
+  Elf64_Half 	st_shndx;         	/* Associated section index */
+  Elf64_Addr 	st_value;          	/* Value of the symbol */
+  Elf64_Xword 	st_size;          	/* Associated symbol size */
+} Elf64_Sym;
+
+#define ELF_ST_BIND(x)          ((x) >> 4)
+#define ELF_ST_TYPE(x)          (((unsigned int) x) & 0xf)
+#define ELF32_ST_BIND(x)        ELF_ST_BIND(x)
+#define ELF32_ST_TYPE(x)        ELF_ST_TYPE(x)
+#define ELF64_ST_BIND(x)        ELF_ST_BIND(x)
+#define ELF64_ST_TYPE(x)        ELF_ST_TYPE(x)
+
 #define STB_GLOBAL	1		/* Global symbol */
 #define STT_OBJECT	1		/* Symbol is a data object */
 #define STT_FUNC	2		/* Symbol is a code object */
-
-/* We handle 32-bit ELF plugins only */
-#undef  ELF_CLASS
-#define ELF_CLASS	ELFCLASS32
-#define ElfW(x)		Elf32_ ## x
-#define ELFW(x)		ELF32_ ## x
 
 void *load_data(int fd, long offset, unsigned int size)
 {
@@ -374,51 +442,16 @@ static bool is_little_endian(void)
   return x.b[0] == 0x04;
 }
 
-static void elf_swap_ehdr(ElfW(Ehdr) *hdr)
-{
-  hdr->e_type			= bswap_16(hdr->e_type);
-  hdr->e_machine		= bswap_16(hdr->e_machine);
-  hdr->e_version		= bswap_32(hdr->e_version);
-  hdr->e_entry			= bswap_32(hdr->e_entry);
-  hdr->e_phoff			= bswap_32(hdr->e_phoff);
-  hdr->e_shoff			= bswap_32(hdr->e_shoff);
-  hdr->e_flags			= bswap_32(hdr->e_flags);
-  hdr->e_ehsize			= bswap_16(hdr->e_ehsize);
-  hdr->e_phentsize		= bswap_16(hdr->e_phentsize);
-  hdr->e_phnum			= bswap_16(hdr->e_phnum);
-  hdr->e_shentsize		= bswap_16(hdr->e_shentsize);
-  hdr->e_shnum			= bswap_16(hdr->e_shnum);
-  hdr->e_shstrndx		= bswap_16(hdr->e_shstrndx);
-}
+#define ELF_CLASS ELFCLASS32
+#include "npw-config-template.h"
 
-static void elf_swap_shdr(ElfW(Shdr) *shdr)
-{
-  shdr->sh_name			= bswap_32(shdr->sh_name);
-  shdr->sh_type			= bswap_32(shdr->sh_type);
-  shdr->sh_flags		= bswap_32(shdr->sh_flags);
-  shdr->sh_addr			= bswap_32(shdr->sh_addr);
-  shdr->sh_offset		= bswap_32(shdr->sh_offset);
-  shdr->sh_size			= bswap_32(shdr->sh_size);
-  shdr->sh_link			= bswap_32(shdr->sh_link);
-  shdr->sh_info			= bswap_32(shdr->sh_info);
-  shdr->sh_addralign	= bswap_32(shdr->sh_addralign);
-  shdr->sh_entsize		= bswap_32(shdr->sh_entsize);
-}
-
-static void elf_swap_sym(ElfW(Sym) *sym)
-{
-  sym->st_name			= bswap_32(sym->st_name);
-  sym->st_value			= bswap_32(sym->st_value);
-  sym->st_size			= bswap_32(sym->st_size);
-  sym->st_shndx			= bswap_32(sym->st_shndx);
-}
+#define ELF_CLASS ELFCLASS64
+#include "npw-config-template.h"
 
 static bool is_plugin_fd(int fd, NPW_PluginInfo *out_plugin_info)
 {
-  int i;
-  bool ret = false;
-
-  ElfW(Ehdr) ehdr;
+  Elf_hdr_base ehdr;
+	
   if (read(fd, &ehdr, sizeof(ehdr)) != sizeof(ehdr))
 	return false;
 
@@ -428,91 +461,13 @@ static bool is_plugin_fd(int fd, NPW_PluginInfo *out_plugin_info)
 	  || ehdr.e_ident[EI_MAG3] != ELFMAG3)
 	return false;
 
-  bool do_swap = (ehdr.e_ident[EI_DATA] == ELFDATA2LSB) && !is_little_endian();
-  if (do_swap)
-	elf_swap_ehdr(&ehdr);
+  lseek(fd, 0, SEEK_SET);
 
-  if (ehdr.e_ident[EI_CLASS] != ELF_CLASS)
-	return false;
-  if (ehdr.e_type != ET_DYN)
-	return false;
-  if (ehdr.e_version != EV_CURRENT)
-	return false;
-
-  if (out_plugin_info) {
-	const char *target_arch = "";
-	switch (ehdr.e_machine) {
-	case EM_386:			target_arch = "i386";	break;
-	case EM_SPARC:			target_arch = "sparc";	break;
-	case EM_PPC:			target_arch = "ppc";	break;
-	}
-	strcpy(out_plugin_info->target_arch, target_arch);
-	const char *target_os = "";
-	switch (ehdr.e_ident[EI_OSABI]) {
-	case ELFOSABI_LINUX:	target_os = "linux";	break;
-	case ELFOSABI_SOLARIS:	target_os = "solaris";	break;
-	case ELFOSABI_FREEBSD:	target_os = "freebsd";	break;
-	}
-	strcpy(out_plugin_info->target_os, target_os);
+  switch (ehdr.e_ident[EI_CLASS]) {
+  case ELFCLASS32: return is_elf_plugin_fd_32(fd, out_plugin_info);
+  case ELFCLASS64: return is_elf_plugin_fd_64(fd, out_plugin_info);
   }
-
-  ElfW(Shdr) *shdr = (ElfW(Shdr) *)load_data(fd, ehdr.e_shoff, ehdr.e_shnum * sizeof(*shdr));
-  if (do_swap) {
-	for (i = 0; i < ehdr.e_shnum; i++)
-	  elf_swap_shdr(&shdr[i]);
-  }
-
-  char **sdata = (char **)calloc(ehdr.e_shnum, sizeof(*sdata));
-  for (i = 0; i < ehdr.e_shnum; i++) {
-	ElfW(Shdr) *sec = &shdr[i];
-	if (sec->sh_type != SHT_NOBITS)
-	  sdata[i] =  (char *)load_data(fd, sec->sh_offset, sec->sh_size);
-  }
-
-  ElfW(Shdr) *symtab_sec = NULL;
-  for (i = 0; i < ehdr.e_shnum; i++) {
-	ElfW(Shdr) *sec = &shdr[i];
-	if (sec->sh_type == SHT_DYNSYM
-		&& strcmp(sdata[ehdr.e_shstrndx] + sec->sh_name, ".dynsym") == 0) {
-	  symtab_sec = sec;
-	  break;
-	}
-  }
-  if (symtab_sec == NULL)
-	goto done;
-  ElfW(Sym) *symtab = (ElfW(Sym) *)sdata[symtab_sec - shdr];
-  char *strtab = sdata[symtab_sec->sh_link];
-
-  int nb_syms = symtab_sec->sh_size / sizeof(*symtab);
-  if (do_swap) {
-	for (i = 0; i < nb_syms; i++)
-	  elf_swap_sym(&symtab[i]);
-  }
-
-  int nb_np_syms;
-  int is_wrapper_plugin = 0;
-  for (i = 0, nb_np_syms = 0; i < nb_syms; i++) {
-	ElfW(Sym) *sym = &symtab[i];
-	const char *name = strtab + sym->st_name;
-	if (ELFW(ST_BIND)(sym->st_info) != STB_GLOBAL)
-	  continue;
-	if (ELFW(ST_TYPE)(sym->st_info) == STT_OBJECT && strcmp(name, "NPW_Plugin") == 0)
-	  is_wrapper_plugin = 1;
-	if (ELFW(ST_TYPE)(sym->st_info) != STT_FUNC)
-	  continue;
-	if (!strcmp(name, "NP_GetMIMEDescription") ||
-		!strcmp(name, "NP_Initialize") ||
-		!strcmp(name, "NP_Shutdown"))
-	  nb_np_syms++;
-  }
-  ret = (nb_np_syms == 3) && !is_wrapper_plugin;
-
- done:
-  for (i = 0; i < ehdr.e_shnum; i++)
-	free(sdata[i]);
-  free(sdata);
-  free(shdr);
-  return ret;
+  return false;
 }
 
 enum {
@@ -548,6 +503,12 @@ static int detect_plugin_viewer(const char *filename, NPW_PluginInfo *out_plugin
   else
 	target_os_table[0] = NULL;
 
+  // don't wrap plugins for host OS/ARCH
+  if (out_plugin_info
+	  && out_plugin_info->target_arch && strcmp(out_plugin_info->target_arch, HOST_ARCH) == 0
+	  && out_plugin_info->target_os && strcmp(out_plugin_info->target_os, HOST_OS) == 0)
+	return EXIT_VIEWER_NATIVE;
+
   for (int i = 0; i < target_arch_table_size; i++) {
 	const char *target_arch = target_arch_table[i];
 	if (target_arch == NULL)
@@ -562,8 +523,6 @@ static int detect_plugin_viewer(const char *filename, NPW_PluginInfo *out_plugin
 	  const char *target_os = target_os_table[j];
 	  if (target_os == NULL)
 		continue;
-	  if (strcmp(target_arch, HOST_ARCH) == 0 && strcmp(target_os, HOST_OS) == 0)
-		return EXIT_VIEWER_NATIVE;		// don't wrap plugins for host OS/ARCH
 	  char viewer_path[PATH_MAX];
 	  sprintf(viewer_path, "%s/%s/%s", viewer_arch_path, target_os, NPW_VIEWER);
 	  if (access(viewer_path, F_OK) != 0)

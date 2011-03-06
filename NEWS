@@ -1,5 +1,13 @@
-nspluginwrapper NEWS -- history of user-visible changes.  2007-04-03
+nspluginwrapper NEWS -- history of user-visible changes.  2007-08-26
 Copyright (C) 2005-2007 Gwenole Beauchesne
+
+Version 0.9.91.5 (BETA) - 26.Aug.2007
+* Fix a memory leak in NPP_Destroy()
+* Fix DiamondX XEmbed example plugin
+* Fix focus problems (Debian bug #435912)
+* Add support for 64-bit plugins (Martin Stransky)
+* Add support for newer NPAPI 0.17 functions and variables
+* Add support for broken 64-bit Konqueror versions (run-time detect)
 
 Version 0.9.91.4 (BETA) - 03.Apr.2007
 * Don't try to wrap native plugins

@@ -647,6 +647,10 @@ if test "$target_cpu" = "i386" ; then
     echo "TARGET_ARCH=i386" >> $config_mak
     echo "#define TARGET_ARCH \"i386\"" >> $config_h
     echo "#define TARGET_I386 1" >> $config_h
+elif test "$target_cpu" = "x86_64" ; then
+    echo "TARGET_ARCH=x86_64" >> $config_mak
+    echo "#define TARGET_ARCH \"x86_64\"" >> $config_h
+    echo "#define TARGET_X86_64 1" >> $config_h
 elif test "$target_cpu" = "ppc" ; then
     echo "TARGET_ARCH=ppc" >> $config_mak
     echo "#define TARGET_ARCH \"ppc\"" >> $config_h

@@ -605,8 +605,10 @@ bool npobject_bridge_new(void)
 
 void npobject_bridge_destroy(void)
 {
-  g_hash_table_destroy(g_npobject_ids);
-  g_hash_table_destroy(g_npobjects);
+  if (g_npobject_ids)
+	g_hash_table_destroy(g_npobject_ids);
+  if (g_npobjects)
+	g_hash_table_destroy(g_npobjects);
 }
 
 void npobject_hash_table_insert(NPObject *npobj, NPObjectInfo *npobj_info)
@@ -635,72 +637,4 @@ NPObjectInfo *npobject_info_lookup(NPObject *npobj)
 NPObject *npobject_lookup(uint32_t npobj_id)
 {
   return g_hash_table_lookup(g_npobject_ids, (void *)(uintptr_t)npobj_id);
-}
-
-
-/* ====================================================================== */
-/* === Dummy npruntime accessors                                      === */
-/* ====================================================================== */
-
-static void dummy_function_do_nothing(void)
-{
-}
-
-static int dummy_function_return_zero(void)
-{
-  return 0;
-}
-
-static bool dummy_function_return_void_variant(NPVariant *variant)
-{
-  if (variant)
-	VOID_TO_NPVARIANT(*variant);
-  return false;
-}
-
-static bool dummy_NPN_Invoke(NPP npp, NPObject* obj, NPIdentifier methodName,
-							 const NPVariant *args, uint32_t argCount, NPVariant *result)
-{
-  return dummy_function_return_void_variant(result);
-}
-
-static bool dummy_NPN_InvokeDefault(NPP npp, NPObject* obj, const NPVariant *args,
-									uint32_t argCount, NPVariant *result)
-{
-  return dummy_function_return_void_variant(result);
-}
-
-static bool dummy_NPN_Evaluate(NPP npp, NPObject* obj, NPString *script,
-							   NPVariant *result)
-{
-  return dummy_function_return_void_variant(result);
-}
-
-static bool dummy_NPN_GetProperty(NPP npp, NPObject* obj, NPIdentifier propertyName,
-								  NPVariant *result)
-{
-  return dummy_function_return_void_variant(result);
-}
-
-void npruntime_init_callbacks(NPNetscapeFuncs *mozilla_funcs)
-{
-  mozilla_funcs->getstringidentifier = NewNPN_GetStringIdentifierProc(dummy_function_return_zero);
-  mozilla_funcs->getstringidentifiers = NewNPN_GetStringIdentifiersProc(dummy_function_do_nothing);
-  mozilla_funcs->getintidentifier = NewNPN_GetIntIdentifierProc(dummy_function_return_zero);
-  mozilla_funcs->identifierisstring = NewNPN_IdentifierIsStringProc(dummy_function_return_zero);
-  mozilla_funcs->utf8fromidentifier = NewNPN_UTF8FromIdentifierProc(dummy_function_return_zero);
-  mozilla_funcs->intfromidentifier = NewNPN_IntFromIdentifierProc(dummy_function_return_zero);
-  mozilla_funcs->createobject = NewNPN_CreateObjectProc(dummy_function_return_zero);
-  mozilla_funcs->retainobject = NewNPN_RetainObjectProc(dummy_function_return_zero);
-  mozilla_funcs->releaseobject = NewNPN_ReleaseObjectProc(dummy_function_do_nothing);
-  mozilla_funcs->invoke = NewNPN_InvokeProc(dummy_NPN_Invoke);
-  mozilla_funcs->invokeDefault = NewNPN_InvokeDefaultProc(dummy_NPN_InvokeDefault);
-  mozilla_funcs->evaluate = NewNPN_EvaluateProc(dummy_NPN_Evaluate);
-  mozilla_funcs->getproperty = NewNPN_GetPropertyProc(dummy_NPN_GetProperty);
-  mozilla_funcs->setproperty = NewNPN_SetPropertyProc(dummy_function_return_zero);
-  mozilla_funcs->removeproperty = NewNPN_RemovePropertyProc(dummy_function_return_zero);
-  mozilla_funcs->hasproperty = NewNPN_HasPropertyProc(dummy_function_return_zero);
-  mozilla_funcs->hasmethod = NewNPN_HasMethodProc(dummy_function_return_zero);
-  mozilla_funcs->releasevariantvalue = NewNPN_ReleaseVariantValueProc(dummy_function_do_nothing);
-  mozilla_funcs->setexception = NewNPN_SetExceptionProc(dummy_function_do_nothing);
 }

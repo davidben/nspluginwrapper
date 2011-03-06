@@ -1,7 +1,7 @@
 %define name	nspluginwrapper
-%define version	0.9.91.4
+%define version	0.9.91.5
 %define release	1
-#define svndate 20070403
+#define svndate 20070826
 
 # define 32-bit arch of multiarch platforms
 %define arch_32 %{nil}
@@ -53,7 +53,7 @@ Source0:	%{name}-%{version}%{?svndate:-%{svndate}}.tar.bz2
 License:	GPL
 Group:		Networking/WWW
 Url:		http://gwenole.beauchesne.info/projects/nspluginwrapper/
-BuildRequires:	gtk+2-devel
+BuildRequires:	gtk2-devel
 Provides:	%{name}-%{_arch} = %{version}-%{release}
 Requires:	%{name}-%{target_arch} = %{version}-%{release}
 BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-buildroot
@@ -158,6 +158,14 @@ fi
 %endif
 
 %changelog
+* Sun Aug 26 2007 Gwenole Beauchesne <gb.public@free.fr> 0.9.91.5-1
+- fix a memory leak in NPP_Destroy()
+- fix DiamondX XEmbed example plugin
+- fix focus problems (debian bug #435912)
+- add support for 64-bit plugins (Martin Stransky)
+- add support for newer NPAPI 0.17 functions and variables
+- add support for broken 64-bit Konqueror versions (run-time detect)
+
 * Mon Apr  2 2007 Gwenole Beauchesne <gb.public@free.fr> 0.9.91.4-1
 - use anonymous sockets by default
 - don't try to wrap native plugins

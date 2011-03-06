@@ -1,3 +1,8 @@
+- Fix "don't try to load native plugins"
+  * This currently works because we don't ship with native viewers
+  * Otherwise, the plugin OS,ARCH characterisation through ELF headers only
+    works for Linux / FreeBSD where they have dedicated tags
+  => This was only useful for Linux/i386 platforms anyway ATM
 - Clean-ups
   * Re-indent -gnu -br -brs
   * Better split for RPC / NAPI level routines

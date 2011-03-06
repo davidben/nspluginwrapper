@@ -66,6 +66,7 @@ int rpc_type_of_NPPVariable(int variable)
   switch (variable) {
   case NPPVpluginNameString:
   case NPPVpluginDescriptionString:
+  case NPPVformValue: // byte values of 0 does not appear in the UTF-8 encoding but for U+0000
 	type = RPC_TYPE_STRING;
 	break;
   case NPPVpluginWindowBool:

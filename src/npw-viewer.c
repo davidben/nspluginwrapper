@@ -43,6 +43,7 @@
 #include "rpc.h"
 #include "npw-rpc.h"
 #include "utils.h"
+#include "xembed.h"
 
 #define XP_UNIX 1
 #define MOZ_X11 1
@@ -60,10 +61,6 @@
 // Define to use XEMBED
 #define USE_XEMBED 1
 
-// XXX define which widget to use
-#define USE_GTK_TOOLKIT 1
-#define USE_X11_TOOLKIT 0
-
 // XXX unimplemented functions
 #define UNIMPLEMENTED() npw_printf("WARNING: Unimplemented function %s at line %d\n", __func__, __LINE__)
 
@@ -78,23 +75,28 @@ typedef struct _PluginInstance {
   bool use_xembed;
   NPWindow window;
   uint32_t width, height;
-  Window old_window;
-  Window focus_window;
-  Window old_focus_window;
-#if USE_GTK_TOOLKIT
-  GtkWidget *top_window;
-#else
-  Window top_window;
-#endif
-  Widget top_widget;
-  Widget form;
+  void *toolkit_data;
 } PluginInstance;
 
 // Browser side data for an NPStream instance
 typedef struct _StreamInstance {
   NPStream *stream;
   uint32_t stream_id;
+  int is_plugin_stream;
 } StreamInstance;
+
+// Xt wrapper data
+typedef struct _XtData {
+  Window browser_window;
+  Widget top_widget;
+  Widget form;
+} XtData;
+
+// Gtk wrapper data
+typedef struct _GtkData {
+  GtkWidget *container;
+  GtkWidget *socket;
+} GtkData;
 
 
 /* ====================================================================== */
@@ -154,26 +156,160 @@ extern void XtResizeWidget(
     _XtDimension        /* border_width */
 );
 
-// Update focus to plugin window
-// XXX I am not convinced this is the really corrent...
-static void xt_client_focus_listener(Widget w, XtPointer user_data, XEvent *event, Boolean *cont)
+// Dummy X error handler
+static int trapped_error_code;
+static int (*old_error_handler)(Display *, XErrorEvent *);
+
+static int error_handler(Display *display, XErrorEvent *error)
 {
-  PluginInstance *plugin = (PluginInstance *)user_data;
+  trapped_error_code = error->error_code;
+  return 0;
+}
+ 
+static void trap_errors(void)
+{
+  trapped_error_code = 0;
+  old_error_handler = XSetErrorHandler(error_handler);
+}
+
+static int untrap_errors(void)
+{
+  XSetErrorHandler(old_error_handler);
+  return trapped_error_code;
+}
+
+// Install the _XEMBED_INFO property
+static void xt_client_set_info(Widget w, unsigned long flags)
+{
+  Atom atom_XEMBED_INFO = XInternAtom(x_display, "_XEMBED_INFO", False);
+
+  unsigned long buffer[2];
+  buffer[1] = 0;		/* Protocol version */
+  buffer[1] = flags;
+  XChangeProperty(XtDisplay(w), XtWindow(w),
+				  atom_XEMBED_INFO,
+				  atom_XEMBED_INFO,
+				  32, PropModeReplace, (unsigned char *)buffer, 2);
+}
+
+// Send an XEMBED message to the specified window
+static void send_xembed_message(Display *display,
+								Window   window,
+								long     message,
+								long     detail,
+								long     data1,
+								long     data2)
+{
+  XEvent xevent;
+  memset(&xevent, 0, sizeof(xevent));
+  xevent.xclient.window = window;
+  xevent.xclient.type = ClientMessage;
+  xevent.xclient.message_type = XInternAtom(display, "_XEMBED", False);
+  xevent.xclient.format = 32;
+  xevent.xclient.data.l[0] = CurrentTime; // XXX: evil?
+  xevent.xclient.data.l[1] = message;
+  xevent.xclient.data.l[2] = detail;
+  xevent.xclient.data.l[3] = data1;
+  xevent.xclient.data.l[4] = data2;
+
+  trap_errors();
+  XSendEvent(display, xevent.xclient.window, False, NoEventMask, &xevent);
+  XSync(display, False);
+  untrap_errors();
+}
+
+/*
+ *  NSPluginWrapper strategy to handle input focus.
+ *
+ *  - XEMBED must be enabled with NPPVpluginNeedsXEmbed set to
+ *    PR_TRUE. This causes Firefox to pass a plain GtkSocket ID into
+ *    NPWindow::window. i.e. the GtkXtBin window ID is NOT used.
+ *
+ *  - A click into the plugin window sends an XEMBED_REQUEST_FOCUS
+ *    event to the parent (socket) window.
+ *
+ *  - An XFocusEvent is simulated when XEMBED_FOCUS_IN and
+ *    XEMBED_FOCUS_OUT messages arrive to the plugin window.
+ *
+ *  - Key events are forwarded from the top widget (which window was
+ *    reparented to the socket window) to the actual canvas (form).
+ *
+ *  Reference checkpoints, i.e. check the following test cases still
+ *  work if you want to change the policy.
+ *
+ *  [1] Debian bug #435912
+ *      <http://www.addictinggames.com/bloxors.html>
+ *
+ *  Goto to stage 1, use arrow keys to move the block. Now, click
+ *  outside of the game window, use arrow keys to try to move the
+ *  block: it should NOT move.
+ *
+ *  [2] User reported bug
+ *      <http://www.forom.com/>
+ *
+ *  Choose a language and then a mirror. Do NOT move the cursor out of
+ *  the plugin window. Now, click into the "Login" input field and try
+ *  to type in something, you should have the input focus.
+ *
+ *  [3] Additional test that came in during debugging
+ *
+ *  Go to either [1] or [2], double-click the browser URL entry to
+ *  select it completely. Now, click into the Flash plugin area. The
+ *  URL selection MUST now be unselected AND using the Tab key selects
+ *  various fields in the Flash window (e.g. menu items for [1]).
+ */
+
+// Simulate client focus
+static void xt_client_simulate_focus(Widget w, int type)
+{
+  XEvent xevent;
+  memset(&xevent, 0, sizeof(xevent));
+  xevent.xfocus.type = type;
+  xevent.xfocus.window = XtWindow(w);
+  xevent.xfocus.display = XtDisplay(w);
+  xevent.xfocus.mode = NotifyNormal;
+  xevent.xfocus.detail = NotifyAncestor;
+
+  trap_errors();
+  XSendEvent(XtDisplay(w), xevent.xfocus.window, False, NoEventMask, &xevent);
+  XSync(XtDisplay(w), False);
+  untrap_errors();
+}
+
+// Various hacks for decent events filtery
+static void xt_client_event_handler(Widget w, XtPointer client_data, XEvent *event, Boolean *cont)
+{
+  XtData *toolkit = (XtData *)client_data;
 
   switch (event->type) {
-  case ButtonRelease:
-	if (plugin->focus_window != XtWindow(plugin->form)) {
-	  XSetInputFocus(x_display, XtWindow(plugin->form), RevertToParent, event->xbutton.time);
-	  plugin->focus_window = XtWindow(plugin->form);
-	  XSync(x_display, False);
+  case ClientMessage:
+	// Handle XEMBED messages, in particular focus changes
+	if (event->xclient.message_type == XInternAtom(x_display, "_XEMBED", False)) {
+	  switch (event->xclient.data.l[1]) {
+	  case XEMBED_FOCUS_IN:
+		xt_client_simulate_focus(toolkit->form, FocusIn);
+		break;
+	  case XEMBED_FOCUS_OUT:
+		xt_client_simulate_focus(toolkit->form, FocusOut);
+		break;
+	  }
 	}
 	break;
-  case LeaveNotify:
-	if (plugin->old_focus_window && plugin->focus_window != plugin->old_focus_window) {
-	  XSetInputFocus(x_display, plugin->old_focus_window, RevertToParent, event->xcrossing.time);
-	  plugin->focus_window = plugin->old_focus_window;
-	  XSync(x_display, False);
+  case KeyPress:
+  case KeyRelease:
+	// Propagate key events down to the actual window
+	if (event->xkey.window == XtWindow(toolkit->top_widget)) {
+	  event->xkey.window = XtWindow(toolkit->form);
+	  trap_errors();
+	  XSendEvent(XtDisplay(toolkit->form), event->xfocus.window, False, NoEventMask, event);
+	  XSync(XtDisplay(toolkit->form), False);
+	  untrap_errors();
+	  *cont = False;
 	}
+	break;
+  case ButtonRelease:
+	// Notify the embedder that we want the input focus
+	send_xembed_message(XtDisplay(w), toolkit->browser_window, XEMBED_REQUEST_FOCUS, 0, 0, 0);
 	break;
   }
 }
@@ -282,86 +418,65 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
   NPSetWindowCallbackStruct *ws_info = window->ws_info;
 
   // create the new window
-  if (plugin->use_xembed)
+  if (plugin->use_xembed) {
+	// XXX it's my understanding that the following plug-forwarding
+	// machinery should not be necessary but it turns out it is for
+	// Flash Player 9 Update 3 beta
+	GtkData *toolkit = calloc(1, sizeof(*toolkit));
+	if (toolkit == NULL)
+	  return -1;
+	toolkit->container = gtk_plug_new((GdkNativeWindow)window->window);
+	if (toolkit->container == NULL)
+	  return -1;
+	gtk_widget_show(toolkit->container);
+	toolkit->socket = gtk_socket_new();
+	if (toolkit->socket == NULL)
+	  return -1;
+	gtk_widget_show(toolkit->socket);
+	gtk_container_add(GTK_CONTAINER(toolkit->container), toolkit->socket);
+	gtk_widget_show_all(toolkit->container);
+	window->window = (void *)gtk_socket_get_id(GTK_SOCKET(toolkit->socket));
+	plugin->toolkit_data = toolkit;
 	return 0;
-#if USE_GTK_TOOLKIT
-  plugin->top_window = gtk_plug_new(0);
-  gtk_window_resize(GTK_WINDOW(plugin->top_window), plugin->width, plugin->height);
-  gtk_widget_set_size_request(plugin->top_window, window->width, window->height);
-  gtk_widget_show(plugin->top_window);
-  {
-	GdkDrawable *win = GDK_DRAWABLE(plugin->top_window->window);
-	XReparentWindow(GDK_DRAWABLE_XDISPLAY(win),
-					GDK_DRAWABLE_XID(win),
-					(Window)window->window, 0, 0);
-
-	XMapWindow(GDK_DRAWABLE_XDISPLAY(win),
-			   GDK_DRAWABLE_XID(win));
   }
-#else
-  XSetWindowAttributes attr;
-  attr.bit_gravity = NorthWestGravity;
-  attr.colormap = ws_info->colormap;
-  attr.event_mask =
-	ButtonMotionMask |
-	ButtonPressMask |
-	ButtonReleaseMask |
-	KeyPressMask |
-	KeyReleaseMask |
-	EnterWindowMask |
-	LeaveWindowMask |
-	PointerMotionMask |
-	StructureNotifyMask |
-	VisibilityChangeMask |
-	FocusChangeMask |
-	ExposureMask;
 
-  unsigned long mask = CWBitGravity | CWEventMask;
-  if (attr.colormap)
-	mask |= CWColormap;
+  XtData *toolkit = malloc(sizeof(*toolkit));
+  if (toolkit == NULL)
+	return -1;
 
-  plugin->top_window = XCreateWindow(x_display, (Window)window->window,
-									 0, 0, window->width, window->height,
-									 0, ws_info->depth, InputOutput, ws_info->visual, mask, &attr);
+  String app_name, app_class;
+  XtGetApplicationNameAndClass(x_display, &app_name, &app_class);
+  Widget top_widget = XtVaAppCreateShell("drawingArea", app_class, topLevelShellWidgetClass, x_display,
+										 XtNoverrideRedirect, True,
+										 XtNborderWidth, 0,
+										 XtNbackgroundPixmap, None,
+										 XtNwidth, window->width,
+										 XtNheight, window->height,
+										 NULL);
 
-  XSelectInput(x_display, plugin->top_window, ExposureMask);
+  Widget form = XtVaCreateManagedWidget("form", compositeWidgetClass, top_widget,
+										XtNdepth, ws_info->depth,
+										XtNvisual, ws_info->visual,
+										XtNcolormap, ws_info->colormap,
+										XtNborderWidth, 0,
+										XtNbackgroundPixmap, None,
+										XtNwidth, window->width,
+										XtNheight, window->height,
+										NULL);
 
-  XMapWindow(x_display, plugin->top_window);
-  XFlush(x_display);
-#endif
-
-  Widget top_widget = XtAppCreateShell("drawingArea", "npw-viewer", applicationShellWidgetClass, x_display, NULL, 0);
-  plugin->top_widget = top_widget;
-  XtResizeWidget(top_widget, window->width, window->height, 0);
-
-  Widget form = XtVaCreateWidget("form", compositeWidgetClass, top_widget,
-								 XtNdepth, ws_info->depth,
-								 XtNvisual, ws_info->visual,
-								 XtNcolormap, ws_info->colormap,
-								 NULL);
-  plugin->form = form;
-  XtResizeWidget(form, window->width, window->height, 0);
-
-#if USE_GTK_TOOLKIT
-  plugin->old_window = top_widget->core.window;
-  top_widget->core.window = GDK_WINDOW_XWINDOW(plugin->top_window->window);
-  XtRegisterDrawable(x_display, GDK_WINDOW_XWINDOW(plugin->top_window->window), top_widget);
-#else
-  plugin->old_window = top_widget->core.window;
-  top_widget->core.window = plugin->top_window;
-  XtRegisterDrawable(x_display, plugin->top_window, top_widget);
-#endif
-
+  XtRealizeWidget(top_widget);
+  XReparentWindow(x_display, XtWindow(top_widget), (Window)window->window, 0, 0);
   XtRealizeWidget(form);
-  XtManageChild(form);
 
-  int revert_to;
-  plugin->old_focus_window = None;
-  XGetInputFocus(x_display, &plugin->old_focus_window, &revert_to);
-  XtAddEventHandler(form, (LeaveWindowMask | ButtonReleaseMask), True, xt_client_focus_listener, plugin);
-  plugin->focus_window = plugin->old_focus_window;
-  XSync(x_display, False);
+  XSelectInput(x_display, XtWindow(top_widget), 0x0fffff);
+  XtAddEventHandler(top_widget, (SubstructureNotifyMask|KeyPress|KeyRelease), True, xt_client_event_handler, toolkit);
+  XtAddEventHandler(form, (ButtonReleaseMask), True, xt_client_event_handler, toolkit);
+  xt_client_set_info(form, 0);
 
+  plugin->toolkit_data = toolkit;
+  toolkit->top_widget = top_widget;
+  toolkit->form = form;
+  toolkit->browser_window = (Window)window->window;
   window->window = (void *)XtWindow(form);
   return 0;
 }
@@ -372,10 +487,18 @@ static int update_window(PluginInstance *plugin, NPWindow *window)
   if (plugin->window.width != window->width || plugin->window.height != window->height) {
 	plugin->window.width = window->width;
 	plugin->window.height = window->height;
-	if (plugin->form)
-	  XtResizeWidget(plugin->form, plugin->window.width, plugin->window.height, 0);
-	if (plugin->top_widget)
-	  XtResizeWidget(plugin->top_widget, plugin->window.width, plugin->window.height, 0);
+	if (plugin->toolkit_data) {
+	  if (plugin->use_xembed) {
+		// XXX check window size changes are already caught per the XEMBED protocol
+	  }
+	  else {
+		XtData *toolkit = (XtData *)plugin->toolkit_data;
+		if (toolkit->form)
+		  XtResizeWidget(toolkit->form, plugin->window.width, plugin->window.height, 0);
+		if (toolkit->top_widget)
+		  XtResizeWidget(toolkit->top_widget, plugin->window.width, plugin->window.height, 0);
+	  }
+	}
   }
   return 0;
 }
@@ -383,35 +506,23 @@ static int update_window(PluginInstance *plugin, NPWindow *window)
 // Destroy window
 static void destroy_window(PluginInstance *plugin)
 {
-  if (plugin->old_focus_window) {
-	XtRemoveEventHandler(plugin->form, (LeaveWindowMask | ButtonReleaseMask), True, xt_client_focus_listener, plugin);
-	plugin->old_focus_window = None;
-  }
-
-  if (plugin->top_widget) {
-	XSync(x_display, False);
-#if USE_GTK_TOOLKIT
-	XtUnregisterDrawable(x_display, GDK_WINDOW_XWINDOW(plugin->top_window->window));
-#else
-	XtUnregisterDrawable(x_display, plugin->top_window);
-#endif
-	XSync(x_display, False);
-	plugin->top_widget->core.window = plugin->old_window;
-	XtUnrealizeWidget(plugin->top_widget);
-	XtDestroyWidget(plugin->top_widget);
-	XSync(x_display, False);
-	plugin->top_widget = NULL;
-  }
-
-  if (plugin->top_window) {
-#if USE_GTK_TOOLKIT
-	gtk_widget_destroy((GtkWidget *)plugin->top_window);
-	plugin->top_window = NULL;
-#else
-	XDestroyWindow(x_display, plugin->top_window);
-	plugin->top_window = None;
-#endif
-	XSync(x_display, False);
+  if (plugin->toolkit_data) {
+	if (plugin->use_xembed) {
+	  GtkData *toolkit = (GtkData *)plugin->toolkit_data;
+	  if (toolkit->container)
+		gtk_widget_destroy(toolkit->container);
+	}
+	else {
+	  XtData *toolkit = (XtData *)plugin->toolkit_data;
+	  if (toolkit->top_widget) {
+		XSync(x_display, False);
+		XtUnrealizeWidget(toolkit->top_widget);
+		XtDestroyWidget(toolkit->top_widget);
+		XSync(x_display, False);
+	  }
+	}
+	free(plugin->toolkit_data);
+	plugin->toolkit_data = NULL;
   }
 
   destroy_window_attributes(&plugin->window);
@@ -424,19 +535,11 @@ static void destroy_window(PluginInstance *plugin)
 
 static char *g_user_agent = NULL;
 
+// Does browser have specified feature?
+#define NPN_HAS_FEATURE(FEATURE) ((mozilla_funcs.version & 0xff) >= NPVERS_HAS_##FEATURE)
+
 // Netscape exported functions
 static NPNetscapeFuncs mozilla_funcs;
-
-// Closes and deletes a stream
-static NPError
-g_NPN_DestroyStream(NPP instance, NPStream *stream, NPError reason)
-{
-  D(bug("NPN_DestroyStream instance=%p\n", instance));
-
-  UNIMPLEMENTED();
-
-  return NPERR_GENERIC_ERROR;
-}
 
 // Forces a repaint message for a windowless plug-in
 static void
@@ -660,17 +763,6 @@ g_NPN_MemFree(void *ptr)
   free(ptr);
 }
 
-// Requests the creation of a new data stream produced by the plug-in and consumed by the browser
-static NPError
-g_NPN_NewStream(NPP instance, NPMIMEType type, const char *target, NPStream **stream)
-{
-  D(bug("NPN_NewStream instance=%p\n", instance));
-
-  UNIMPLEMENTED();
-
-  return NPERR_GENERIC_ERROR;
-}
-
 // Posts data to a URL
 static NPError
 invoke_NPN_PostURL(NPP instance, const char *url, const char *target, uint32 len, const char *buf, NPBool file)
@@ -891,15 +983,256 @@ g_NPN_UserAgent(NPP instance)
   return g_user_agent;
 }
 
+// Requests the creation of a new data stream produced by the plug-in and consumed by the browser
+static NPError
+invoke_NPN_NewStream(NPP instance, NPMIMEType type, const char *target, NPStream **pstream)
+{
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_NEW_STREAM,
+								RPC_TYPE_NPP, instance,
+								RPC_TYPE_STRING, type,
+								RPC_TYPE_STRING, target,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_NewStream() invoke", error);
+	return NPERR_OUT_OF_MEMORY_ERROR;
+  }
+
+  int32_t ret;
+  uint32_t stream_id;
+  char *url;
+  uint32_t end;
+  uint32_t lastmodified;
+  void *notifyData;
+  char *headers;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_INT32, &ret,
+									RPC_TYPE_UINT32, &stream_id,
+									RPC_TYPE_STRING, &url,
+									RPC_TYPE_UINT32, &end,
+									RPC_TYPE_UINT32, &lastmodified,
+									RPC_TYPE_NP_NOTIFY_DATA, &notifyData,
+									RPC_TYPE_STRING, &headers,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_NewStream() wait for reply", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  NPStream *stream = NULL;
+  if (ret == NPERR_NO_ERROR) {
+	if ((stream = malloc(sizeof(*stream))) == NULL)
+	  return NPERR_OUT_OF_MEMORY_ERROR;
+	memset(stream, 0, sizeof(*stream));
+
+	StreamInstance *stream_ndata;
+	if ((stream_ndata = malloc(sizeof(*stream_ndata))) == NULL) {
+	  free(stream);
+	  return NPERR_OUT_OF_MEMORY_ERROR;
+	}
+	stream->ndata = stream_ndata;
+	stream->url = url;
+	stream->end = end;
+	stream->lastmodified = lastmodified;
+	stream->notifyData = notifyData;
+	stream->headers = headers;
+	memset(stream_ndata, 0, sizeof(*stream_ndata));
+	stream_ndata->stream_id = stream_id;
+	id_link(stream_id, stream_ndata);
+	stream_ndata->stream = stream;
+	stream_ndata->is_plugin_stream = 1;
+  }
+  else {
+	if (url)
+	  free(url);
+	if (headers)
+	  free(headers);
+  }
+  *pstream = stream;
+
+  return ret;
+}
+
+static NPError
+g_NPN_NewStream(NPP instance, NPMIMEType type, const char *target, NPStream **stream)
+{
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  if (stream == NULL)
+	return NPERR_INVALID_PARAM;
+  *stream = NULL;
+
+  D(bug("NPN_NewStream instance=%p\n", instance));
+  NPError ret = invoke_NPN_NewStream(instance, type, target, stream);
+  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  return ret;
+}
+
+// Closes and deletes a stream
+static NPError
+invoke_NPN_DestroyStream(NPP instance, NPStream *stream, NPError reason)
+{
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_DESTROY_STREAM,
+								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NP_STREAM, stream,
+								RPC_TYPE_INT32, (int32_t)reason,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_DestroyStream() invoke", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  int32_t ret;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_INT32, &ret,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_DestroyStream() wait for reply", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  return ret;
+}
+
+static NPError
+g_NPN_DestroyStream(NPP instance, NPStream *stream, NPError reason)
+{
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  if (stream == NULL)
+	return NPERR_INVALID_PARAM;
+
+  D(bug("NPN_DestroyStream instance=%p, stream=%p, reason=%s\n",
+		instance, stream, string_of_NPReason(reason)));
+  NPError ret = invoke_NPN_DestroyStream(instance, stream, reason);
+  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+
+  // Mozilla calls NPP_DestroyStream() for its streams, keep stream
+  // info in that case
+  StreamInstance *stream_ndata = stream->ndata;
+  if (stream_ndata && stream_ndata->is_plugin_stream) {
+	id_remove(stream_ndata->stream_id);
+	free(stream_ndata);
+	free((char *)stream->url);
+	free((char *)stream->headers);
+	free(stream);
+  }
+
+  return ret;
+}
+
 // Pushes data into a stream produced by the plug-in and consumed by the browser
+static int
+invoke_NPN_Write(NPP instance, NPStream *stream, int32 len, void *buf)
+{
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_WRITE,
+								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NP_STREAM, stream,
+								RPC_TYPE_ARRAY, RPC_TYPE_CHAR, len, buf,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_Write() invoke", error);
+	return -1;
+  }
+
+  int32_t ret;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_INT32, &ret,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_Write() wait for reply", error);
+	return -1;
+  }
+
+  return ret;
+}
+
 static int32
 g_NPN_Write(NPP instance, NPStream *stream, int32 len, void *buf)
 {
-  D(bug("NPN_Write instance=%d\n", instance));
+  if (instance == NULL)
+	return -1;
 
-  UNIMPLEMENTED();
+  if (stream == NULL)
+	return -1;
 
-  return -1;
+  D(bug("NPN_Write instance=%p, stream=%p, len=%d, buf=%p\n", instance, stream, len, buf));
+  int32 ret = invoke_NPN_Write(instance, stream, len, buf);
+  D(bug(" return: %d\n", ret));
+  return ret;
+}
+
+// Enable popups while executing code where popups should be enabled
+static void
+invoke_NPN_PushPopupsEnabledState(NPP instance, NPBool enabled)
+{
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_PUSH_POPUPS_ENABLED_STATE,
+								RPC_TYPE_NPP, instance,
+								RPC_TYPE_UINT32, (uint32_t)enabled,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_PushPopupsEnabledState() invoke", error);
+	return;
+  }
+
+  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_INVALID);
+  
+  if (error != RPC_ERROR_NO_ERROR)
+	npw_perror("NPN_PushPopupsEnabledState() wait for reply", error);
+}
+
+static void
+g_NPN_PushPopupsEnabledState(NPP instance, NPBool enabled)
+{
+  if (instance == NULL)
+	return;
+
+  D(bug("NPN_PushPopupsEnabledState instance=%p, enabled=%d\n", instance, enabled));
+  invoke_NPN_PushPopupsEnabledState(instance, enabled);
+  D(bug(" done\n"));
+}
+
+// Restore popups state
+static void
+invoke_NPN_PopPopupsEnabledState(NPP instance)
+{
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_POP_POPUPS_ENABLED_STATE,
+								RPC_TYPE_NPP, instance,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_PopPopupsEnabledState() invoke", error);
+	return;
+  }
+
+  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_INVALID);
+  
+  if (error != RPC_ERROR_NO_ERROR)
+	npw_perror("NPN_PopPopupsEnabledState() wait for reply", error);
+}
+
+static void
+g_NPN_PopPopupsEnabledState(NPP instance)
+{
+  if (instance == NULL)
+	return;
+
+  D(bug("NPN_PopPopupsEnabledState instance=%p\n", instance));
+  invoke_NPN_PopPopupsEnabledState(instance);
+  D(bug(" done\n"));
 }
 
 
@@ -1673,19 +2006,19 @@ static NPPluginFuncs plugin_funcs;
 
 // Allows the browser to query the plug-in supported formats
 typedef char * (*NP_GetMIMEDescriptionUPP)(void);
-static NP_GetMIMEDescriptionUPP g_NP_GetMIMEDescription = NULL;
+static NP_GetMIMEDescriptionUPP g_plugin_NP_GetMIMEDescription = NULL;
 
 // Allows the browser to query the plug-in for information
 typedef NPError (*NP_GetValueUPP)(void *instance, NPPVariable variable, void *value);
-static NP_GetValueUPP g_NP_GetValue = NULL;
+static NP_GetValueUPP g_plugin_NP_GetValue = NULL;
 
 // Provides global initialization for a plug-in
 typedef NPError (*NP_InitializeUPP)(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs);
-static NP_InitializeUPP g_NP_Initialize = NULL;
+static NP_InitializeUPP g_plugin_NP_Initialize = NULL;
 
 // Provides global deinitialization for a plug-in
 typedef NPError (*NP_ShutdownUPP)(void);
-static NP_ShutdownUPP g_NP_Shutdown = NULL;
+static NP_ShutdownUPP g_plugin_NP_Shutdown = NULL;
 
 
 /* ====================================================================== */
@@ -1693,6 +2026,18 @@ static NP_ShutdownUPP g_NP_Shutdown = NULL;
 /* ====================================================================== */
 
 // NP_GetMIMEDescription
+static char *
+g_NP_GetMIMEDescription(void)
+{
+  if (g_plugin_NP_GetMIMEDescription == NULL)
+	return NULL;
+
+  D(bug("NP_GetMIMEDescription\n"));
+  char *str = g_plugin_NP_GetMIMEDescription();
+  D(bug(" return: %s\n", str ? str : "<empty>"));
+  return str;
+}
+
 static int handle_NP_GetMIMEDescription(rpc_connection_t *connection)
 {
   D(bug("handle_NP_GetMIMEDescription\n"));
@@ -1702,6 +2047,18 @@ static int handle_NP_GetMIMEDescription(rpc_connection_t *connection)
 }
 
 // NP_GetValue
+static NPError
+g_NP_GetValue(NPPVariable variable, void *value)
+{
+  if (g_plugin_NP_GetValue == NULL)
+	return NPERR_INVALID_FUNCTABLE_ERROR;
+
+  D(bug("NP_GetValue variable=%d\n", variable));
+  NPError ret = g_plugin_NP_GetValue(NULL, variable, value);
+  D(bug(" return: %d\n", ret));
+  return ret;
+}
+
 static int handle_NP_GetValue(rpc_connection_t *connection)
 {
   D(bug("handle_NP_GetValue\n"));
@@ -1713,32 +2070,47 @@ static int handle_NP_GetValue(rpc_connection_t *connection)
 	return error;
   }
 
-  char *str = NULL;
-  NPError ret = g_NP_GetValue ? g_NP_GetValue(NULL, variable, (void *)&str) : NPERR_GENERIC_ERROR;
-  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_STRING, str, RPC_TYPE_INVALID);
+  NPError ret = NPERR_GENERIC_ERROR;
+  int variable_type = rpc_type_of_NPPVariable(variable);
+
+  switch (variable_type) {
+  case RPC_TYPE_STRING:
+	{
+	  char *str = NULL;
+	  ret = g_NP_GetValue(variable, (void *)&str);
+	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_STRING, str, RPC_TYPE_INVALID);
+	}
+  case RPC_TYPE_INT32:
+	{
+	  uint32_t n = 0;
+	  ret = g_NP_GetValue(variable, (void *)&n);
+	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INT32, n, RPC_TYPE_INVALID);
+	}
+  case RPC_TYPE_BOOLEAN:
+	{
+	  PRBool b = PR_FALSE;
+	  ret = g_NP_GetValue(variable, (void *)&b);
+	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_BOOLEAN, b, RPC_TYPE_INVALID);
+	}
+  }
+
+  npw_printf("ERROR: only basic types are supported in NP_GetValue()\n");
+  abort();
 }
 
 // NP_Initialize
-static int handle_NP_Initialize(rpc_connection_t *connection)
+static NPError
+g_NP_Initialize(uint32_t version)
 {
-  D(bug("handle_NP_Initialize\n"));
-
-  uint32_t has_npruntime = 0;
-  int error = rpc_method_get_args(connection,
-								  RPC_TYPE_UINT32, &has_npruntime,
-								  RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NP_Initialize() get args", error);
-	return error;
-  }
+  if (g_plugin_NP_Initialize == NULL)
+	return NPERR_INVALID_FUNCTABLE_ERROR;
 
   memset(&plugin_funcs, 0, sizeof(plugin_funcs));
   plugin_funcs.size = sizeof(plugin_funcs);
 
   memset(&mozilla_funcs, 0, sizeof(mozilla_funcs));
   mozilla_funcs.size = sizeof(mozilla_funcs);
-  mozilla_funcs.version = (NP_VERSION_MAJOR << 8) + NP_VERSION_MINOR;
+  mozilla_funcs.version = version;
   mozilla_funcs.geturl = NewNPN_GetURLProc(g_NPN_GetURL);
   mozilla_funcs.posturl = NewNPN_PostURLProc(g_NPN_PostURL);
   mozilla_funcs.requestread = NewNPN_RequestReadProc(g_NPN_RequestRead);
@@ -1760,15 +2132,10 @@ static int handle_NP_Initialize(rpc_connection_t *connection)
   mozilla_funcs.invalidaterect = NewNPN_InvalidateRectProc(g_NPN_InvalidateRect);
   mozilla_funcs.invalidateregion = NewNPN_InvalidateRegionProc(g_NPN_InvalidateRegion);
   mozilla_funcs.forceredraw = NewNPN_ForceRedrawProc(g_NPN_ForceRedraw);
+  mozilla_funcs.pushpopupsenabledstate = NewNPN_PushPopupsEnabledStateProc(g_NPN_PushPopupsEnabledState);
+  mozilla_funcs.poppopupsenabledstate = NewNPN_PopPopupsEnabledStateProc(g_NPN_PopPopupsEnabledState);
 
-  npruntime_init_callbacks(&mozilla_funcs);
-
-  if (has_npruntime && getenv("NPW_DISABLE_NPRUNTIME")) {
-	D(bug(" user disabled npruntime support\n"));
-	has_npruntime = false;
-  }
-
-  if (has_npruntime) {
+  if (NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING)) {
 	D(bug(" browser supports scripting through npruntime\n"));
 	mozilla_funcs.getstringidentifier = NewNPN_GetStringIdentifierProc(g_NPN_GetStringIdentifier);
 	mozilla_funcs.getstringidentifiers = NewNPN_GetStringIdentifiersProc(g_NPN_GetStringIdentifiers);
@@ -1789,29 +2156,59 @@ static int handle_NP_Initialize(rpc_connection_t *connection)
 	mozilla_funcs.hasmethod = NewNPN_HasMethodProc(g_NPN_HasMethod);
 	mozilla_funcs.releasevariantvalue = NewNPN_ReleaseVariantValueProc(g_NPN_ReleaseVariantValue);
 	mozilla_funcs.setexception = NewNPN_SetExceptionProc(g_NPN_SetException);
+
+	if (!npobject_bridge_new())
+	  return NPERR_OUT_OF_MEMORY_ERROR;
   }
 
-  NPError ret = NPERR_NO_ERROR;
+  D(bug("NP_Initialize\n"));
+  NPError ret = g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
+  D(bug(" return: %d\n", ret));
+  return ret;
+}
 
-  if (!npobject_bridge_new())
-	ret = NPERR_OUT_OF_MEMORY_ERROR;
+static int handle_NP_Initialize(rpc_connection_t *connection)
+{
+  D(bug("handle_NP_Initialize\n"));
 
-  if (ret == NPERR_NO_ERROR)
-	ret = g_NP_Initialize(&mozilla_funcs, &plugin_funcs);
+  uint32_t version;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_UINT32, &version,
+								  RPC_TYPE_INVALID);
 
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NP_Initialize() get args", error);
+	return error;
+  }
+
+  NPError ret = g_NP_Initialize(version);
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
 // NP_Shutdown
+static NPError
+g_NP_Shutdown(void)
+{
+  if (g_plugin_NP_Shutdown == NULL)
+	return NPERR_INVALID_FUNCTABLE_ERROR;
+
+  D(bug("NP_Shutdown\n"));
+  NPError ret = g_plugin_NP_Shutdown();
+  D(bug(" done\n"));
+
+  if (NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING))
+	npobject_bridge_destroy();
+
+  gtk_main_quit();
+
+  return ret;
+}
+
 static int handle_NP_Shutdown(rpc_connection_t *connection)
 {
   D(bug("handle_NP_Shutdown\n"));
 
   NPError ret = g_NP_Shutdown();
-
-  npobject_bridge_destroy();
-  gtk_main_quit();
-
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
@@ -1966,7 +2363,7 @@ g_NPP_SetWindow(NPP instance, NPWindow *np_window)
 
   NPWindow *window = np_window;
   if (window) {
-	if (plugin->top_window) {
+	if (plugin->toolkit_data) {
 	  if (update_window(plugin, window) < 0)
 		return NPERR_GENERIC_ERROR;
 	}
@@ -2020,6 +2417,16 @@ g_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
 
   if (plugin_funcs.getvalue == NULL)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
+
+  switch (variable) {
+#if USE_XEMBED
+  case NPPVpluginNeedsXEmbed:
+	*((PRBool *)value) = PR_TRUE;
+	return NPERR_NO_ERROR;
+#endif
+  default:
+	break;
+  }
 
   D(bug("NPP_GetValue instance=%p, variable=%d\n", instance, variable));
   NPError ret = plugin_funcs.getvalue(instance, variable, value);
@@ -2158,6 +2565,7 @@ static int handle_NPP_NewStream(rpc_connection_t *connection)
 							  RPC_TYPE_UINT32, &stream->end,
 							  RPC_TYPE_UINT32, &stream->lastmodified,
 							  RPC_TYPE_NP_NOTIFY_DATA, &stream->notifyData,
+							  RPC_TYPE_STRING, &stream->headers,
 							  RPC_TYPE_BOOLEAN, &seekable,
 							  RPC_TYPE_INVALID);
 
@@ -2174,6 +2582,7 @@ static int handle_NPP_NewStream(rpc_connection_t *connection)
   stream_ndata->stream_id = stream_id;
   id_link(stream_id, stream_ndata);
   stream_ndata->stream = stream;
+  stream_ndata->is_plugin_stream = 0;
 
   uint16 stype = NP_NORMAL;
   NPError ret = g_NPP_NewStream(instance, type, stream, seekable, &stype);
@@ -2212,6 +2621,7 @@ g_NPP_DestroyStream(NPP instance, NPStream *stream, NPReason reason)
 	free(stream_ndata);
   }
   free((char *)stream->url);
+  free((char *)stream->headers);
   free(stream);
 
   return ret;
@@ -2686,24 +3096,22 @@ static int do_main(int argc, char **argv, const char *connection_path)
 // freeze on NP_Shutdown when multiple Flash movies are active
 static int is_flash_player9_beta1(void)
 {
-  if (g_NP_GetValue) {
-	const char *plugin_desc = NULL;
-	if (g_NP_GetValue(NULL, NPPVpluginDescriptionString, &plugin_desc) == NPERR_NO_ERROR
-		&& plugin_desc && strcmp(plugin_desc, "Shockwave Flash 9.0 d55") == 0) {
-	  npw_printf("WARNING: Flash Player 9 beta 1 detected and rejected\n");
-	  return 1;
-	}
+  const char *plugin_desc = NULL;
+  if (g_NP_GetValue(NPPVpluginDescriptionString, &plugin_desc) == NPERR_NO_ERROR
+	  && plugin_desc && strcmp(plugin_desc, "Shockwave Flash 9.0 d55") == 0) {
+	npw_printf("WARNING: Flash Player 9 beta 1 detected and rejected\n");
+	return 1;
   }
   return 0;
 }
 
 static int do_test(void)
 {
-  if (g_NP_GetMIMEDescription == NULL)
+  if (g_plugin_NP_GetMIMEDescription == NULL)
 	return 1;
-  if (g_NP_Initialize == NULL)
+  if (g_plugin_NP_Initialize == NULL)
 	return 2;
-  if (g_NP_Shutdown == NULL)
+  if (g_plugin_NP_Shutdown == NULL)
 	return 3;
   if (is_flash_player9_beta1())
 	return 4;
@@ -2714,25 +3122,15 @@ static int do_info(void)
 {
   if (do_test() != 0)
 	return 1;
-  if (g_NP_GetValue == NULL)
-	printf("0\n\n0\n\n");
-  else {
-	const char *plugin_name = NULL;
-	if (g_NP_GetValue(NULL, NPPVpluginNameString, &plugin_name) == NPERR_NO_ERROR && plugin_name)
-	  printf("%zd\n%s\n", strlen(plugin_name) + 1, plugin_name);
-	else
-	  printf("0\n\n");
-	const char *plugin_desc = NULL;
-	if (g_NP_GetValue(NULL, NPPVpluginDescriptionString, &plugin_desc) == NPERR_NO_ERROR && plugin_desc)
-	  printf("%zd\n%s\n", strlen(plugin_desc) + 1, plugin_desc);
-	else
-	  printf("0\n\n");
-  }
+  const char *plugin_name = NULL;
+  if (g_NP_GetValue(NPPVpluginNameString, &plugin_name) == NPERR_NO_ERROR && plugin_name)
+	printf("PLUGIN_NAME %zd\n%s\n", strlen(plugin_name), plugin_name);
+  const char *plugin_desc = NULL;
+  if (g_NP_GetValue(NPPVpluginDescriptionString, &plugin_desc) == NPERR_NO_ERROR && plugin_desc)
+	printf("PLUGIN_DESC %zd\n%s\n", strlen(plugin_desc), plugin_desc);
   const char *mime_info = g_NP_GetMIMEDescription();
   if (mime_info)
-	printf("%zd\n%s\n", strlen(mime_info) + 1, mime_info);
-  else
-	printf("0\n\n");
+	printf("PLUGIN_MIME %zd\n%s\n", strlen(mime_info), mime_info);
   return 0;
 }
 
@@ -2813,22 +3211,22 @@ int main(int argc, char **argv)
 	  return 1;
 	}
 	dlerror();
-	g_NP_GetMIMEDescription = (NP_GetMIMEDescriptionUPP)dlsym(handle, "NP_GetMIMEDescription");
+	g_plugin_NP_GetMIMEDescription = (NP_GetMIMEDescriptionUPP)dlsym(handle, "NP_GetMIMEDescription");
 	if ((error = dlerror()) != NULL) {
 	  npw_printf("ERROR: %s\n", error);
 	  return 1;
 	}
-	g_NP_Initialize = (NP_InitializeUPP)dlsym(handle, "NP_Initialize");
+	g_plugin_NP_Initialize = (NP_InitializeUPP)dlsym(handle, "NP_Initialize");
 	if ((error = dlerror()) != NULL) {
 	  npw_printf("ERROR: %s\n", error);
 	  return 1;
 	}
-	g_NP_Shutdown = (NP_ShutdownUPP)dlsym(handle, "NP_Shutdown");
+	g_plugin_NP_Shutdown = (NP_ShutdownUPP)dlsym(handle, "NP_Shutdown");
 	if ((error = dlerror()) != NULL) {
 	  npw_printf("ERROR: %s\n", error);
 	  return 1;
 	}
-	g_NP_GetValue = (NP_GetValueUPP)dlsym(handle, "NP_GetValue");
+	g_plugin_NP_GetValue = (NP_GetValueUPP)dlsym(handle, "NP_GetValue");
   }
 
   int ret = 1;

@@ -18,16 +18,17 @@
  *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
  */
 
+#define _GNU_SOURCE 1 /* RTLD_DEFAULT */
 #include "sysdeps.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <limits.h>
+#include <dlfcn.h>
 #include <errno.h>
 #include <unistd.h>
 #include <signal.h>
-#include <pthread.h>
 #include <semaphore.h>
 #include <sys/wait.h>
 
@@ -94,12 +95,12 @@ typedef struct _PluginInstance {
 typedef struct _StreamInstance {
   NPStream *stream;
   uint32_t stream_id;
+  int is_plugin_stream;
 } StreamInstance;
 
 // Prototypes
 static void plugin_init(int is_NP_Initialize);
 static void plugin_exit(void);
-static pthread_mutex_t plugin_init_lock = PTHREAD_MUTEX_INITIALIZER;
 
 // Helpers
 #ifndef min
@@ -140,12 +141,40 @@ static gboolean rpc_event_dispatch(GSource *source, GSourceFunc callback, gpoint
 /* === Browser side plug-in API                                       === */
 /* ====================================================================== */
 
+// Does browser have specified feature?
+#define NPN_HAS_FEATURE(FEATURE) ((mozilla_funcs.version & 0xff) >= NPVERS_HAS_##FEATURE)
+
+// NPN_MemAlloc
+static inline void *g_NPN_MemAlloc(uint32 size)
+{
+  return CallNPN_MemAllocProc(mozilla_funcs.memalloc, size);
+}
+
+// NPN_MemFree
+static inline void g_NPN_MemFree(void* ptr)
+{
+  CallNPN_MemFreeProc(mozilla_funcs.memfree, ptr);
+}
+
+// NPN_MemFlush
+static inline uint32 g_NPN_MemFlush(uint32 size)
+{
+  return CallNPN_MemFlushProc(mozilla_funcs.memflush, size);
+}
+
 // NPN_UserAgent
+static const char *g_NPN_UserAgent(NPP instance)
+{
+  if (mozilla_funcs.uagent == NULL)
+	return NULL;
+  return mozilla_funcs.uagent(instance);
+}
+
 static int handle_NPN_UserAgent(rpc_connection_t *connection)
 {
   D(bug("handle_NPN_UserAgent\n"));
 
-  const char *user_agent = mozilla_funcs.uagent ? mozilla_funcs.uagent(NULL) : NULL;
+  const char *user_agent = g_NPN_UserAgent(NULL);
   return rpc_method_send_reply(connection, RPC_TYPE_STRING, user_agent, RPC_TYPE_INVALID);
 }
 
@@ -461,6 +490,237 @@ static int handle_NPN_RequestRead(rpc_connection_t *connection)
   }
 
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
+}
+
+// NPN_NewStream
+static NPError g_NPN_NewStream(NPP instance, NPMIMEType type, const char *target, NPStream **stream)
+{
+  if (mozilla_funcs.newstream == NULL)
+	return NPERR_INVALID_FUNCTABLE_ERROR;
+
+  if (stream == NULL)
+	return NPERR_INVALID_PARAM;
+
+  D(bug("NPN_NewStream instance=%p, type='%s', target='%s'\n", instance, type, target));
+  NPError ret = CallNPN_NewStreamProc(mozilla_funcs.newstream, instance, type, target, stream);
+  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+
+  if (ret == NPERR_NO_ERROR) {
+	StreamInstance *stream_pdata = malloc(sizeof(*stream_pdata));
+	if (stream_pdata == NULL)
+	  return NPERR_OUT_OF_MEMORY_ERROR;
+	memset(stream_pdata, 0, sizeof(*stream_pdata));
+	stream_pdata->stream = *stream;
+	stream_pdata->stream_id = id_create(stream_pdata);
+	stream_pdata->is_plugin_stream = 1;
+	(*stream)->pdata = stream_pdata;
+  }
+  else {
+	static const StreamInstance fake_StreamInstance = {
+	  .stream = NULL,
+	  .stream_id = 0
+	};
+	static const NPStream fake_NPStream = {
+	  .pdata = (void *)&fake_StreamInstance,
+	  .url = NULL,
+	  .end = 0,
+	  .lastmodified = 0,
+	  .notifyData = NULL
+	};
+	*stream = (void *)&fake_NPStream;
+  }
+
+  return ret;
+}
+
+static int handle_NPN_NewStream(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_NewStream\n"));
+
+  NPP instance;
+  char *type;
+  char *target;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_STRING, &type,
+								  RPC_TYPE_STRING, &target,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_NewStream() get args", error);
+	return error;
+  }
+
+  NPStream *stream;
+  NPError ret = g_NPN_NewStream(instance, type, target, &stream);
+
+  if (type)
+	free(type);
+  if (target)
+	free(target);
+
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_INT32, ret,
+							   RPC_TYPE_UINT32, ((StreamInstance *)stream->pdata)->stream_id,
+							   RPC_TYPE_STRING, stream->url,
+							   RPC_TYPE_UINT32, stream->end,
+							   RPC_TYPE_UINT32, stream->lastmodified,
+							   RPC_TYPE_NP_NOTIFY_DATA, stream->notifyData,
+							   RPC_TYPE_STRING, NPN_HAS_FEATURE(RESPONSE_HEADERS) ? stream->headers : NULL,
+							   RPC_TYPE_INVALID);
+}
+
+// NPN_DestroySream
+static NPError
+g_NPN_DestroyStream(NPP instance, NPStream *stream, NPReason reason)
+{
+  if (mozilla_funcs.destroystream == NULL)
+	return NPERR_INVALID_FUNCTABLE_ERROR;
+
+  if (stream == NULL)
+	return NPERR_INVALID_PARAM;
+
+  // Mozilla calls NPP_DestroyStream() for its streams, keep stream
+  // info in that case
+  StreamInstance *stream_pdata = stream->pdata;
+  if (stream_pdata && stream_pdata->is_plugin_stream) {
+	id_remove(stream_pdata->stream_id);
+	free(stream->pdata);
+	stream->pdata = NULL;
+  }
+
+  D(bug("NPN_DestroyStream instance=%p, stream=%p, reason=%s\n",
+		instance, stream, string_of_NPReason(reason)));
+  NPError ret = CallNPN_DestroyStreamProc(mozilla_funcs.destroystream, instance, stream, reason);
+  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+
+  return ret;
+}
+
+static int handle_NPN_DestroyStream(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_DestroyStream\n"));
+
+  NPP instance;
+  NPStream *stream;
+  int32_t reason;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_NP_STREAM, &stream,
+								  RPC_TYPE_INT32, &reason,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_DestroyStream() get args", error);
+	return error;
+  }
+
+  NPError ret = g_NPN_DestroyStream(instance, stream, reason);
+  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
+}
+
+// NPN_Write
+static int32 g_NPN_Write(NPP instance, NPStream *stream, int32 len, void *buf)
+{
+  if (mozilla_funcs.write == NULL)
+	return -1;
+
+  if (stream == NULL)
+	return -1;
+
+  D(bug("NPP_Write instance=%p\n", instance));
+  int32 ret = CallNPN_WriteProc(mozilla_funcs.write, instance, stream, len, buf);
+  D(bug(" return: %d\n", ret));
+  return ret;
+}
+
+static int handle_NPN_Write(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_Write\n"));
+
+  NPP instance;
+  NPStream *stream;
+  unsigned char *buf;
+  int32_t len;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_NP_STREAM, &stream,
+								  RPC_TYPE_ARRAY, RPC_TYPE_CHAR, &len, &buf,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_Write() get args", error);
+	return error;
+  }
+
+  int32 ret = g_NPN_Write(instance, stream, len, buf);
+
+  if (buf)
+	free(buf);
+
+  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
+}
+
+// NPN_PushPopupsEnabledState
+static void g_NPN_PushPopupsEnabledState(NPP instance, NPBool enabled)
+{
+  if (mozilla_funcs.pushpopupsenabledstate == NULL)
+	return;
+
+  D(bug("NPN_PushPopupsEnabledState instance=%p, enabled=%d\n", instance, enabled));
+  CallNPN_PushPopupsEnabledStateProc(mozilla_funcs.pushpopupsenabledstate, instance, enabled);
+  D(bug(" done\n"));
+}
+
+static int handle_NPN_PushPopupsEnabledState(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_PushPopupsEnabledState\n"));
+
+  NPP instance;
+  uint32_t enabled;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_UINT32, &enabled,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_PushPopupsEnabledState() get args", error);
+	return error;
+  }
+
+  g_NPN_PushPopupsEnabledState(instance, enabled);
+
+  return RPC_ERROR_NO_ERROR;
+}
+
+// NPN_PopPopupsEnabledState
+static void g_NPN_PopPopupsEnabledState(NPP instance)
+{
+  if (mozilla_funcs.poppopupsenabledstate == NULL)
+	return;
+
+  D(bug("NPN_PopPopupsEnabledState instance=%p\n", instance));
+  CallNPN_PopPopupsEnabledStateProc(mozilla_funcs.poppopupsenabledstate, instance);
+  D(bug(" done\n"));
+}
+
+static int handle_NPN_PopPopupsEnabledState(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_PopPopupsEnabledState\n"));
+
+  NPP instance;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_PopPopupsEnabledState() get args", error);
+	return error;
+  }
+
+  g_NPN_PopPopupsEnabledState(instance);
+
+  return RPC_ERROR_NO_ERROR;
 }
 
 // NPN_CreateObject
@@ -982,7 +1242,6 @@ g_NPP_New(NPMIMEType mime_type, NPP instance,
 static NPError
 invoke_NPP_Destroy(NPP instance, NPSavedData **save)
 {
-  // XXX handle save area (transfer raw bytes but keep size information somewhere)
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPP_DESTROY,
 								RPC_TYPE_NPP, instance,
@@ -1007,6 +1266,11 @@ invoke_NPP_Destroy(NPP instance, NPSavedData **save)
 
   if (save)
 	*save = save_area;
+  else if (save_area) {
+	if (save_area->len > 0 && save_area->buf)
+	  free(save_area->buf);
+	free(save_area);
+  }
 
   return ret;
 }
@@ -1097,7 +1361,24 @@ invoke_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
 		ret = NPERR_GENERIC_ERROR;
 	  }
 	  D(bug(" value: %s\n", str));
-	  *((char **)value) = str; // XXX memory leak
+	  switch (variable) {
+	  case NPPVformValue:
+		// this is a '\0'-terminated UTF-8 string data allocated by NPN_MemAlloc()
+		if (ret == NPERR_NO_ERROR && str) {
+		  char *utf8_str = g_NPN_MemAlloc(strlen(str) + 1);
+		  if (utf8_str == NULL)
+			ret = NPERR_OUT_OF_MEMORY_ERROR;
+		  else
+			strcpy(utf8_str, str);
+		  free(str);
+		  str = utf8_str;
+		}
+		break;
+	  default:
+		// XXX memory leak (add to a deallocation pool?)
+		break;
+	  }
+	  *((char **)value) = str;
 	  break;
 	}
   case RPC_TYPE_INT32:
@@ -1232,6 +1513,7 @@ invoke_NPP_NewStream(NPP instance, NPMIMEType type, NPStream *stream, NPBool see
 								RPC_TYPE_UINT32, stream->end,
 								RPC_TYPE_UINT32, stream->lastmodified,
 								RPC_TYPE_NP_NOTIFY_DATA, stream->notifyData,
+								RPC_TYPE_STRING, NPN_HAS_FEATURE(RESPONSE_HEADERS) ? stream->headers : NULL,
 								RPC_TYPE_BOOLEAN, seekable,
 								RPC_TYPE_INVALID);
 
@@ -1269,6 +1551,7 @@ g_NPP_NewStream(NPP instance, NPMIMEType type, NPStream *stream, NPBool seekable
   memset(stream_pdata, 0, sizeof(*stream_pdata));
   stream_pdata->stream = stream;
   stream_pdata->stream_id = id_create(stream_pdata);
+  stream_pdata->is_plugin_stream = 0;
   stream->pdata = stream_pdata;
 
   D(bug("NPP_NewStream instance=%p\n", instance));
@@ -1391,7 +1674,7 @@ static int32
 g_NPP_WriteReady(NPP instance, NPStream *stream)
 {
   if (instance == NULL)
-	return NPERR_INVALID_INSTANCE_ERROR;
+	return -1;
 
   D(bug("NPP_WriteReady instance=%p\n", instance));
   int32 ret = invoke_NPP_WriteReady(instance, stream);
@@ -1434,7 +1717,7 @@ static int32
 g_NPP_Write(NPP instance, NPStream *stream, int32 offset, int32 len, void *buf)
 {
   if (instance == NULL)
-	return NPERR_INVALID_INSTANCE_ERROR;
+	return -1;
 
   D(bug("NPP_Write instance=%p\n", instance));
   int32 ret = invoke_NPP_Write(instance, stream, offset, len, buf);
@@ -1590,6 +1873,442 @@ NP_GetMIMEDescription(void)
   return g_plugin.formats;
 }
 
+
+/* ====================================================================== */
+/* === LONG64 NPAPI support                                           === */
+/* ====================================================================== */
+
+/*
+ * Dependent on NPSavedData
+ *  NPP_New
+ *  NPP_Destroy
+ * NOTE: the browsers don't seem to care about NPSavedData
+ *
+ * Dependent on NPWindow / NPSetWindowCallbackStruct
+ *  NPP_SetWindow
+ *
+ * Dependent on NPStream (plug-in side)
+ *  NPP_NewStream
+ *  NPP_DestroyStream
+ *  NPP_WriteReady
+ *  NPP_Write
+ *  NPP_StreamAsFile
+ *
+ * Dependent on NPStream (browser-side)
+ *  NPN_RequestRead
+ *  NPN_NewStream
+ *  NPN_DestroyStream
+ *  NPN_Write
+ * NOTE: Konqueror does not implement those
+ *
+ * Dependent on NPPrintCallbackStruct
+ *  NPP_Print
+ */
+
+// Check if another thunking layer is necessary
+static int g_use_long64_thunks = -1;
+
+static void set_use_long64_thunks(bool enabled)
+{
+  g_use_long64_thunks = enabled;
+
+  if (g_use_long64_thunks) {
+	// XXX update mozilla_funcs with g_LONG64_*() variants
+  }
+}
+
+#define NP_CVT32(VAL) ptr32->VAL = ptr64->VAL
+#define NP_CVT64(VAL) ptr64->VAL = ptr32->VAL
+
+// Check display is valid
+static bool is_browser_display(Display *display)
+{
+  Display *browser_display = NULL;
+  if (mozilla_funcs.getvalue == NULL)
+	return 0;
+  if (mozilla_funcs.getvalue(NULL, NPNVxDisplay, (void *)&browser_display) != NPERR_NO_ERROR)
+	return 0;
+  return display == browser_display;
+}
+
+// NPStream
+typedef struct _LONG64_NPStream {
+  void*  pdata;
+  void*  ndata;
+  const  char* url;
+  uint64 end;
+  uint64 lastmodified;
+  void*  notifyData;
+  const  char* headers;
+} LONG64_NPStream;
+
+static void convert_from_LONG64_NPStream(NPStream *ptr32, const LONG64_NPStream *ptr64)
+{
+  NP_CVT32(pdata);
+  NP_CVT32(ndata);
+  NP_CVT32(url);
+  NP_CVT32(end);
+  NP_CVT32(lastmodified);
+  NP_CVT32(notifyData);
+  NP_CVT32(headers);
+}
+
+#define NP_STREAM32(STREAM) get_stream32(STREAM)
+
+static inline NPStream *get_stream32(LONG64_NPStream *stream64)
+{
+  NPStream *stream32 = stream64->pdata;
+  if (stream32 && stream32->ndata == stream64)
+	return stream32;
+  return (NPStream *)stream64;
+}
+
+// NPByteRange
+typedef struct _LONG64_NPByteRange {
+  int64  offset;
+  uint64 length;
+  struct _LONG64_NPByteRange* next;
+} LONG64_NPByteRange;
+
+// NPSavedData
+typedef struct _LONG64_NPSavedData {
+  int64	len;
+  void*	buf;
+} LONG64_NPSavedData;
+
+static void convert_from_LONG64_NPSavedData(NPSavedData *ptr32, const LONG64_NPSavedData *ptr64)
+{
+  NP_CVT32(len);
+  NP_CVT32(buf);
+}
+
+static void convert_from_NPSavedData(LONG64_NPSavedData *ptr64, const NPSavedData *ptr32)
+{
+  NP_CVT64(len);
+  NP_CVT64(buf);
+}
+
+// NPSetWindowCallbackStruct
+typedef struct {
+  int64        type;
+#ifdef MOZ_X11
+  Display*     display;
+  Visual*      visual;
+  Colormap     colormap;
+  unsigned int depth;
+#endif
+} LONG64_NPSetWindowCallbackStruct;
+
+static bool is_LONG64_NPSetWindowCallbackStruct(void *ws_info)
+{
+  LONG64_NPSetWindowCallbackStruct *ws_info64 = (LONG64_NPSetWindowCallbackStruct *)ws_info;
+
+  return (/* LONG64_NPSetWindowCallbacStruct.type valid? */
+		  (ws_info64->type == 0 || ws_info64->type == NP_SETWINDOW) &&
+#ifdef MOZ_X11
+		  /* LONG64_NPSetWindowCallbacStruct.display valid? */
+		  is_browser_display(ws_info64->display) &&
+#endif
+		  1);
+}
+
+static void convert_from_LONG64_NPSetWindowCallbackStruct(NPSetWindowCallbackStruct *ptr32,
+														  const LONG64_NPSetWindowCallbackStruct *ptr64)
+{
+  NP_CVT32(type);
+#ifdef MOZ_X11
+  NP_CVT32(display);
+  NP_CVT32(visual);
+  NP_CVT32(colormap);
+  NP_CVT32(depth);
+#endif
+}
+
+// NPPrintCallbackStruct
+typedef struct {
+  int64 type;
+  FILE* fp;
+} LONG64_NPPrintCallbackStruct;
+
+static bool is_LONG64_NPPrintCallbackStruct(void *platformPrint)
+{
+  LONG64_NPPrintCallbackStruct *platformPrint64 = (LONG64_NPPrintCallbackStruct *)platformPrint;
+
+  return (/* LONG64_NPPrintCallbackStruct.type valid? */
+		  platformPrint64->type == NP_PRINT &&
+		  /* LONG64_NPPrintCallbackStruct.file valid? */
+		  platformPrint64->fp != NULL);
+}
+
+static void convert_from_LONG64_NPPrintCallbackStruct(NPPrintCallbackStruct *ptr32,
+													  const LONG64_NPPrintCallbackStruct *ptr64)
+{
+  NP_CVT32(type);
+  NP_CVT32(fp);
+}
+
+// NPWindow
+typedef struct _LONG64_NPWindow {
+  void* window;
+  int64 x;
+  int64 y;
+  uint64 width;
+  uint64 height;
+  NPRect clipRect;
+#if defined(XP_UNIX) && !defined(XP_MACOSX)
+  void * ws_info;
+#endif /* XP_UNIX */
+  NPWindowType type;
+} LONG64_NPWindow;
+
+static bool is_LONG64_NPWindow(void *window)
+{
+  NPWindow *window32 = (NPWindow *)window;
+  LONG64_NPWindow *window64 = (LONG64_NPWindow *)window;
+
+  return (/* MSW32(LONG64_NPWindow.x) */
+		  (window32->x == 0 || window32->x == 0xffffffff) &&
+		  /* MSW32(LONG64_NPWindow.y) */
+		  (window32->width == 0 || window32->width == 0xffffffff) &&
+		  /* LONG64_NPWindow.clipRect.top, LONG64_NPWindow.clipRect.left */
+		  (window32->type != NPWindowTypeWindow && window32->type != NPWindowTypeDrawable) &&
+		  /* LONG64_NPWindow.type valid? */
+		  (window64->type == NPWindowTypeWindow || window64->type == NPWindowTypeDrawable) &&
+		  /* LONG64_NPWindow.ws_info valid? */
+		  is_LONG64_NPSetWindowCallbackStruct(window64->ws_info));
+}
+
+static void convert_from_LONG64_NPWindow(NPWindow *ptr32, const LONG64_NPWindow *ptr64)
+{
+  NP_CVT32(type);
+  NP_CVT32(window);
+  NP_CVT32(x);
+  NP_CVT32(y);
+  NP_CVT32(width);
+  NP_CVT32(height);
+  NP_CVT32(clipRect.top);
+  NP_CVT32(clipRect.left);
+  NP_CVT32(clipRect.bottom);
+  NP_CVT32(clipRect.right);
+  convert_from_LONG64_NPSetWindowCallbackStruct(ptr32->ws_info, ptr64->ws_info);
+}
+
+// NPP_SetWindow (LONG64)
+static NPError
+g_LONG64_NPP_SetWindow(NPP instance, void *window)
+{
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  // Detect broken 64-bit NPAPI
+  if (g_use_long64_thunks < 0)
+	set_use_long64_thunks(is_LONG64_NPWindow(window));
+
+  NPWindow window32;
+  NPSetWindowCallbackStruct ws_info32;
+  if (g_use_long64_thunks) {
+	window32.ws_info = &ws_info32;
+	convert_from_LONG64_NPWindow(&window32, window);
+	window = &window32;
+  }
+
+  return g_NPP_SetWindow(instance, window);
+}
+
+// NPP_New (LONG64)
+static NPError
+g_LONG64_NPP_New(NPMIMEType mime_type, NPP instance,
+				 uint16_t mode, int16_t argc, char *argn[], char *argv[],
+				 void *saved)
+{
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  NPSavedData saved32;
+  if (saved && g_use_long64_thunks > 0) {
+	convert_from_LONG64_NPSavedData(&saved32, saved);
+	saved = &saved32;
+  }
+
+  return g_NPP_New(mime_type, instance, mode, argc, argn, argv, saved);
+}
+
+// NPP_Destroy (LONG64)
+static NPError
+g_LONG64_NPP_Destroy(NPP instance, void **save)
+{
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  NPSavedData *save_area32 = NULL;
+  NPError ret = g_NPP_Destroy(instance, &save_area32);
+
+  if (save && g_use_long64_thunks > 0) {
+	LONG64_NPSavedData *save_area64 = NULL;
+	if (ret == NPERR_NO_ERROR && save_area32) {
+	  if ((save_area64 = g_NPN_MemAlloc(save_area32->len)) != NULL)
+		convert_from_NPSavedData(save_area64, save_area32);
+	  free(save_area32);
+	}
+	*save = save_area64;
+  }
+
+  return ret;
+}
+
+// NPP_NewStream (LONG64)
+static NPError
+g_LONG64_NPP_NewStream(NPP instance, NPMIMEType type, void *stream, NPBool seekable, uint16 *stype)
+{
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  // Detect broken 64-bit NPAPI
+  if (g_use_long64_thunks < 0) {
+	npw_printf("WARNING: function using an NPStream was called too early, could not determine LONG64 data structure\n");
+	set_use_long64_thunks(false);
+  }
+
+  if (g_use_long64_thunks) {
+	NPStream *stream32;
+	if ((stream32 = malloc(sizeof(*stream32))) == NULL)
+	  return NPERR_OUT_OF_MEMORY_ERROR;
+	convert_from_LONG64_NPStream(stream32, stream);
+	stream32->ndata = stream;
+	((NPStream *)stream)->pdata = stream32;
+  }
+
+  return g_NPP_NewStream(instance, type, NP_STREAM32(stream), seekable, stype);
+}
+
+// NPP_DestroyStream (LONG64)
+static NPError
+g_LONG64_NPP_DestroyStream(NPP instance, void *stream, NPReason reason)
+{
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  if (stream == NULL)
+	return NPERR_INVALID_PARAM;
+
+  NPError ret = g_NPP_DestroyStream(instance, NP_STREAM32(stream), reason);
+
+  if (g_use_long64_thunks) {
+	free(((NPStream *)stream)->pdata);
+	((NPStream *)stream)->pdata = NULL;
+  }
+
+  return ret;
+}
+
+// NPP_WriteReady (LONG64)
+static int64
+g_LONG64_NPP_WriteReady(NPP instance, void *stream)
+{
+  if (instance == NULL)
+	return -1L;
+
+  if (stream == NULL)
+	return -1L;
+
+  return (int64)(int32)g_NPP_WriteReady(instance, NP_STREAM32(stream));
+}
+
+// NPP_Write (LONG64)
+static int64
+g_LONG64_NPP_Write(NPP instance, void *stream, int64 offset, int64 len, void *buf)
+{
+  if (instance == NULL)
+	return -1L;
+
+  if (stream == NULL)
+	return -1L;
+
+  return (int64)(int32)g_NPP_Write(instance, NP_STREAM32(stream), offset, len, buf);
+}
+
+// NPP_StreamAsFile (LONG64)
+static void
+g_LONG64_NPP_StreamAsFile(NPP instance, void *stream, const char *fname)
+{
+  if (instance == NULL)
+	return;
+
+  if (stream == NULL)
+	return;
+
+  g_NPP_StreamAsFile(instance, NP_STREAM32(stream), fname);
+}
+
+// NPP_Print (LONG64)
+static void g_LONG64_NPP_Print(NPP instance, void *PrintInfo)
+{
+  if (instance == NULL)
+	return;
+
+  if (PrintInfo == NULL)
+	return;
+
+  // Detect broken 64-bit NPAPI
+  if (g_use_long64_thunks < 0)
+	set_use_long64_thunks(is_LONG64_NPPrintCallbackStruct(PrintInfo));
+
+  NPPrint PrintInfo32;
+  NPPrintCallbackStruct platformPrint32;
+  if (g_use_long64_thunks) {
+	memcpy(&PrintInfo32, PrintInfo, sizeof(PrintInfo32));
+	void *platformPrint;
+	switch (((NPPrint *)PrintInfo)->mode) {
+	case NP_FULL:
+	  platformPrint = ((NPPrint *)PrintInfo)->print.fullPrint.platformPrint;
+	  convert_from_LONG64_NPPrintCallbackStruct(&platformPrint32, platformPrint);
+	  PrintInfo32.print.fullPrint.platformPrint = &platformPrint32;
+	  break;
+	case NP_EMBED:
+	  platformPrint = ((NPPrint *)PrintInfo)->print.embedPrint.platformPrint;
+	  convert_from_LONG64_NPPrintCallbackStruct(&platformPrint32, platformPrint);
+	  PrintInfo32.print.embedPrint.platformPrint = &platformPrint32;
+	  break;
+	}
+	PrintInfo = &PrintInfo32;
+  }
+
+  g_NPP_Print(instance, PrintInfo);
+}
+
+
+/* ====================================================================== */
+/* === Plug-in initialization                                         === */
+/* ====================================================================== */
+
+// Detect Konqueror
+static bool is_konqueror(void)
+{
+  if (dlsym(RTLD_DEFAULT, "qApp") == NULL)
+	return false;
+  if (mozilla_funcs.getvalue == NULL)
+	return false;
+  Display *x_display = NULL;
+  if (mozilla_funcs.getvalue(NULL, NPNVxDisplay, (void *)&x_display) != NPERR_NO_ERROR)
+	return false;
+  XtAppContext x_app_context = NULL;
+  if (mozilla_funcs.getvalue(NULL, NPNVxtAppContext, (void *)&x_app_context) != NPERR_NO_ERROR)
+	return false;
+  if (x_display == NULL || x_app_context == NULL)
+	return false;
+  String name, class;
+  XtGetApplicationNameAndClass(x_display, &name, &class);
+  if (strcmp(name, "nspluginviewer") == 0)
+	return true;
+  // XXX user-agent string can be changed, but it's still an heuristic
+  const char *user_agent = g_NPN_UserAgent(NULL);
+  if (user_agent == NULL)
+	return false;
+  if (strstr(user_agent, "Konqueror") != NULL)
+	return true;
+  return false;
+}
+
 // Provides global initialization for a plug-in
 NPError
 NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
@@ -1630,6 +2349,21 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
   plugin_funcs->getvalue = NewNPP_GetValueProc(g_NPP_GetValue);
   plugin_funcs->setvalue = NewNPP_SetValueProc(g_NPP_SetValue);
 
+  // override function table with an additional thunking layer for
+  // possibly broken 64-bit Konqueror versions (NPAPI 0.11)
+  if (is_konqueror() && sizeof(void *) == 8 && ! NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING)) {
+	D(bug("Installing Konqueror workarounds\n"));
+	plugin_funcs->setwindow = NewNPP_SetWindowProc(g_LONG64_NPP_SetWindow);
+	plugin_funcs->newstream = NewNPP_NewStreamProc(g_LONG64_NPP_NewStream);
+	plugin_funcs->destroystream = NewNPP_DestroyStreamProc(g_LONG64_NPP_DestroyStream);
+	plugin_funcs->asfile = NewNPP_StreamAsFileProc(g_LONG64_NPP_StreamAsFile);
+	plugin_funcs->writeready = NewNPP_WriteReadyProc(g_LONG64_NPP_WriteReady);
+	plugin_funcs->write = NewNPP_WriteProc(g_LONG64_NPP_Write);
+	plugin_funcs->print = NewNPP_PrintProc(g_LONG64_NPP_Print);
+	plugin_funcs->newp = NewNPP_NewProc(g_LONG64_NPP_New);
+	plugin_funcs->destroy = NewNPP_DestroyProc(g_LONG64_NPP_Destroy);
+  }
+
   if (g_plugin.initialized == 0 || g_plugin.initialized == 1)
 	plugin_init(1);
   if (g_plugin.initialized <= 0)
@@ -1638,17 +2372,13 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
   if (!npobject_bridge_new())
 	return NPERR_MODULE_LOAD_FAILED_ERROR;
 
-  // NPRuntime appeared in NPAPI >= 0.14
-  bool has_npruntime = true;
-  if ((moz_funcs->version >> 8) == 0 && (moz_funcs->version & 0xff) < 14)
-	has_npruntime = false;
-  // check that the browser doesn't lie
-  if (moz_funcs->size < (offsetof(NPNetscapeFuncs, setexception) + sizeof(NPN_SetExceptionUPP)))
-	has_npruntime = false;
+  // pass down common NPAPI version supported by both the underlying
+  // browser and the thunking capabilities of nspluginwrapper
+  uint32_t version = min(moz_funcs->version, plugin_funcs->version);
 
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NP_INITIALIZE,
-								RPC_TYPE_UINT32, (uint32_t)has_npruntime,
+								RPC_TYPE_UINT32, (uint32_t)version,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -1707,13 +2437,8 @@ NP_Shutdown(void)
   return ret;
 }
 
-
-/* ====================================================================== */
-/* === Plug initialization                                            === */
-/* ====================================================================== */
-
 // Initialize wrapper plugin and execute viewer
-static void do_plugin_init(int is_NP_Initialize)
+static void plugin_init(int is_NP_Initialize)
 {
   if (g_plugin.initialized < 0)
 	return;
@@ -1754,28 +2479,30 @@ static void do_plugin_init(int is_NP_Initialize)
 	FILE *viewer_fp = popen(command, "r");
 	if (viewer_fp == NULL)
 	  return;
-	char **strings[] = { &g_plugin.name, &g_plugin.description, &g_plugin.formats, NULL };
-	int i, error = 0;
-	for (i = 0; strings[i] != NULL; i++) {
-	  int len;
-	  if (fscanf(viewer_fp, "%d\n", &len) != 1) {
-		error = 1;
-		break;
-	  }
-	  char *str = malloc(len + 1);
+	char line[256];
+	while (fgets(line, sizeof(line), viewer_fp)) {
+	  // Read line
+	  int len = strlen(line);
 	  if (len == 0)
-		str[0] = '\0';
-	  else {
-		if (fgets(str, len, viewer_fp) == NULL) {
-		  error = 1;
-		  break;
+		continue;
+	  line[len - 1] = '\0';
+
+	  // Parse line
+	  char tag[sizeof(line)];
+	  if (sscanf(line, "%s %d", tag, &len) == 2) {
+		char *str = malloc(++len);
+		if (str && fgets(str, len, viewer_fp)) {
+		  if (strcmp(tag, "PLUGIN_NAME") == 0)
+			g_plugin.name = str;
+		  else if (strcmp(tag, "PLUGIN_DESC") == 0)
+			g_plugin.description = str;
+		  else if (strcmp(tag, "PLUGIN_MIME") == 0)
+			g_plugin.formats = str;
 		}
 	  }
-	  *(strings[i]) = str;
 	}
 	pclose(viewer_fp);
-	if (error == 0)
-	  g_plugin.initialized = 1;
+	g_plugin.initialized = 1;
   }
 
   if (!is_NP_Initialize)
@@ -1817,6 +2544,11 @@ static void do_plugin_init(int is_NP_Initialize)
 	{ RPC_METHOD_NPN_STATUS,							handle_NPN_Status },
 	{ RPC_METHOD_NPN_PRINT_DATA,						handle_NPN_PrintData },
 	{ RPC_METHOD_NPN_REQUEST_READ,						handle_NPN_RequestRead },
+	{ RPC_METHOD_NPN_NEW_STREAM,						handle_NPN_NewStream },
+	{ RPC_METHOD_NPN_DESTROY_STREAM,					handle_NPN_DestroyStream },
+	{ RPC_METHOD_NPN_WRITE,								handle_NPN_Write },
+	{ RPC_METHOD_NPN_PUSH_POPUPS_ENABLED_STATE,			handle_NPN_PushPopupsEnabledState },
+	{ RPC_METHOD_NPN_POP_POPUPS_ENABLED_STATE,			handle_NPN_PopPopupsEnabledState },
 	{ RPC_METHOD_NPN_CREATE_OBJECT,						handle_NPN_CreateObject },
 	{ RPC_METHOD_NPN_RETAIN_OBJECT,						handle_NPN_RetainObject },
 	{ RPC_METHOD_NPN_RELEASE_OBJECT,					handle_NPN_ReleaseObject },
@@ -1909,15 +2641,8 @@ static void do_plugin_init(int is_NP_Initialize)
   D(bug("--- INIT ---\n"));
 }
 
-static void plugin_init(int is_NP_Initialize)
-{
-  pthread_mutex_lock(&plugin_init_lock);
-  do_plugin_init(is_NP_Initialize);
-  pthread_mutex_unlock(&plugin_init_lock);
-}
-
 // Kill NSPlugin Viewer process
-static void do_plugin_exit(void)
+static void plugin_exit(void)
 {
   D(bug("plugin_exit\n"));
 
@@ -1962,13 +2687,6 @@ static void do_plugin_exit(void)
   id_kill();
 
   g_plugin.initialized = 0;
-}
-
-static void plugin_exit(void)
-{
-  pthread_mutex_lock(&plugin_init_lock);
-  do_plugin_exit();
-  pthread_mutex_unlock(&plugin_init_lock);
 }
 
 static void __attribute__((destructor)) plugin_exit_sentinel(void)

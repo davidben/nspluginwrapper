@@ -126,7 +126,7 @@
 /*----------------------------------------------------------------------*/
 
 #define NP_VERSION_MAJOR 0
-#define NP_VERSION_MINOR 14
+#define NP_VERSION_MINOR 17
 
 
 /* The OS/2 version of Netscape uses RC_DATA to define the
@@ -256,6 +256,16 @@ typedef struct _NPStream
   uint32 end;
   uint32 lastmodified;
   void*  notifyData;
+  const  char* headers; /* Response headers from host.
+                         * Exists only for >= NPVERS_HAS_RESPONSE_HEADERS.
+                         * Used for HTTP only; NULL for non-HTTP.
+                         * Available from NPP_NewStream onwards.
+                         * Plugin should copy this data before storing it.
+                         * Includes HTTP status line and all headers,
+                         * preferably verbatim as received from server,
+                         * headers formatted as in HTTP ("Header: Value"),
+                         * and newlines (\n, NOT \r\n) separating lines.
+                         * Terminated by \n\0 (NOT \n\n\0). */
 } NPStream;
 
 
@@ -385,13 +395,24 @@ typedef enum {
   NPPVpluginScriptableInstance = (10 | NP_ABI_MASK),
   NPPVpluginScriptableIID = 11,
 
-  /* 12 and over are available on Mozilla builds starting with 0.9.9 */
+  /* Introduced in Mozilla 0.9.9 */
   NPPVjavascriptPushCallerBool = 12,
-  NPPVpluginKeepLibraryInMemory = 13,   /* available in Mozilla 1.0 */
+
+  /* Introduced in Mozilla 1.0 */
+  NPPVpluginKeepLibraryInMemory = 13,
   NPPVpluginNeedsXEmbed         = 14,
 
-  /* Get the NPObject for scripting the plugin. */
-  NPPVpluginScriptableNPObject  = 15
+  /* Get the NPObject for scripting the plugin. Introduced in Firefox
+   * 1.0 (NPAPI minor version 14).
+   */
+  NPPVpluginScriptableNPObject  = 15,
+
+  /* Get the plugin value (as \0-terminated UTF-8 string data) for
+   * form submission if the plugin is part of a form. Use
+   * NPN_MemAlloc() to allocate memory for the string data. Introduced
+   * in Mozilla 1.8b2 (NPAPI minor version 15).
+   */
+  NPPVformValue = 16
 } NPPVariable;
 
 /*
@@ -604,13 +625,17 @@ enum NPEventType {
 /*
  * Version feature information
  */
-#define NPVERS_HAS_STREAMOUTPUT      8
-#define NPVERS_HAS_NOTIFICATION      9
-#define NPVERS_HAS_LIVECONNECT       9
-#define NPVERS_WIN16_HAS_LIVECONNECT 9
-#define NPVERS_68K_HAS_LIVECONNECT   11
-#define NPVERS_HAS_WINDOWLESS        11
-#define NPVERS_HAS_XPCONNECT_SCRIPTING 13
+#define NPVERS_HAS_STREAMOUTPUT           8
+#define NPVERS_HAS_NOTIFICATION           9
+#define NPVERS_HAS_LIVECONNECT            9
+#define NPVERS_WIN16_HAS_LIVECONNECT      9
+#define NPVERS_68K_HAS_LIVECONNECT        11
+#define NPVERS_HAS_WINDOWLESS             11
+#define NPVERS_HAS_XPCONNECT_SCRIPTING    13
+#define NPVERS_HAS_NPRUNTIME_SCRIPTING    14
+#define NPVERS_HAS_FORM_VALUES            15
+#define NPVERS_HAS_POPUPS_ENABLED_STATE   16
+#define NPVERS_HAS_RESPONSE_HEADERS       17
 
 /*----------------------------------------------------------------------*/
 /*                        Function Prototypes                           */
@@ -663,9 +688,6 @@ void    NP_LOADDS NPP_URLNotify(NPP instance, const char* url,
 jref    NP_LOADDS NPP_GetJavaClass(void);
 #endif
 NPError NP_LOADDS NPP_GetValue(NPP instance, NPPVariable variable, void *value);
-/*
- * Uh, shouldn't NPP_SetValue() take an NPPVariable and not an NPNVariable?
- */
 NPError NP_LOADDS NPP_SetValue(NPP instance, NPNVariable variable, void *value);
 
 /*
@@ -704,6 +726,8 @@ NPError NP_LOADDS NPN_SetValue(NPP instance, NPPVariable variable, void *value);
 void    NP_LOADDS NPN_InvalidateRect(NPP instance, NPRect *invalidRect);
 void    NP_LOADDS NPN_InvalidateRegion(NPP instance, NPRegion invalidRegion);
 void    NP_LOADDS NPN_ForceRedraw(NPP instance);
+void    NP_LOADDS NPN_PushPopupsEnabledState(NPP instance, NPBool enabled);
+void    NP_LOADDS NPN_PopPopupsEnabledState(NPP instance);
 
 #ifdef __cplusplus
 }  /* end extern "C" */
