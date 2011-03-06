@@ -1,7 +1,7 @@
 /*
  *  npw-rpc.c - Remote Procedure Calls (NPAPI specialisation)
  *
- *  nspluginwrapper (C) 2005-2006 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -364,6 +364,63 @@ static int do_recv_NPRect(rpc_message_t *message, void *p_value)
  *  Process NPWindow objects
  */
 
+static int do_send_NPWindowData(rpc_message_t *message, void *p_value)
+{
+  NPWindow *window = (NPWindow *)p_value;
+  int error;
+
+  if (window == NULL)
+	return RPC_ERROR_MESSAGE_ARGUMENT_INVALID;
+
+  if ((error = rpc_message_send_uint32(message, (Window)window->window)) < 0)
+	return error;
+  if ((error = rpc_message_send_int32(message, window->x)) < 0)
+	return error;
+  if ((error = rpc_message_send_int32(message, window->y)) < 0)
+	return error;
+  if ((error = rpc_message_send_uint32(message, window->width)) < 0)
+	return error;
+  if ((error = rpc_message_send_uint32(message, window->height)) < 0)
+	return error;
+  if ((error = do_send_NPRect(message, &window->clipRect)) < 0)
+	return error;
+  if ((error = rpc_message_send_int32(message, window->type)) < 0)
+	return error;
+
+  return RPC_ERROR_NO_ERROR;
+}
+
+static int do_recv_NPWindowData(rpc_message_t *message, void *p_value)
+{
+  NPWindow *window = (NPWindow *)p_value;
+  uint32_t window_id;
+  int32_t window_type;
+  int error;
+
+  if (window == NULL)
+	return RPC_ERROR_MESSAGE_ARGUMENT_INVALID;
+
+  if ((error = rpc_message_recv_uint32(message, &window_id)) < 0)
+	return error;
+  if ((error = rpc_message_recv_int32(message, &window->x)) < 0)
+	return error;
+  if ((error = rpc_message_recv_int32(message, &window->y)) < 0)
+	return error;
+  if ((error = rpc_message_recv_uint32(message, &window->width)) < 0)
+	return error;
+  if ((error = rpc_message_recv_uint32(message, &window->height)) < 0)
+	return error;
+  if ((error = do_recv_NPRect(message, &window->clipRect)) < 0)
+	return error;
+  if ((error = rpc_message_recv_int32(message, &window_type)) < 0)
+	return error;
+  window->type = window_type;
+  window->ws_info = NULL; // to be filled in by the plugin
+  window->window = (void *)(Window)window_id;
+
+  return RPC_ERROR_NO_ERROR;
+}
+
 static int do_send_NPWindow(rpc_message_t *message, void *p_value)
 {
   NPWindow *window = (NPWindow *)p_value;
@@ -374,19 +431,9 @@ static int do_send_NPWindow(rpc_message_t *message, void *p_value)
 	  return error;
   }
   else {
-	if ((error = rpc_message_send_uint32(message, (Window)window->window)) < 0)
+	if ((error = rpc_message_send_uint32(message, 1)) < 0)
 	  return error;
-	if ((error = rpc_message_send_int32(message, window->x)) < 0)
-	  return error;
-	if ((error = rpc_message_send_int32(message, window->y)) < 0)
-	  return error;
-	if ((error = rpc_message_send_uint32(message, window->width)) < 0)
-	  return error;
-	if ((error = rpc_message_send_uint32(message, window->height)) < 0)
-	  return error;
-	if ((error = do_send_NPRect(message, &window->clipRect)) < 0)
-	  return error;
-	if ((error = rpc_message_send_int32(message, window->type)) < 0)
+	if ((error = do_send_NPWindowData(message, window)) < 0)
 	  return error;
   }
 
@@ -397,31 +444,22 @@ static int do_recv_NPWindow(rpc_message_t *message, void *p_value)
 {
   NPWindow **window_p = (NPWindow **)p_value;
   NPWindow *window;
-  uint32_t window_id;
-  int32_t window_type;
+  uint32_t window_valid;
   int error;
 
-  if ((error = rpc_message_recv_uint32(message, &window_id)) < 0)
+  if (window_p)
+	*window_p = NULL;
+  if ((error = rpc_message_recv_uint32(message, &window_valid)) < 0)
 	return error;
-  *window_p = NULL;
-  if (window_id) {
-	if ((window = *window_p = malloc(sizeof(NPWindow))) == NULL)
+  if (window_valid) {
+	if ((window = malloc(sizeof(NPWindow))) == NULL)
 	  return RPC_ERROR_NO_MEMORY;
-	if ((error = rpc_message_recv_int32(message, &window->x)) < 0)
+	if ((error = do_recv_NPWindowData(message, window)) < 0) {
+	  free(window);
 	  return error;
-	if ((error = rpc_message_recv_int32(message, &window->y)) < 0)
-	  return error;
-	if ((error = rpc_message_recv_uint32(message, &window->width)) < 0)
-	  return error;
-	if ((error = rpc_message_recv_uint32(message, &window->height)) < 0)
-	  return error;
-	if ((error = do_recv_NPRect(message, &window->clipRect)) < 0)
-	  return error;
-	if ((error = rpc_message_recv_int32(message, &window_type)) < 0)
-	  return error;
-	window->type = window_type;
-	window->ws_info = NULL; // to be filled in by the plugin
-	window->window = (void *)(Window)window_id;
+	}
+	if (window_p)
+	  *window_p = window;
   }
 
   return RPC_ERROR_NO_ERROR;
@@ -472,7 +510,7 @@ static int do_send_NPEmbedPrint(rpc_message_t *message, void *p_value)
   NPEmbedPrint *embedPrint = (NPEmbedPrint *)p_value;
   int error;
 
-  if ((error = do_send_NPWindow(message, &embedPrint->window)) < 0)
+  if ((error = do_send_NPWindowData(message, &embedPrint->window)) < 0)
 	return error;
 
   return RPC_ERROR_NO_ERROR;
@@ -483,7 +521,7 @@ static int do_recv_NPEmbedPrint(rpc_message_t *message, void *p_value)
   NPEmbedPrint *embedPrint = (NPEmbedPrint *)p_value;
   int error;
 
-  if ((error = do_recv_NPWindow(message, &embedPrint->window)) < 0)
+  if ((error = do_recv_NPWindowData(message, &embedPrint->window)) < 0)
 	return error;
 
   embedPrint->platformPrint = NULL; // to be filled in by the plugin

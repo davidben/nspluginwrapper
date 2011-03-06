@@ -2,7 +2,7 @@
 #
 #  getdeps.sh - get dependent libs of a program
 #
-#  nspluginwrapper (C) 2005-2006 Gwenole Beauchesne
+#  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
 #
 
 # FIXME: needs pango config files, extra X11 libraries, etc. Thus it's

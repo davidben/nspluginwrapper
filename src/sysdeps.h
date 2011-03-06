@@ -1,7 +1,7 @@
 /*
  *  sysdeps.h - System dependent definitions
  *
- *  nspluginwrapper (C) 2005-2006 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by

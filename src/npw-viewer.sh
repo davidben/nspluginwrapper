@@ -18,6 +18,9 @@ fi
 
 NPW_VIEWER_DIR=$NPW_LIBDIR/$TARGET_ARCH/$TARGET_OS
 
+# Set a new LD_LIBRARY_PATH that is TARGET specific
+export LD_LIBRARY_PATH=$NPW_VIEWER_DIR
+
 case $ARCH in
 i?86)
     ARCH=i386
@@ -26,13 +29,6 @@ amd64)
     ARCH=x86_64
     ;;
 esac
-
-if test -n "$LD_LIBRARY_PATH"; then
-    LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$NPW_VIEWER_DIR
-else
-    LD_LIBRARY_PATH=$NPW_VIEWER_DIR
-fi
-export LD_LIBRARY_PATH
 
 if test "$ARCH" != "$TARGET_ARCH"; then
     case $TARGET_ARCH in
@@ -75,30 +71,6 @@ if test "$ARCH" != "$TARGET_ARCH"; then
     fi
 fi
 
-# XXX qemu doesn't support NPTL
-case " $LOADER " in
-*qemu*)
-    if test -f "/etc/mandrake-release"; then
-	# glibc --enable-kernel (as of 2.3.4-8mdk)
-	case $ARCH in
-	ppc64)	KERNEL_VERSION=2.4.21;;
-	ia64)	KERNEL_VERSION=2.4.0;;
-	x86_64)	KERNEL_VERSION=2.4.0;;
-	*)	KERNEL_VERSION=2.2.5;;
-	esac
-    else
-	# this generally brings floating-stacks
-	KERNEL_VERSION=2.4.1
-    fi
-    ;;
-*none*)
-    unset LOADER
-    ;;
-esac
-if test -n "$KERNEL_VERSION"; then
-    export LD_ASSUME_KERNEL=$KERNEL_VERSION
-fi
-
 # Expand PATH for RealPlayer package on NetBSD (realplay)
 if test "$OS" = "NetBSD"; then
     REALPLAYER_HOME="/usr/pkg/lib/RealPlayer"
@@ -106,5 +78,30 @@ if test "$OS" = "NetBSD"; then
 	export PATH=$PATH:$REALPLAYER_HOME
     fi
 fi
+
+# Use sound wrappers wherever possible (Flash 9 plugin)
+case " $@ " in
+*" --test "*|*" -t "*)
+    # do nothing
+    ;;
+*)
+    # XXX: detect QEMU target soundwrapper differently
+    case "$LOADER" in
+    *linux32)
+	if test "$OS" = "Linux"; then
+	    soundwrapper=`which soundwrapper`
+	    if test -x "$soundwrapper"; then
+		LOADER="$LOADER $soundwrapper"
+	    elif ps aux | grep artsd | grep -vq grep; then
+		soundwrapper=`which artsdsp`
+		if test -x "$soundwrapper"; then
+		    LOADER="$LOADER $soundwrapper"
+		fi
+	    fi
+	fi
+	;;
+    esac
+    ;;
+esac
 
 exec $LOADER $NPW_VIEWER_DIR/npviewer.bin ${1+"$@"}

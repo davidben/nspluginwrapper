@@ -1,7 +1,7 @@
 /*
  *  npw-viewer.c - Target plugin loader and viewer
  *
- *  nspluginwrapper (C) 2005-2006 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -206,7 +206,7 @@ extern nsresult NS_GetServiceManager(nsIServiceManager **result);
 // Reconstruct window attributes
 static int create_window_attributes(NPWindow *window)
 {
-  if (window == NULL)
+  if (window == NULL || window->window == NULL)
 	return -1;
   if (window->ws_info == NULL) {
 	if ((window->ws_info = malloc(sizeof(NPSetWindowCallbackStruct))) == NULL) {
@@ -231,7 +231,9 @@ static int create_window_attributes(NPWindow *window)
 // Destroy window attributes struct
 static void destroy_window_attributes(NPWindow *window)
 {
-  if (window && window->ws_info) {
+  if (window == NULL)
+	return;
+  if (window->ws_info) {
 	free(window->ws_info);
 	window->ws_info = NULL;
   }
@@ -1806,17 +1808,11 @@ static int handle_NP_Shutdown(rpc_connection_t *connection)
   D(bug("handle_NP_Shutdown\n"));
 
   NPError ret = g_NP_Shutdown();
+
   npobject_bridge_destroy();
-  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
-}
-
-// NP_Exit
-static int handle_NP_Exit(rpc_connection_t *connection)
-{
-  D(bug("handle_NP_Exit\n"));
-
   gtk_main_quit();
-  return RPC_ERROR_NO_ERROR;
+
+  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
 // NPP_New
@@ -2448,21 +2444,23 @@ static int handle_NPP_Print(rpc_connection_t *connection)
 	long file_size = ftell(printer.fp);
 	D(bug(" writeback data [%d bytes]\n", file_size));
 	rewind(printer.fp);
-	NPPrintData printData;
-	const int printDataMaxSize = sizeof(printData.data);
-	int n = file_size / printDataMaxSize;
-	while (--n >= 0) {
-	  printData.size = printDataMaxSize;
-	  if (fread(&printData.data, sizeof(printData.data), 1, printer.fp) != 1) {
-		npw_printf("ERROR: unexpected end-of-file or error condition in NPP_Print\n");
-		break;
+	if (file_size > 0) {
+	  NPPrintData printData;
+	  const int printDataMaxSize = sizeof(printData.data);
+	  int n = file_size / printDataMaxSize;
+	  while (--n >= 0) {
+		printData.size = printDataMaxSize;
+		if (fread(&printData.data, sizeof(printData.data), 1, printer.fp) != 1) {
+		  npw_printf("ERROR: unexpected end-of-file or error condition in NPP_Print\n");
+		  break;
+		}
+		invoke_NPN_PrintData(instance->ndata, platform_print_id, &printData);
 	  }
+	  printData.size = file_size % printDataMaxSize;
+	  if (fread(&printData.data, printData.size, 1, printer.fp) != 1)
+		npw_printf("ERROR: unexpected end-of-file or error condition in NPP_Print\n");
 	  invoke_NPN_PrintData(instance->ndata, platform_print_id, &printData);
 	}
-	printData.size = file_size % printDataMaxSize;
-	if (fread(&printData.data, printData.size, 1, printer.fp) != 1)
-	  npw_printf("ERROR: unexpected end-of-file or error condition in NPP_Print\n");
-	invoke_NPN_PrintData(instance->ndata, platform_print_id, &printData);
 	fclose(printer.fp);
   }
 
@@ -2581,7 +2579,13 @@ static int do_main(int argc, char **argv, const char *connection_path)
   }
   D(bug("  Plugin connection: %s\n", connection_path));
 
-  id_init();
+  // Cleanup environment, the program may fork/exec a native shell
+  // script and having 32-bit libraries in LD_PRELOAD is not right,
+  // though not a fatal error
+#if defined(__linux__)
+  if (getenv("LD_PRELOAD"))
+	unsetenv("LD_PRELOAD");
+#endif
 
   // Xt and GTK initialization
   XtToolkitInitialize();
@@ -2603,7 +2607,6 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	{ RPC_METHOD_NP_GET_VALUE,					handle_NP_GetValue },
 	{ RPC_METHOD_NP_INITIALIZE,					handle_NP_Initialize },
 	{ RPC_METHOD_NP_SHUTDOWN,					handle_NP_Shutdown },
-	{ RPC_METHOD_NP_EXIT,						handle_NP_Exit },
 	{ RPC_METHOD_NPP_NEW,						handle_NPP_New },
 	{ RPC_METHOD_NPP_DESTROY,					handle_NPP_Destroy },
 	{ RPC_METHOD_NPP_GET_VALUE,					handle_NPP_GetValue },
@@ -2628,6 +2631,8 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	npw_printf("ERROR: failed to setup NPP method callbacks\n");
 	return 1;
   }
+
+  id_init();
 
   // Initialize Xt events listener (integrate X events into GTK events loop)
   GSource *xt_source = g_source_new(&xt_event_funcs, sizeof(GSource));

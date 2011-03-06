@@ -7,6 +7,7 @@ void _Unwind_GetCFA() {} ;
 void _Unwind_GetDataRelBase() {} ;
 void _Unwind_GetGR() {} ;
 void _Unwind_GetIP() {} ;
+void _Unwind_GetIPInfo() {} ;
 void _Unwind_GetLanguageSpecificData() {} ;
 void _Unwind_GetRegionStart() {} ;
 void _Unwind_GetTextRelBase() {} ;

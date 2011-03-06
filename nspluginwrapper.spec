@@ -1,7 +1,7 @@
 %define name	nspluginwrapper
-%define version	0.9.91.2
+%define version	0.9.91.3
 %define release	1
-#define svndate 20061229
+#define svndate 20070304
 
 # define 32-bit arch of multiarch platforms
 %define arch_32 %{nil}
@@ -143,6 +143,12 @@ fi
 %endif
 
 %changelog
+* Sun Mar  4 2007 Gwenole Beauchesne <gb.public@free.fr> 0.9.91.3-1
+- fix printing with EMBED plugins
+- fix build on Debian systems (Rob Andrews)
+- use sound wrappers whenever possible on Linux (Flash Player 9)
+- don't wait for dying processes (i.e. avoid hangs on NP_Shutdown)
+
 * Fri Dec 29 2006 Gwenole Beauchesne <gb.public@free.fr> 0.9.91.2-1
 - fix some rare RPC synchronisation issues (flashearth.com)
 - fix hangs when the plugin exits unexpectedly (e.g. a crash)

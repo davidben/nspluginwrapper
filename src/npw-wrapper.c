@@ -1,7 +1,7 @@
 /*
  *  npw-wrapper.c - Host Mozilla plugin (loads the actual viewer)
  *
- *  nspluginwrapper (C) 2005-2006 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -1501,7 +1501,7 @@ static void g_NPP_Print(NPP instance, NPPrint *PrintInfo)
 	return;
 
   D(bug("NPP_Print instance=%p\n", instance));
-  invoke_NPP_Print(instance->pdata, PrintInfo);
+  invoke_NPP_Print(instance, PrintInfo);
   D(bug(" done\n"));
 }
 
@@ -1931,16 +1931,30 @@ static void do_plugin_exit(void)
   }
 
   if (g_rpc_connection) {
-	int error = rpc_method_invoke(g_rpc_connection, RPC_METHOD_NP_EXIT, RPC_TYPE_INVALID);
-	if (error != RPC_ERROR_NO_ERROR)
-	  npw_perror("NP_Exit() invoke", error);
 	rpc_exit(g_rpc_connection);
 	g_rpc_connection = NULL;
   }
 
   if (g_plugin.viewer_pid != -1) {
-	int status;
-	waitpid(g_plugin.viewer_pid, &status, 0);
+	// let it shutdown gracefully, then kill it gently to no mercy
+	const int WAITPID_DELAY_TO_SIGTERM = 3;
+	const int WAITPID_DELAY_TO_SIGKILL = 3;
+	int counter = 0;
+	while (waitpid(g_plugin.viewer_pid, NULL, WNOHANG) == 0) {
+	  if (++counter > WAITPID_DELAY_TO_SIGTERM) {
+		kill(g_plugin.viewer_pid, SIGTERM);
+		counter = 0;
+		while (waitpid(g_plugin.viewer_pid, NULL, WNOHANG) == 0) {
+		  if (++counter > WAITPID_DELAY_TO_SIGKILL) {
+			kill(g_plugin.viewer_pid, SIGKILL);
+			break;
+		  }
+		  sleep(1);
+		}
+		break;
+	  }
+	  sleep(1);
+	}
 	g_plugin.viewer_pid = -1;
   }
 

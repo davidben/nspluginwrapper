@@ -1,7 +1,7 @@
 /*
  *  npw-rpc.h - Remote Procedure Calls (NPAPI specialisation)
  *
- *  nspluginwrapper (C) 2005-2006 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -27,7 +27,6 @@ enum {
   RPC_METHOD_NP_GET_MIME_DESCRIPTION,
   RPC_METHOD_NP_INITIALIZE,
   RPC_METHOD_NP_SHUTDOWN,
-  RPC_METHOD_NP_EXIT,
 
   RPC_METHOD_NPN_USER_AGENT,
   RPC_METHOD_NPN_GET_VALUE,

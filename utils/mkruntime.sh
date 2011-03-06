@@ -2,7 +2,7 @@
 #
 #  mkruntime.sh - prepare QEMU runtime from Mandriva Linux 2006.0
 #
-#  nspluginwrapper (C) 2005-2006 Gwenole Beauchesne
+#  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
 #
 
 # Usage: mkruntime <MDV2006-RPMS>

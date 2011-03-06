@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-#  nspluginwrapper Makefile (C) 2005-2006 Gwenole Beauchesne
+#  nspluginwrapper Makefile (C) 2005-2007 Gwenole Beauchesne
 #
 -include config.mak
 

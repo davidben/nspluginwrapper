@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-#  nspluginwrapper configure script (C) 2005-2006 Gwenole Beauchesne
+#  nspluginwrapper configure script (C) 2005-2007 Gwenole Beauchesne
 #  derived from qemu configure script, (C) 2003 Fabrice Bellard
 #
 PACKAGE=nspluginwrapper
