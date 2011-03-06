@@ -1,7 +1,7 @@
 %define name	nspluginwrapper
-%define version	1.1.4
+%define version	1.1.10
 %define release	1
-#define svndate 20081106
+#define svndate	DATE
 
 # define 32-bit arch of multiarch platforms
 %define arch_32 %{nil}
@@ -192,6 +192,33 @@ fi
 %endif
 
 %changelog
+* Mon Dec 08 2008 Gwenole Beauchesne <gb.public@free.fr> 1.1.10-1
+- fix NPPVpluginScriptableNPObject::Invalidate()
+- fix condition for delayed NPN_ReleaseObject() call
+- fix XEMBED (rework for lost events/focus regressions)
+- fix RPC for calls initiated by the plugin (SYNC mode)
+- fix invalid RPC after the plugin was NPP_Destroy()'ed
+
+* Mon Dec 01 2008 Gwenole Beauchesne <gb.public@free.fr> 1.1.8-1
+- delay NPN_ReleaseObject() if there is incoming RPC
+- improve plugins restart machinery (Martin Stransky)
+- close npviewer.bin sockets on exec()
+- close all open files on fork() (initial patch by Dan Walsh)
+- make `which` failures silent for soundwrappers (Stanislav Brabec)
+- allow direct execution of native plugins if NPW_DIRECT_EXEC is set
+
+* Thu Nov 23 2008 Gwenole Beauchesne <gb.public@free.fr> 1.1.6-1
+- enable glib memory hooks by default
+- lower priority of RPC events so that timeouts are triggered first
+- fix string_of_NPVariant() that could make some plugins crash
+- fix args release in NPClass::Invoke(|Default)()
+- fix memory leak in NPN_GetStringIdentifiers()
+- fix NPN_ReleaseObject() that could dereference a deallocated NPObject
+- fix (sync) NPObject referenceCount when the object is passed to the plugin
+- fix plugin window resize in XEMBED hack mode
+- fix "javascript:" streams requests in standalone player
+- fix NPP_Write() and propage negative lengths too (DiamondX plugin)
+
 * Thu Nov  6 2008 Gwenole Beauchesne <gb.public@free.fr> 1.1.4-1
 - fix memory leaks in NPRuntime bridge
 - fix XEMBED support (workaround Gtk2 and Firefox bugs)

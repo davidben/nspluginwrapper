@@ -11,6 +11,8 @@ License
 nspluginwrapper is available under the terms of the GNU General Public License.
 See the file "COPYING" that is included in the distribution for details.
 
+nspluginwrapper is a trademark of Gwenole Beauchesne.
+
 
 Overview
 --------
@@ -21,7 +23,7 @@ like Adobe Flash Player on other platforms like Linux/x86_64, *BSD and
 even Linux/ppc.
 
 nspluginwrapper also provides a standalone plugins player. This
-programs makes it possible to execute plugins without an actual
+program makes it possible to execute plugins without an actual
 browser.
 
 
@@ -39,10 +41,11 @@ $ make
 Or, if you prefer from a source package:
 $ rpm --rebuild nspluginwrapper.src.rpm
 
-NOTE: if you are building the Linux viewer to use on a non-Linux
+NOTE: if you are building the Linux viewer for use on a non-Linux
 system (e.g. NetBSD, FreeBSD), you will have to configure the Linux
-build with the --enable-generic option. That way, named sockets will be
-used and work under the Linux emulation on those operating systems.
+build with the --enable-generic option. That way, named sockets will
+be used and work under the Linux emulation layer on those operating
+systems.
 
 
 Requirements and Installation

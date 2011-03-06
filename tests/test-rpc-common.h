@@ -26,16 +26,36 @@
 
 enum
   {
-	/* void rpc_test_exit (int status); */
-	RPC_TEST_METHOD_EXIT = 0,
+    /* void rpc_test_exit (int status); */
+    RPC_TEST_METHOD_EXIT = 0,
   };
 
 enum
   {
-	RPC_TEST_EXECUTE_SUCCESS   = 0,
-	RPC_TEST_EXECUTE_FAILURE   = 1,
-	RPC_TEST_EXECUTE_DONT_QUIT = 0x8000,
+    RPC_TEST_EXECUTE_SUCCESS   = 0,
+    RPC_TEST_EXECUTE_FAILURE   = 1,
+    RPC_TEST_EXECUTE_DONT_QUIT = 0x8000,
   };
+
+#define RPC_TEST_ENSURE(expr) do {				\
+  if (!(expr)) {						\
+    npw_printf ("ERROR:(%s:%d):%s: assertion failed: (%s)\n",	\
+		__FILE__, __LINE__, __func__, #expr);		\
+    abort ();							\
+  }								\
+} while (0)
+
+#define RPC_TEST_ENSURE_ERROR(error, error_code) do {	\
+  if ((error) != (error_code)) {			\
+    npw_printf ("ERROR:(%s:%d):%s: %s\n",		\
+		__FILE__, __LINE__, __func__,		\
+		rpc_strerror (error));			\
+    abort ();						\
+  }							\
+} while (0)
+
+#define RPC_TEST_ENSURE_NO_ERROR(error)			\
+  RPC_TEST_ENSURE_ERROR(error, RPC_ERROR_NO_ERROR)
 
 typedef struct _RPCTestFuncs RPCTestFuncs;
 struct _RPCTestFuncs

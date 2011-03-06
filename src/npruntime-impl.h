@@ -25,6 +25,8 @@
 typedef struct {
   NPObject *npobj;
   uint32_t npobj_id;
+  bool is_valid;
+  void *plugin;
 } NPObjectInfo;
 
 extern NPObjectInfo *npobject_info_new(NPObject *npobj) attribute_hidden;
@@ -41,15 +43,6 @@ extern void npobject_bridge_destroy(void) attribute_hidden;
 
 extern NPClass npclass_bridge;
 
-extern void npclass_invoke_Invalidate(NPObject *npobj) attribute_hidden;
-extern bool npclass_invoke_HasMethod(NPObject *npobj, NPIdentifier name) attribute_hidden;
-extern bool npclass_invoke_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *args, uint32_t argCount, NPVariant *result) attribute_hidden;
-extern bool npclass_invoke_InvokeDefault(NPObject *npobj, const NPVariant *args, uint32_t argCount, NPVariant *result) attribute_hidden;
-extern bool npclass_invoke_HasProperty(NPObject *npobj, NPIdentifier name) attribute_hidden;
-extern bool npclass_invoke_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *result) attribute_hidden;
-extern bool npclass_invoke_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *value) attribute_hidden;
-extern bool npclass_invoke_RemoveProperty(NPObject *npobj, NPIdentifier name) attribute_hidden;
-
 extern int npclass_handle_Invalidate(rpc_connection_t *connection) attribute_hidden;
 extern int npclass_handle_HasMethod(rpc_connection_t *connection) attribute_hidden;
 extern int npclass_handle_Invoke(rpc_connection_t *connection) attribute_hidden;
@@ -64,5 +57,8 @@ struct _NPVariant;
 extern void npvariant_clear(struct _NPVariant *variant) attribute_hidden;
 extern char *string_of_NPVariant(const struct _NPVariant *arg) attribute_hidden;
 extern void print_npvariant_args(const struct _NPVariant *args, uint32_t nargs) attribute_hidden;
+
+// Deactivate all NPObject instances
+extern void npruntime_deactivate(void);
 
 #endif /* NPRUNTIME_IMPL_H */

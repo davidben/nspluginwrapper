@@ -41,6 +41,7 @@ enum {
   RPC_ERROR_MESSAGE_ARGUMENT_MISMATCH	= -1010,
   RPC_ERROR_MESSAGE_ARGUMENT_UNKNOWN	= -1011,
   RPC_ERROR_MESSAGE_ARGUMENT_INVALID	= -1012,
+  RPC_ERROR_MESSAGE_SYNC_NOT_ALLOWED	= -1013,
 };
 extern const char *rpc_strerror(int error) attribute_hidden;
 
@@ -113,6 +114,7 @@ extern int rpc_connection_add_method_descriptor(rpc_connection_t *connection, co
 extern int rpc_connection_add_method_descriptors(rpc_connection_t *connection, const rpc_method_descriptor_t *descs, int n_descs) attribute_hidden;
 
 // Remote Procedure Call (method invocation)
+extern bool rpc_method_invoke_possible(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_method_invoke(rpc_connection_t *connection, int method, ...) attribute_hidden;
 extern int rpc_method_wait_for_reply(rpc_connection_t *connection, ...) attribute_hidden;
 extern int rpc_method_get_args(rpc_connection_t *connection, ...) attribute_hidden;
@@ -121,5 +123,11 @@ extern int rpc_method_send_reply(rpc_connection_t *connection, ...) attribute_hi
 #ifdef __cplusplus
 }
 #endif
+
+// This callback is called when the connection is closed or broken
+typedef void (*rpc_error_callback_t)(rpc_connection_t *connection, void *user_data);
+
+// Set error callback for a connection
+void rpc_connection_set_error_callback(rpc_connection_t *connection, rpc_error_callback_t callback, void *callback_data);
 
 #endif /* RPC_H */

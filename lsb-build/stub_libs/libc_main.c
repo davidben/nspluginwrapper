@@ -130,6 +130,7 @@ void dcgettext() {} ;
 void dcngettext() {} ;
 void dgettext() {} ;
 void difftime() {} ;
+void dirfd() {} ;
 void dirname() {} ;
 void div() {} ;
 void dngettext() {} ;

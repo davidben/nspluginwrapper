@@ -29,6 +29,9 @@ extern "C" {
 
 extern void npw_dprintf(const char *format, ...) attribute_hidden;
 
+extern void npw_indent(int inc) attribute_hidden;
+extern void npw_idprintf(int inc, const char *format, ...) attribute_hidden;
+
 extern void npw_printf(const char *format, ...) attribute_hidden;
 extern void npw_vprintf(const char *format, va_list args) attribute_hidden;
 
@@ -37,12 +40,41 @@ extern void npw_vprintf(const char *format, va_list args) attribute_hidden;
 # if 0 && (defined(__GNUC__) && (__GNUC__ >= 3 || (__GNUC__ == 2 && __GNUC_MINOR__ == 96)))
 #  define bug(format, ...) \
      npw_dprintf("[%-20s:%4d] " format, __FILE__, __LINE__, ##__VA_ARGS__)
+#  define bugiI(format, ...) \
+     npw_idprintf(+1, "[%-20s:%4d] " format, __FILE__, __LINE__, ##__VA_ARGS__)
+#  define bugiD(format, ...) \
+     npw_idprintf(-1, "[%-20s:%4d] " format, __FILE__, __LINE__, ##__VA_ARGS__)
 # else
 #  define bug npw_dprintf
+#  define bugiI(...) npw_idprintf(+1, __VA_ARGS__)
+#  define bugiD(...) npw_idprintf(-1, __VA_ARGS__)
 # endif
 # define D(x) x
 #else
 # define D(x) ;
+#endif
+
+/* XXX: add an ENABLE_CHECKS config option? */
+#if DEBUG
+# define npw_return_if_fail_warning(expr_str) do {				\
+  npw_printf("WARNING:(%s:%d):%s: assertion failed: (%s)\n",	\
+			 __FILE__, __LINE__, __func__, expr_str);			\
+} while (0)
+# define npw_return_if_fail(expr)			do {	\
+  if (!(expr)) {									\
+	npw_return_if_fail_warning(#expr);				\
+	return;											\
+  }													\
+} while (0)
+# define npw_return_val_if_fail(expr, val)	do {	\
+  if (!(expr)) {									\
+	npw_return_if_fail_warning(#expr);				\
+	return (val);									\
+  }													\
+} while (0)
+#else
+# define npw_return_if_fail(expr, val)		do {} while (0)
+# define npw_return_val_if_fail(expr, val)	do {} while (0)
 #endif
 
 #ifdef __cplusplus

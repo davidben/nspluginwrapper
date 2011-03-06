@@ -110,11 +110,11 @@ case " $@ " in
     case "$LOADER" in
     *linux32)
 	if test "$OS" = "Linux"; then
-	    soundwrapper=`which soundwrapper`
+	    soundwrapper=`which soundwrapper 2>/dev/null`
 	    if test -x "$soundwrapper"; then
 		LOADER="$LOADER $soundwrapper"
 	    elif ps aux | grep artsd | grep -vq grep; then
-		soundwrapper=`which artsdsp`
+		soundwrapper=`which artsdsp 2>/dev/null`
 		if test -x "$soundwrapper"; then
 		    LOADER="$LOADER $soundwrapper"
 		fi

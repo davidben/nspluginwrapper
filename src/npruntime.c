@@ -24,6 +24,7 @@
 #include <glib.h> /* <glib/ghash.h> */
 #include "utils.h"
 #include "npw-common.h"
+#include "npw-malloc.h"
 
 #define DEBUG 1
 #include "debug.h"
@@ -32,28 +33,58 @@
 // Defined in npw-{wrapper,viewer}.c
 extern rpc_connection_t *g_rpc_connection attribute_hidden;
 
+// Defined in npw-viewer.c
+#if USE_PID_CHECK && NPW_IS_PLUGIN
+extern bool pid_check(void);
+#else
+#define pid_check() true
+#endif
+
 
 /* ====================================================================== */
 /* === NPClass Bridge                                                 === */
 /* ====================================================================== */
 
+static void g_NPClass_Invalidate(NPObject *npobj);
+static bool g_NPClass_HasMethod(NPObject *npobj, NPIdentifier name);
+static bool g_NPClass_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *args, uint32_t argCount, NPVariant *result);
+static bool g_NPClass_InvokeDefault(NPObject *npobj, const NPVariant *args, uint32_t argCount, NPVariant *result);
+static bool g_NPClass_HasProperty(NPObject *npobj, NPIdentifier name);
+static bool g_NPClass_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *result);
+static bool g_NPClass_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *value);
+static bool g_NPClass_RemoveProperty(NPObject *npobj, NPIdentifier name);
+
 NPClass npclass_bridge = {
   NPW_NP_CLASS_STRUCT_VERSION,
   NULL,
   NULL,
-  npclass_invoke_Invalidate,
-  npclass_invoke_HasMethod,
-  npclass_invoke_Invoke,
-  npclass_invoke_InvokeDefault,
-  npclass_invoke_HasProperty,
-  npclass_invoke_GetProperty,
-  npclass_invoke_SetProperty,
-  npclass_invoke_RemoveProperty
+  g_NPClass_Invalidate,
+  g_NPClass_HasMethod,
+  g_NPClass_Invoke,
+  g_NPClass_InvokeDefault,
+  g_NPClass_HasProperty,
+  g_NPClass_GetProperty,
+  g_NPClass_SetProperty,
+  g_NPClass_RemoveProperty
 };
+
+static inline bool is_valid_npobject_class(NPObject *npobj)
+{
+  if (npobj == NULL || npobj->_class == NULL)
+	return false;
+  NPObjectInfo *npobj_info = npobject_info_lookup(npobj);
+  if (npobj_info == NULL)
+	return false;
+  if (!npobj_info->is_valid)
+	npw_printf("ERROR: NPObject %p is no longer valid!\n", npobj);
+  return npobj_info->is_valid;
+}
 
 // NPClass::Invalidate
 int npclass_handle_Invalidate(rpc_connection_t *connection)
 {
+  D(bug("npclass_handle_Invalidate\n"));
+
   NPObject *npobj;
   int error = rpc_method_get_args(connection,
 								  RPC_TYPE_NP_OBJECT, &npobj,
@@ -64,17 +95,19 @@ int npclass_handle_Invalidate(rpc_connection_t *connection)
 	return error;
   }
 
-  if (npobj && npobj->_class && npobj->_class->invalidate) {
-	D(bug("NPClass::Invalidate(npobj %p)\n", npobj));
+  if (npobj && is_valid_npobject_class(npobj) && npobj->_class->invalidate) {
+	D(bugiI("NPClass::Invalidate(npobj %p)\n", npobj));
 	npobj->_class->invalidate(npobj);
-	D(bug(" done\n"));
+	D(bugiD("NPClass::Invalidate done\n"));
   }
 
   return rpc_method_send_reply(connection, RPC_TYPE_INVALID);
 }
 
-void npclass_invoke_Invalidate(NPObject *npobj)
+static void npclass_invoke_Invalidate(NPObject *npobj)
 {
+  npw_return_if_fail(rpc_method_invoke_possible(g_rpc_connection));
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_INVALIDATE,
 								RPC_TYPE_NP_OBJECT, npobj,
@@ -93,9 +126,26 @@ void npclass_invoke_Invalidate(NPObject *npobj)
   }
 }
 
+void g_NPClass_Invalidate(NPObject *npobj)
+{
+  if (!is_valid_npobject_class(npobj))
+	return;
+
+  if (!pid_check()) {
+	npw_printf("WARNING: NPClass::Invalidate called from the wrong process\n");
+	return;
+  }
+
+  D(bugiI("NPClass::Invalidate(npobj %p)\n", npobj));
+  npclass_invoke_Invalidate(npobj);
+  D(bugiD("NPClass::Invalidate done\n"));
+}
+
 // NPClass::HasMethod
 int npclass_handle_HasMethod(rpc_connection_t *connection)
 {
+  D(bug("npclass_handle_HasMethod\n"));
+
   NPObject *npobj;
   NPIdentifier name;
   int error = rpc_method_get_args(connection,
@@ -109,10 +159,10 @@ int npclass_handle_HasMethod(rpc_connection_t *connection)
   }
 
   uint32_t ret = false;
-  if (npobj && npobj->_class && npobj->_class->hasMethod) {
-	D(bug("NPClass::HasMethod(npobj %p, name id %p)\n", npobj, name));
+  if (npobj && is_valid_npobject_class(npobj) && npobj->_class->hasMethod) {
+	D(bugiI("NPClass::HasMethod(npobj %p, name id %p)\n", npobj, name));
 	ret = npobj->_class->hasMethod(npobj, name);
-	D(bug(" return: %d\n", ret));
+	D(bugiD("NPClass::HasMethod return: %d\n", ret));
   }
 
   return rpc_method_send_reply(connection,
@@ -120,8 +170,10 @@ int npclass_handle_HasMethod(rpc_connection_t *connection)
 							   RPC_TYPE_INVALID);
 }
 
-bool npclass_invoke_HasMethod(NPObject *npobj, NPIdentifier name)
+static bool npclass_invoke_HasMethod(NPObject *npobj, NPIdentifier name)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_HAS_METHOD,
 								RPC_TYPE_NP_OBJECT, npobj,
@@ -144,9 +196,27 @@ bool npclass_invoke_HasMethod(NPObject *npobj, NPIdentifier name)
   return ret;
 }
 
+bool g_NPClass_HasMethod(NPObject *npobj, NPIdentifier name)
+{
+  if (!is_valid_npobject_class(npobj))
+	return false;
+
+  if (!pid_check()) {
+	npw_printf("WARNING: NPClass::HasMethod called from the wrong process\n");
+	return false;
+  }
+
+  D(bugiI("NPClass::HasMethod(npobj %p, name id %p)\n", npobj, name));
+  bool ret = npclass_invoke_HasMethod(npobj, name);
+  D(bugiD("NPClass::HasMethod return: %d\n", ret));
+  return ret;
+}
+
 // NPClass::Invoke
 int npclass_handle_Invoke(rpc_connection_t *connection)
 {
+  D(bug("npclass_handle_Invoke\n"));
+
   NPObject *npobj;
   NPIdentifier name;
   uint32_t argCount;
@@ -165,12 +235,12 @@ int npclass_handle_Invoke(rpc_connection_t *connection)
   uint32_t ret = false;
   NPVariant result;
   VOID_TO_NPVARIANT(result);
-  if (npobj && npobj->_class && npobj->_class->invoke) {
-	D(bug("NPClass::Invoke(npobj %p, name id %p)\n", npobj, name));
+  if (npobj && is_valid_npobject_class(npobj) && npobj->_class->invoke) {
+	D(bugiI("NPClass::Invoke(npobj %p, name id %p)\n", npobj, name));
 	print_npvariant_args(args, argCount);
 	ret = npobj->_class->invoke(npobj, name, args, argCount, &result);
 	gchar *result_str = string_of_NPVariant(&result);
-	D(bug(" return: %d (%s)\n", ret, result_str));
+	D(bugiD("NPClass::Invoke return: %d (%s)\n", ret, result_str));
 	g_free(result_str);
   }
 
@@ -189,12 +259,10 @@ int npclass_handle_Invoke(rpc_connection_t *connection)
   return rpc_ret;
 }
 
-bool npclass_invoke_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *args, uint32_t argCount,
-						   NPVariant *result)
+static bool npclass_invoke_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *args, uint32_t argCount,
+								  NPVariant *result)
 {
-  if (result == NULL)
-	return false;
-  VOID_TO_NPVARIANT(*result);
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
 
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_INVOKE,
@@ -222,9 +290,35 @@ bool npclass_invoke_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *
   return ret;
 }
 
+bool g_NPClass_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *args, uint32_t argCount,
+					  NPVariant *result)
+{
+  if (result == NULL)
+	return false;
+  VOID_TO_NPVARIANT(*result);
+
+  if (!is_valid_npobject_class(npobj))
+	return false;
+
+  if (!pid_check()) {
+	npw_printf("WARNING: NPClass::Invoke called from the wrong process\n");
+	return false;
+  }
+
+  D(bugiI("NPClass::Invoke(npobj %p, name id %p)\n", npobj, name));
+  print_npvariant_args(args, argCount);
+  bool ret = npclass_invoke_Invoke(npobj, name, args, argCount, result);
+  gchar *result_str = string_of_NPVariant(result);
+  D(bugiD("NPClass::Invoke return: %d (%s)\n", ret, result_str));
+  g_free(result_str);
+  return ret;
+}
+
 // NPClass::InvokeDefault
 int npclass_handle_InvokeDefault(rpc_connection_t *connection)
 {
+  D(bug("npclass_handle_InvokeDefault\n"));
+
   NPObject *npobj;
   uint32_t argCount;
   NPVariant *args;
@@ -241,12 +335,12 @@ int npclass_handle_InvokeDefault(rpc_connection_t *connection)
   uint32_t ret = false;
   NPVariant result;
   VOID_TO_NPVARIANT(result);
-  if (npobj && npobj->_class && npobj->_class->invokeDefault) {
-	D(bug("NPClass::InvokeDefault(npobj %p)\n", npobj));
+  if (npobj && is_valid_npobject_class(npobj) && npobj->_class->invokeDefault) {
+	D(bugiI("NPClass::InvokeDefault(npobj %p)\n", npobj));
 	print_npvariant_args(args, argCount);
 	ret = npobj->_class->invokeDefault(npobj, args, argCount, &result);
 	gchar *result_str = string_of_NPVariant(&result);
-	D(bug(" return: %d (%s)\n", ret, result_str));
+	D(bugiD("NPClass::InvokeDefault return: %d (%s)\n", ret, result_str));
 	g_free(result_str);
   }
 
@@ -265,12 +359,10 @@ int npclass_handle_InvokeDefault(rpc_connection_t *connection)
   return rpc_ret;
 }
 
-bool npclass_invoke_InvokeDefault(NPObject *npobj, const NPVariant *args, uint32_t argCount,
-						   NPVariant *result)
+static bool npclass_invoke_InvokeDefault(NPObject *npobj, const NPVariant *args, uint32_t argCount,
+										 NPVariant *result)
 {
-  if (result == NULL)
-	return false;
-  VOID_TO_NPVARIANT(*result);
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
 
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_INVOKE_DEFAULT,
@@ -297,9 +389,35 @@ bool npclass_invoke_InvokeDefault(NPObject *npobj, const NPVariant *args, uint32
   return ret;
 }
 
+bool g_NPClass_InvokeDefault(NPObject *npobj, const NPVariant *args, uint32_t argCount,
+							 NPVariant *result)
+{
+  if (result == NULL)
+	return false;
+  VOID_TO_NPVARIANT(*result);
+
+  if (!is_valid_npobject_class(npobj))
+	return false;
+
+  if (!pid_check()) {
+	npw_printf("WARNING: NPClass::InvokeDefault called from the wrong process\n");
+	return false;
+  }
+
+  D(bugiI("NPClass::InvokeDefault(npobj %p)\n", npobj));
+  print_npvariant_args(args, argCount);
+  bool ret = npclass_invoke_InvokeDefault(npobj, args, argCount, result);
+  gchar *result_str = string_of_NPVariant(result);
+  D(bugiD("NPClass::InvokeDefault return: %d (%s)\n", ret, result_str));
+  g_free(result_str);
+  return ret;
+}
+
 // NPClass::HasProperty
 int npclass_handle_HasProperty(rpc_connection_t *connection)
 {
+  D(bug("npclass_handle_HasProperty\n"));
+
   NPObject *npobj;
   NPIdentifier name;
   int error = rpc_method_get_args(connection,
@@ -313,10 +431,10 @@ int npclass_handle_HasProperty(rpc_connection_t *connection)
   }
 
   uint32_t ret = false;
-  if (npobj && npobj->_class && npobj->_class->hasProperty) {
-	D(bug("NPClass::HasProperty(npobj %p, name id %p)\n", npobj, name));
+  if (npobj && is_valid_npobject_class(npobj) && npobj->_class->hasProperty) {
+	D(bugiI("NPClass::HasProperty(npobj %p, name id %p)\n", npobj, name));
 	ret = npobj->_class->hasProperty(npobj, name);
-	D(bug(" return: %d\n", ret));
+	D(bugiD("NPClass::HasProperty return: %d\n", ret));
   }
 
   return rpc_method_send_reply(connection,
@@ -324,8 +442,10 @@ int npclass_handle_HasProperty(rpc_connection_t *connection)
 							   RPC_TYPE_INVALID);
 }
 
-bool npclass_invoke_HasProperty(NPObject *npobj, NPIdentifier name)
+static bool npclass_invoke_HasProperty(NPObject *npobj, NPIdentifier name)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_HAS_PROPERTY,
 								RPC_TYPE_NP_OBJECT, npobj,
@@ -348,9 +468,27 @@ bool npclass_invoke_HasProperty(NPObject *npobj, NPIdentifier name)
   return ret;
 }
 
+bool g_NPClass_HasProperty(NPObject *npobj, NPIdentifier name)
+{
+  if (!is_valid_npobject_class(npobj))
+	return false;
+
+  if (!pid_check()) {
+	npw_printf("WARNING: NPClass::HasProperty called from the wrong process\n");
+	return false;
+  }
+
+  D(bugiI("NPClass::HasProperty(npobj %p, name id %p)\n", npobj, name));
+  bool ret = npclass_invoke_HasProperty(npobj, name);
+  D(bugiD("NPClass::HasProperty return: %d\n", ret));
+  return ret;
+}
+  
 // NPClass::GetProperty
 int npclass_handle_GetProperty(rpc_connection_t *connection)
 {
+  D(bug("npclass_handle_GetProperty\n"));
+
   NPObject *npobj;
   NPIdentifier name;
   int error = rpc_method_get_args(connection,
@@ -366,11 +504,11 @@ int npclass_handle_GetProperty(rpc_connection_t *connection)
   uint32_t ret = false;
   NPVariant result;
   VOID_TO_NPVARIANT(result);
-  if (npobj && npobj->_class && npobj->_class->getProperty) {
-	D(bug("NPClass::GetProperty(npobj %p, name id %p)\n", npobj, name));
+  if (npobj && is_valid_npobject_class(npobj) && npobj->_class->getProperty) {
+	D(bugiI("NPClass::GetProperty(npobj %p, name id %p)\n", npobj, name));
 	ret = npobj->_class->getProperty(npobj, name, &result);
 	gchar *result_str = string_of_NPVariant(&result);
-	D(bug(" return: %d (%s)\n", ret, result_str));
+	D(bugiD("NPClass::GetProperty return: %d (%s)\n", ret, result_str));
 	g_free(result_str);
   }
 
@@ -383,11 +521,9 @@ int npclass_handle_GetProperty(rpc_connection_t *connection)
   return rpc_ret;
 }
 
-bool npclass_invoke_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *result)
+static bool npclass_invoke_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *result)
 {
-  if (result == NULL)
-	return false;
-  VOID_TO_NPVARIANT(*result);
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
 
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_GET_PROPERTY,
@@ -414,9 +550,33 @@ bool npclass_invoke_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *r
   return ret;
 }
 
+bool g_NPClass_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *result)
+{
+  if (result == NULL)
+	return false;
+  VOID_TO_NPVARIANT(*result);
+
+  if (!is_valid_npobject_class(npobj))
+	return false;
+
+  if (!pid_check()) {
+	npw_printf("WARNING: NPClass::GetProperty called from the wrong process\n");
+	return false;
+  }
+
+  D(bugiI("NPClass::GetProperty(npobj %p, name id %p)\n", npobj, name));
+  bool ret = npclass_invoke_GetProperty(npobj, name, result);
+  gchar *result_str = string_of_NPVariant(result);
+  D(bugiD("NPClass::GetProperty return: %d (%s)\n", ret, result_str));
+  g_free(result_str);
+  return ret;
+}
+  
 // NPClass::SetProperty
 int npclass_handle_SetProperty(rpc_connection_t *connection)
 {
+  D(bug("npclass_handle_SetProperty\n"));
+
   NPObject *npobj;
   NPIdentifier name;
   NPVariant value;
@@ -432,10 +592,10 @@ int npclass_handle_SetProperty(rpc_connection_t *connection)
   }
 
   uint32_t ret = false;
-  if (npobj && npobj->_class && npobj->_class->setProperty) {
-	D(bug("NPClass::SetProperty(npobj %p, name id %p)\n", npobj, name));
+  if (npobj && is_valid_npobject_class(npobj) && npobj->_class->setProperty) {
+	D(bugiI("NPClass::SetProperty(npobj %p, name id %p)\n", npobj, name));
 	ret = npobj->_class->setProperty(npobj, name, &value);
-	D(bug(" return: %d\n", ret));
+	D(bugiD("NPClass::SetProperty return: %d\n", ret));
   }
 
   int rpc_ret = rpc_method_send_reply(connection,
@@ -446,10 +606,9 @@ int npclass_handle_SetProperty(rpc_connection_t *connection)
   return rpc_ret;
 }
 
-bool npclass_invoke_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *value)
+static bool npclass_invoke_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *value)
 {
-  if (value == NULL)
-	return false;
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
 
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_SET_PROPERTY,
@@ -476,9 +635,32 @@ bool npclass_invoke_SetProperty(NPObject *npobj, NPIdentifier name, const NPVari
   return ret;
 }
 
+bool g_NPClass_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *value)
+{
+  if (value == NULL) {
+	npw_printf("WARNING: NPClass::SetProperty() called with a NULL value\n");
+	return false;
+  }
+
+  if (!is_valid_npobject_class(npobj))
+	return false;
+
+  if (!pid_check()) {
+	npw_printf("WARNING: NPClass::SetProperty called from the wrong process\n");
+	return false;
+  }
+
+  D(bugiI("NPClass::SetProperty(npobj %p, name id %p)\n", npobj, name));
+  bool ret = npclass_invoke_SetProperty(npobj, name, value);
+  D(bugiD("NPClass::SetProperty return: %d\n", ret));
+  return ret;
+}
+
 // NPClass::RemoveProperty
 int npclass_handle_RemoveProperty(rpc_connection_t *connection)
 {
+  D(bug("npclass_handle_RemoveProperty\n"));
+
   NPObject *npobj;
   NPIdentifier name;
   int error = rpc_method_get_args(connection,
@@ -492,10 +674,10 @@ int npclass_handle_RemoveProperty(rpc_connection_t *connection)
   }
 
   uint32_t ret = false;
-  if (npobj && npobj->_class && npobj->_class->removeProperty) {
-	D(bug("NPClass::RemoveProperty(npobj %p, name id %p)\n", npobj, name));
+  if (npobj && is_valid_npobject_class(npobj) && npobj->_class->removeProperty) {
+	D(bugiI("NPClass::RemoveProperty(npobj %p, name id %p)\n", npobj, name));
 	ret = npobj->_class->removeProperty(npobj, name);
-	D(bug(" return: %d\n", ret));
+	D(bugiD("NPClass::RemoveProperty return: %d\n", ret));
   }
 
   return rpc_method_send_reply(connection,
@@ -503,8 +685,10 @@ int npclass_handle_RemoveProperty(rpc_connection_t *connection)
 							   RPC_TYPE_INVALID);
 }
 
-bool npclass_invoke_RemoveProperty(NPObject *npobj, NPIdentifier name)
+static bool npclass_invoke_RemoveProperty(NPObject *npobj, NPIdentifier name)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPCLASS_REMOVE_PROPERTY,
 								RPC_TYPE_NP_OBJECT, npobj,
@@ -527,6 +711,22 @@ bool npclass_invoke_RemoveProperty(NPObject *npobj, NPIdentifier name)
   return ret;
 }
 
+bool g_NPClass_RemoveProperty(NPObject *npobj, NPIdentifier name)
+{
+  if (!is_valid_npobject_class(npobj))
+	return false;
+
+  if (!pid_check()) {
+	npw_printf("WARNING: NPClass::RemoveProperty called from the wrong process\n");
+	return false;
+  }
+  
+  D(bugiI("NPClass::RemoveProperty(npobj %p, name id %p)\n", npobj, name));
+  bool ret = npclass_invoke_RemoveProperty(npobj, name);
+  D(bugiD("NPClass::RemoveProperty return: %d\n", ret));
+  return ret;
+}
+
 
 /* ====================================================================== */
 /* === NPObjectInfo                                                   === */
@@ -534,19 +734,22 @@ bool npclass_invoke_RemoveProperty(NPObject *npobj, NPIdentifier name)
 
 NPObjectInfo *npobject_info_new(NPObject *npobj)
 {
-  NPObjectInfo *npobj_info = malloc(sizeof(*npobj_info));
+  NPObjectInfo *npobj_info = NPW_MemNew0(NPObjectInfo, 1);
   if (npobj_info) {
 	static uint32_t id;
 	npobj_info->npobj = npobj;
 	npobj_info->npobj_id = ++id;
+	npobj_info->is_valid = true;
   }
   return npobj_info;
 }
 
 void npobject_info_destroy(NPObjectInfo *npobj_info)
 {
-  if (npobj_info)
-	free(npobj_info);
+  if (npobj_info) {
+	npw_plugin_instance_unref(npobj_info->plugin);
+	NPW_MemFree(npobj_info);
+  }
 }
 
 
@@ -593,6 +796,7 @@ NPObject *npobject_new(uint32_t npobj_id, NPP instance, NPClass *class)
 	return NULL;
   }
   npobj_info->npobj_id = npobj_id;
+  npobj_info->plugin = npw_plugin_instance_ref(NPW_PLUGIN_INSTANCE(instance));
   npobject_associate(npobj, npobj_info);
   return npobj;
 }
@@ -665,6 +869,17 @@ NPObject *npobject_lookup(uint32_t npobj_id)
   return g_hash_table_lookup(g_npobject_ids, (void *)(uintptr_t)npobj_id);
 }
 
+static void npruntime_deactivate_func(gpointer key, gpointer value, gpointer user_data)
+{
+  NPObjectInfo *npobj_info = (NPObjectInfo *)value;
+  npobj_info->is_valid = false;
+}
+
+void npruntime_deactivate(void)
+{
+  g_hash_table_foreach(g_npobjects, npruntime_deactivate_func, NULL);
+}
+
 
 /* ====================================================================== */
 /* === NPVariant helpers                                              === */
@@ -703,6 +918,8 @@ gchar *
 string_of_NPVariant(const NPVariant *arg)
 {
 #if DEBUG
+  if (arg == NULL)
+	return NULL;
   GString *str = g_string_new(NULL);
   switch (arg->type)
 	{
@@ -752,7 +969,7 @@ print_npvariant_args(const NPVariant *args, uint32_t nargs)
 	g_string_append(str, argstr);
 	g_free(argstr);
   }
-  D(bug(" %u args (%s)\n", nargs, str->str));
+  D(bug("%u args (%s)\n", nargs, str->str));
   g_string_free(str, TRUE);
 #endif
 }

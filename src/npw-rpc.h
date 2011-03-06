@@ -115,7 +115,8 @@ enum {
   RPC_TYPE_NP_IDENTIFIER,
   RPC_TYPE_NP_STRING,							/* 15 */
   RPC_TYPE_NP_VARIANT,
-  RPC_TYPE_NP_UTF8
+  RPC_TYPE_NP_UTF8,
+  RPC_TYPE_NPW_PLUGIN_INSTANCE
 };
 
 // NPPrintData is used to get the plugin printed tmpfile

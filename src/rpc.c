@@ -74,6 +74,11 @@
 #define RPC_INIT_TIMEOUT 5
 #endif
 
+// Set close-on-exec flag on the newly created socket (Linux >= 2.6.27)
+#ifndef SOCK_CLOEXEC
+#define SOCK_CLOEXEC 0
+#endif
+
 
 /* ====================================================================== */
 /* === Utility functions                                              === */
@@ -254,6 +259,9 @@ const char *rpc_strerror(int error)
 	break;
   case RPC_ERROR_MESSAGE_ARGUMENT_INVALID:
 	str = "Message argument invalid";
+	break;
+  case RPC_ERROR_MESSAGE_SYNC_NOT_ALLOWED:
+	str = "SYNC message forbidden";
 	break;
   default:
 	str = "<unknown>";
@@ -456,6 +464,13 @@ struct rpc_connection {
   pthread_t server_thread;
   rpc_map_t *types;
   rpc_map_t *methods;
+  rpc_error_callback_t error_callback;
+  void *error_callback_data;
+  int dispatch_depth;
+  int invoke_depth;
+  int handle_depth;
+  int sync_depth;
+  int pending_sync_depth;
 };
 
 // Increment connection reference count
@@ -473,6 +488,55 @@ void rpc_connection_unref(rpc_connection_t *connection)
 	D(bug("Close unused connection\n"));
 	rpc_exit(connection);
   }
+}
+
+// Returns whether we are in sync mode or not (i.e. needs other end sync)
+static inline bool _rpc_connection_is_sync_mode(rpc_connection_t *connection)
+{
+  return connection->type == RPC_CONNECTION_SERVER;
+}
+
+// Returns whether we are "synchronized" with the other end
+static inline bool _rpc_connection_is_sync(rpc_connection_t *connection)
+{
+  if (connection->dispatch_depth < 1)
+	return false;
+  return connection->dispatch_depth == connection->handle_depth;
+}
+
+// Returns whether we are allowed to synchronize with the other end
+static inline bool _rpc_connection_is_sync_allowed(rpc_connection_t *connection)
+{
+  if (_rpc_connection_is_sync_mode(connection)) {
+	npw_printf("ERROR: RPC is not allowed to receive MESSAGE_SYNC\n");
+	return false;
+  }
+  return connection->pending_sync_depth == 0;
+}
+
+// Set error callback for a connection
+void rpc_connection_set_error_callback(rpc_connection_t *connection,
+                                       rpc_error_callback_t callback,
+									   void *callback_data)
+{
+  if (connection == NULL)
+	return;
+  if (connection->error_callback != NULL)
+	return;  
+  connection->error_callback = callback;
+  connection->error_callback_data = callback_data;
+}
+
+// Call error callback if the connection is closed
+static inline void _rpc_connection_invoke_error_callback(rpc_connection_t *connection)
+{
+  connection->error_callback(connection, connection->error_callback_data);
+}
+
+static inline void rpc_connection_invoke_error_callback(rpc_connection_t *connection)
+{
+  if (connection && connection->error_callback)
+	_rpc_connection_invoke_error_callback(connection);
 }
 
 // Returns connection status
@@ -506,13 +570,27 @@ static void _rpc_set_status(rpc_connection_t *connection, int error)
   }
 }
 
-static inline int rpc_error(rpc_connection_t *connection, int error)
+// Set error status. The caller must return after a call to this function
+// e.g. the usual practise is to "return rpc_error();"
+// This is necessary because the error callback can decide to kill the
+// RPC connection in that case, so anything beyond rpc_error() should
+// be considered garbage.
+static int rpc_error(rpc_connection_t *connection, int error)
 {
   // XXX: this function must be called only in case of error
-  // (otherwise, it's an internal error)
+  // (otherwise, it's an internal error, hence the assert()s)
   assert(error < 0);
   assert(connection != NULL);
   _rpc_set_status(connection, error);
+
+  switch (_rpc_status(connection)) {
+  case RPC_STATUS_CLOSED:
+  case RPC_STATUS_BROKEN:
+	rpc_connection_invoke_error_callback(connection);
+	break;
+  default:
+	break;
+  }
   return error;
 }
 
@@ -605,6 +683,13 @@ rpc_connection_t *rpc_init_server(const char *ident)
   connection->status = RPC_STATUS_CLOSED;
   connection->socket = -1;
   connection->server_thread_active = 0;
+  connection->error_callback = NULL;
+  connection->error_callback_data = NULL;
+  connection->dispatch_depth = 0;
+  connection->invoke_depth = 0;
+  connection->handle_depth = 0;
+  connection->sync_depth = 0;
+  connection->pending_sync_depth = 0;
   if ((connection->types = rpc_map_new_full((free))) == NULL) {
 	rpc_exit(connection);
 	return NULL;
@@ -614,7 +699,7 @@ rpc_connection_t *rpc_init_server(const char *ident)
 	return NULL;
   }
 
-  if ((connection->server_socket = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+  if ((connection->server_socket = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0)) < 0) {
 	perror("server socket");
 	rpc_exit(connection);
 	return NULL;
@@ -665,6 +750,13 @@ rpc_connection_t *rpc_init_client(const char *ident)
   connection->refcnt = 1;
   connection->status = RPC_STATUS_CLOSED;
   connection->server_socket = -1;
+  connection->error_callback = NULL;
+  connection->error_callback_data = NULL;
+  connection->dispatch_depth = 0;
+  connection->invoke_depth = 0;
+  connection->handle_depth = 0;
+  connection->sync_depth = 0;
+  connection->pending_sync_depth = 0;
   if ((connection->types = rpc_map_new_full((free))) == NULL) {
 	rpc_exit(connection);
 	return NULL;
@@ -674,7 +766,7 @@ rpc_connection_t *rpc_init_client(const char *ident)
 	return NULL;
   }
 
-  if ((connection->socket = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+  if ((connection->socket = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0)) < 0) {
 	perror("client socket");
 	rpc_exit(connection);
 	return NULL;
@@ -862,6 +954,9 @@ enum {
   RPC_MESSAGE_ACK		= -3003,
   RPC_MESSAGE_REPLY		= -3004,
   RPC_MESSAGE_FAILURE	= -3005,
+  RPC_MESSAGE_SYNC		= -3006,
+  RPC_MESSAGE_SYNC_END	= -3007,
+  RPC_MESSAGE_SYNC_ACK	= -3008,
 };
 
 // Message type
@@ -1088,20 +1183,26 @@ static int rpc_message_send_args(rpc_message_t *message, va_list args)
 	case RPC_TYPE_ARRAY: {
 	  int i;
 	  int array_type = va_arg(args, int32_t);
-	  int array_size = va_arg(args, uint32_t);
+	  unsigned int array_size = va_arg(args, uint32_t);
+	  void *array_arg = va_arg(args, void *);
+	  bool is_valid_array = array_size > 0 && array_arg != NULL;
 	  if ((error = rpc_message_send_int32(message, array_type)) < 0)
 		return error;
 	  if ((error = rpc_message_send_uint32(message, array_size)) < 0)
 		return error;
+	  if ((error = rpc_message_send_char(message, is_valid_array)) < 0)
+		return error;
+	  if (!is_valid_array)
+		break;
 	  switch (array_type) {
 	  case RPC_TYPE_CHAR: {
-		unsigned char *array = va_arg(args, unsigned char *);
+		unsigned char *array = (unsigned char *)array_arg;
 		error = rpc_message_send_bytes(message, array, array_size);
 		break;
 	  }
 	  case RPC_TYPE_BOOLEAN:
 	  case RPC_TYPE_INT32: {
-		int32_t *array = va_arg(args, int32_t *);
+		int32_t *array = (int32_t *)array_arg;
 		for (i = 0; i < array_size; i++) {
 		  if ((error = rpc_message_send_int32(message, array[i])) < 0)
 			break;
@@ -1109,15 +1210,31 @@ static int rpc_message_send_args(rpc_message_t *message, va_list args)
 		break;
 	  }
 	  case RPC_TYPE_UINT32: {
-		uint32_t *array = va_arg(args, uint32_t *);
+		uint32_t *array = (uint32_t *)array_arg;
 		for (i = 0; i < array_size; i++) {
 		  if ((error = rpc_message_send_uint32(message, array[i])) < 0)
 			break;
 		}
 		break;
 	  }
+	  case RPC_TYPE_UINT64: {
+		uint64_t *array = (uint64_t *)array_arg;
+		for (i = 0; i < array_size; i++) {
+		  if ((error = rpc_message_send_uint64(message, array[i])) < 0)
+			break;
+		}
+		break;
+	  }
+	  case RPC_TYPE_DOUBLE: {
+		double *array = (double *)array_arg;
+		for (i = 0; i < array_size; i++) {
+		  if ((error = rpc_message_send_double(message, array[i])) < 0)
+			break;
+		}
+		break;
+	  }
 	  case RPC_TYPE_STRING: {
-		char **array = va_arg(args, char **);
+		char **array = (char **)array_arg;
 		for (i = 0; i < array_size; i++) {
 		  if ((error = rpc_message_send_string(message, array[i])) < 0)
 			break;
@@ -1127,7 +1244,7 @@ static int rpc_message_send_args(rpc_message_t *message, va_list args)
 	  default:
 		if ((desc = rpc_message_descriptor_lookup(message, array_type)) != NULL) {
 		  // arguments are passed by value (XXX: needs a way to differenciate reference/value)
-		  uint8_t *array = va_arg(args, uint8_t *);
+		  uint8_t *array = (uint8_t *)array_arg;
 		  for (i = 0; i < array_size; i++) {
 			if ((error = desc->send_callback(message, &array[i * desc->size])) < 0)
 			  break;
@@ -1342,13 +1459,21 @@ static int rpc_message_recv_args(rpc_message_t *message, va_list args)
 	  int i;
 	  int32_t array_type;
 	  uint32_t array_size;
+	  char is_valid_array;
 	  if ((error = rpc_message_recv_int32(message, &array_type)) < 0)
 		return error;
 	  if ((error = rpc_message_recv_uint32(message, &array_size)) < 0)
 		return error;
+	  if ((error = rpc_message_recv_char(message, &is_valid_array)) < 0)
+		return error;
 	  p_value = va_arg(args, void *);
-	  *((uint32_t *)p_value) = array_size;
+	  *((int32_t *)p_value) = array_size;
 	  p_value = va_arg(args, void *);
+	  if (!is_valid_array) {
+		*((void **)p_value) = NULL;
+		break;
+	  }
+	  assert(array_size > 0); // otherwise, it's an internal error, see send()
 	  switch (array_type) {
 	  case RPC_TYPE_CHAR: {
 		unsigned char *array;
@@ -1375,12 +1500,38 @@ static int rpc_message_recv_args(rpc_message_t *message, va_list args)
 		break;
 	  }
 	  case RPC_TYPE_UINT32: {
-		unsigned int *array;
-		if ((array = (unsigned int *)malloc(array_size * sizeof(*array))) == NULL)
+		uint32_t *array;
+		if ((array = (uint32_t *)malloc(array_size * sizeof(*array))) == NULL)
 		  return RPC_ERROR_NO_MEMORY;
 		for (i = 0; i < array_size; i++) {
 		  uint32_t value;
 		  if ((error = rpc_message_recv_uint32(message, &value)) < 0)
+			return error;
+		  array[i] = value;
+		}
+		*((void **)p_value) = (void *)array;
+		break;
+	  }
+	  case RPC_TYPE_UINT64: {
+		uint64_t *array;
+		if ((array = (uint64_t *)malloc(array_size * sizeof(*array))) == NULL)
+		  return RPC_ERROR_NO_MEMORY;
+		for (i = 0; i < array_size; i++) {
+		  uint64_t value;
+		  if ((error = rpc_message_recv_uint64(message, &value)) < 0)
+			return error;
+		  array[i] = value;
+		}
+		*((void **)p_value) = (void *)array;
+		break;
+	  }
+	  case RPC_TYPE_DOUBLE: {
+		double *array;
+		if ((array = (double *)malloc(array_size * sizeof(*array))) == NULL)
+		  return RPC_ERROR_NO_MEMORY;
+		for (i = 0; i < array_size; i++) {
+		  double value;
+		  if ((error = rpc_message_recv_double(message, &value)) < 0)
 			return error;
 		  array[i] = value;
 		}
@@ -1484,7 +1635,7 @@ static inline rpc_method_callback_t rpc_lookup_callback(rpc_connection_t *connec
 }
 
 // Dispatch message received in the server loop
-static int _rpc_dispatch(rpc_connection_t *connection, rpc_message_t *message)
+static int _rpc_dispatch_1(rpc_connection_t *connection, rpc_message_t *message)
 {
   // recv: <invoke> (body: <method-id> MESSAGE_END
   D(bug("receiving message\n"));
@@ -1531,6 +1682,62 @@ static int _rpc_dispatch(rpc_connection_t *connection, rpc_message_t *message)
   return method;
 }
 
+static int _rpc_dispatch(rpc_connection_t *connection, rpc_message_t *message)
+{
+  ++connection->dispatch_depth;
+  int ret = _rpc_dispatch_1(connection, message);
+  --connection->dispatch_depth;
+  return ret;
+}
+
+// Dispatch pending remote calls until we get MSG_TAG
+static int _rpc_dispatch_until(rpc_connection_t *connection, rpc_message_t *message, int32_t expected_msg_tag)
+{
+  assert(expected_msg_tag != 0);
+  for (;;) {
+	int32_t msg_tag;
+	int error = rpc_message_recv_int32(message, &msg_tag);
+	if (error != RPC_ERROR_NO_ERROR)
+	  return error;
+	if (msg_tag == expected_msg_tag)
+	  break;
+	switch (msg_tag) {
+	case RPC_MESSAGE_SYNC:
+	  if (!_rpc_connection_is_sync_allowed(connection))
+		return RPC_ERROR_MESSAGE_SYNC_NOT_ALLOWED;
+	  connection->pending_sync_depth = connection->invoke_depth;
+	  break;
+	case RPC_MESSAGE_START:
+	  if ((error = _rpc_dispatch(connection, message)) < 0)
+		return error;
+	  break;
+	default:
+	  return RPC_ERROR_MESSAGE_TYPE_INVALID;
+	}
+  }
+  return RPC_ERROR_NO_ERROR;
+}
+
+// Dispatch pending remote calls in SYNC mode (i.e. until MESSAGE_SYNC_END)
+static int _rpc_dispatch_sync(rpc_connection_t *connection)
+{
+  rpc_message_t message;
+  rpc_message_init(&message, connection);
+
+  // send: MESSAGE_SYNC_ACK
+  int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC_ACK);
+  if (error != RPC_ERROR_NO_ERROR)
+	return error;
+  error = rpc_message_flush(&message);
+  if (error != RPC_ERROR_NO_ERROR)
+	return error;
+
+  // call: rpc_dispatch() (pending remote calls)
+  // recv: MESSAGE_SYNC_END
+  return _rpc_dispatch_until(connection, &message, RPC_MESSAGE_SYNC_END);
+}
+
+// Dispatch message received in the server loop (public entry point)
 int rpc_dispatch(rpc_connection_t *connection)
 {
   int32_t msg_tag;
@@ -1541,6 +1748,8 @@ int rpc_dispatch(rpc_connection_t *connection)
   int error = rpc_message_recv_int32(&message, &msg_tag);
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
+  if (msg_tag == RPC_MESSAGE_SYNC) // optional
+	return _rpc_dispatch_sync(connection);
   if (msg_tag != RPC_MESSAGE_START)
 	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
 
@@ -1548,35 +1757,6 @@ int rpc_dispatch(rpc_connection_t *connection)
   if (method < 0)
 	return rpc_error(connection, method);
   return method;
-}
-
-// Dispatch pending remote calls until we get MSG_TAG
-static int _rpc_dispatch_until(rpc_connection_t *connection, rpc_message_t *message, int32_t expected_msg_tag)
-{
-  if (expected_msg_tag) {
-	for (;;) {
-	  int32_t msg_tag;
-	  int error = rpc_message_recv_int32(message, &msg_tag);
-	  if (error != RPC_ERROR_NO_ERROR)
-		return error;
-	  if (msg_tag == expected_msg_tag)
-		break;
-	  if (msg_tag != RPC_MESSAGE_START)
-		return RPC_ERROR_MESSAGE_TYPE_INVALID;
-	  if ((error = _rpc_dispatch(connection, message)) < 0)
-		return error;
-	}
-  }
-  else {
-	for (;;) {
-	  int ret = _rpc_wait_dispatch(connection, 0);
-	  if (ret == 0)
-		break;
-	  if (ret < 0 || (ret = rpc_dispatch(connection)) < 0)
-		return ret;
-	}
-  }
-  return RPC_ERROR_NO_ERROR;
 }
 
 
@@ -1653,26 +1833,66 @@ int rpc_connection_remove_method_descriptors(rpc_connection_t *connection, const
 /* === Remote Procedure Call (method invocation)                      === */
 /* ====================================================================== */
 
-// Invoke remote procedure (client side)
-int rpc_method_invoke(rpc_connection_t *connection, int method, ...)
+// Returns whether it is possible to rpc_method_invoke() now or not
+bool rpc_method_invoke_possible(rpc_connection_t *connection)
 {
-  D(bug("rpc_method_invoke method=%d\n", method));
+  if (rpc_status(connection) != RPC_STATUS_ACTIVE)
+	return false;
+  /* XXX: at this time, we can can call rpc_method_invoke() only if we
+	 are not processing incoming calls already or if we are
+	 "synchronized" with the other side. i.e. we are between an
+	 rpc_method_get_args() and rpc_method_send_reply() in an RPC handler
+	 function.  */
+  return connection->dispatch_depth == connection->handle_depth;
+}
 
-  if (connection == NULL)
-	return RPC_ERROR_CONNECTION_NULL;
-  if (_rpc_status(connection) == RPC_STATUS_CLOSED)
-	return RPC_ERROR_CONNECTION_CLOSED;
-
+// Invoke remote procedure (client side)
+static int _rpc_method_invoke_valist(rpc_connection_t *connection, int method, va_list args)
+{
   rpc_message_t message;
   rpc_message_init(&message, connection);
 
-  // call: rpc_dispatch() (pending remote calls)
-  int error = _rpc_dispatch_until(connection, &message, 0);
-  if (error != RPC_ERROR_NO_ERROR)
-	return rpc_error(connection, error);
+  /* Strategy to synchronize the connections.
+
+	 The purpose of connection synchronization is to ensure that the
+	 other end is ready to receive our rpc_method_invoke() calls,
+	 i.e. make sure it is not already processing RPC, or has not
+	 started an rpc_method_invoke() call itself.
+
+	 There are two locations where it is safe to process incoming RPC:
+	 - rpc_dispatch(), i.e. from the public entry-point
+	 - rpc_method_wait_for_reply(), while waiting for MESSAGE_REPLY
+
+	 Otherwise, we need to synchronize both ends:
+	 - Send MSG_SYNC, and block until we get MSG_SYNC_ACK
+	 - Process any pending calls while we are blocked
+	 - Honour MSG_SYNC in either rpc_dispatch() or at the end of
+       rpc_method_wait_for_reply(), i.e. while there is nothing else
+       to process, and until MSG_SYNC_END actually
+  */
+  bool is_sync_mode = _rpc_connection_is_sync_mode(connection);
+  if (is_sync_mode && !_rpc_connection_is_sync(connection)) {
+	assert(connection->sync_depth == 0);
+	assert(connection->invoke_depth == 1);
+
+	// send: MESSAGE_SYNC
+	int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC);
+	if (error != RPC_ERROR_NO_ERROR)
+	  return rpc_error(connection, error);
+	error = rpc_message_flush(&message);
+	if (error != RPC_ERROR_NO_ERROR)
+	  return rpc_error(connection, error);
+
+	// call: rpc_dispatch() (pending remote calls)
+	error = _rpc_dispatch_until(connection, &message, RPC_MESSAGE_SYNC_ACK);
+	if (error != RPC_ERROR_NO_ERROR)
+	  return rpc_error(connection, error);
+
+	connection->sync_depth = connection->invoke_depth;
+  }
 
   // send: <invoke> = MESSAGE_START <method-id> MESSAGE_END
-  error = rpc_message_send_int32(&message, RPC_MESSAGE_START);
+  int error = rpc_message_send_int32(&message, RPC_MESSAGE_START);
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
   error = rpc_message_send_int32(&message, method);
@@ -1686,16 +1906,14 @@ int rpc_method_invoke(rpc_connection_t *connection, int method, ...)
 	return rpc_error(connection, error);
 
   // send optional arguments
-  va_list args;
-  va_start(args, method);
+  va_list args_copy;
+  va_copy(args_copy, args);
   int arg_type = va_arg(args, int);
-  va_end(args);
   if (arg_type != RPC_TYPE_INVALID) {
 
 	// send: <method-args> = MESSAGE_ARGS [ <arg-type> <arg-value> ]+ MESSAGE_END
-	va_start(args, method);
-	error = rpc_message_send_args(&message, args);
-	va_end(args);
+	error = rpc_message_send_args(&message, args_copy);
+	va_end(args_copy);
 	if (error != RPC_ERROR_NO_ERROR)
 	  return rpc_error(connection, error);
 	error = rpc_message_flush(&message);
@@ -1703,17 +1921,46 @@ int rpc_method_invoke(rpc_connection_t *connection, int method, ...)
 	  return rpc_error(connection, error);
   }
 
-  // wait: MESSAGE_ACK
-  error = _rpc_dispatch_until(connection, &message, RPC_MESSAGE_ACK);
-  if (error == RPC_ERROR_ERRNO_SET)
-	perror("rpc_method_invoke");
+  return RPC_ERROR_NO_ERROR;
+}
+
+int rpc_method_invoke(rpc_connection_t *connection, int method, ...)
+{
+  D(bug("rpc_method_invoke method=%d\n", method));
+
+  if (connection == NULL)
+	return RPC_ERROR_CONNECTION_NULL;
+  if (_rpc_status(connection) == RPC_STATUS_CLOSED)
+	return RPC_ERROR_CONNECTION_CLOSED;
+
+  ++connection->invoke_depth;
+
+  va_list args;
+  va_start(args, method);
+  int ret = _rpc_method_invoke_valist(connection, method, args);
+  va_end(args);
+
+  return ret;
+}
+
+// Retrieve procedure arguments (server side)
+static int _rpc_method_get_args_valist(rpc_connection_t *connection, va_list args)
+{
+  rpc_message_t message;
+  rpc_message_init(&message, connection);
+
+  // we can't have pending calls here because the method invocation
+  // message and its arguments are atomic (i.e. they are sent right
+  // away, no wait for ACK)
+
+  // recv: <method-args>
+  int error = rpc_message_recv_args(&message, args);
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
 
   return RPC_ERROR_NO_ERROR;
 }
 
-// Retrieve procedure arguments (server side)
 int rpc_method_get_args(rpc_connection_t *connection, ...)
 {
   D(bug("rpc_method_get_args\n"));
@@ -1723,42 +1970,19 @@ int rpc_method_get_args(rpc_connection_t *connection, ...)
   if (_rpc_status(connection) == RPC_STATUS_CLOSED)
 	return RPC_ERROR_CONNECTION_CLOSED;
 
-  rpc_message_t message;
-  rpc_message_init(&message, connection);
+  ++connection->handle_depth;
 
-  // we can't have pending calls here because the method invocation
-  // message and its arguments are atomic (i.e. they are sent right
-  // away, no wait for ACK)
-
-  // recv: <method-args>
   va_list args;
   va_start(args, connection);
-  int error = rpc_message_recv_args(&message, args);
+  int ret = _rpc_method_get_args_valist(connection, args);
   va_end(args);
-  if (error != RPC_ERROR_NO_ERROR)
-	return rpc_error(connection, error);
 
-  // send: MESSAGE_ACK
-  error = rpc_message_send_int32(&message, RPC_MESSAGE_ACK);
-  if (error != RPC_ERROR_NO_ERROR)
-	return rpc_error(connection, error);
-  error = rpc_message_flush(&message);
-  if (error != RPC_ERROR_NO_ERROR)
-	return rpc_error(connection, error);
-
-  return RPC_ERROR_NO_ERROR;
+  return ret;
 }
 
 // Wait for a reply from the remote procedure (client side)
-int rpc_method_wait_for_reply(rpc_connection_t *connection, ...)
+static int _rpc_method_wait_for_reply_valist(rpc_connection_t *connection, va_list args)
 {
-  D(bug("rpc_method_wait_for_reply\n"));
-
-  if (connection == NULL)
-	return RPC_ERROR_CONNECTION_NULL;
-  if (_rpc_status(connection) == RPC_STATUS_CLOSED)
-	return RPC_ERROR_CONNECTION_CLOSED;
-
   int error;
   int32_t msg_tag;
   rpc_message_t message;
@@ -1771,16 +1995,14 @@ int rpc_method_wait_for_reply(rpc_connection_t *connection, ...)
 	return rpc_error(connection, error);
 
   // receive optional arguments
-  va_list args;
-  va_start(args, connection);
+  va_list args_copy;
+  va_copy(args_copy, args);
   int type = va_arg(args, int);
-  va_end(args);
   if (type != RPC_TYPE_INVALID) {
 
 	// recv: [ <method-args> ]
-	va_start(args, connection);
-	error = rpc_message_recv_args(&message, args);
-	va_end(args);
+	error = rpc_message_recv_args(&message, args_copy);
+	va_end(args_copy);
 	if (error != RPC_ERROR_NO_ERROR)
 	  return rpc_error(connection, error);
   }
@@ -1792,26 +2014,59 @@ int rpc_method_wait_for_reply(rpc_connection_t *connection, ...)
   if (msg_tag != RPC_MESSAGE_END)
 	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
 
-  // wait: MESSAGE_ACK
-  error = rpc_message_recv_int32(&message, &msg_tag);
-  if (error != RPC_ERROR_NO_ERROR)
-	return rpc_error(connection, error);
-  if (msg_tag != RPC_MESSAGE_ACK)
-	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
-  
+  // send: MESSAGE_SYNC_END (done pending message)
+  if (connection->sync_depth) {
+	if (connection->sync_depth == connection->invoke_depth) {
+	  assert(connection->invoke_depth == 1);
+
+	  // send: MESSAGE_SYNC_END
+	  int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC_END);
+	  if (error != RPC_ERROR_NO_ERROR)
+		return rpc_error(connection, error);
+	  error = rpc_message_flush(&message);
+	  if (error != RPC_ERROR_NO_ERROR)
+		return rpc_error(connection, error);
+
+	  connection->sync_depth = 0;
+	}
+  }
+
+  // send: MESSAGE_SYNC_ACK (pending message)
+  if (connection->pending_sync_depth) {
+	if (connection->pending_sync_depth == connection->invoke_depth) {
+	  assert(connection->invoke_depth == 1);
+	  assert(_rpc_wait_dispatch(connection, 0) == 0);
+
+	  connection->pending_sync_depth = 0;
+	  return _rpc_dispatch_sync(connection);
+	}
+  }
+
   return RPC_ERROR_NO_ERROR;
 }
 
-// Send a reply to the client (server side)
-int rpc_method_send_reply(rpc_connection_t *connection, ...)
+int rpc_method_wait_for_reply(rpc_connection_t *connection, ...)
 {
-  D(bug("rpc_method_send_reply\n"));
+  D(bug("rpc_method_wait_for_reply\n"));
 
   if (connection == NULL)
 	return RPC_ERROR_CONNECTION_NULL;
   if (_rpc_status(connection) == RPC_STATUS_CLOSED)
 	return RPC_ERROR_CONNECTION_CLOSED;
 
+  va_list args;
+  va_start(args, connection);
+  int ret = _rpc_method_wait_for_reply_valist(connection, args);
+  va_end(args);
+
+  --connection->invoke_depth;
+
+  return ret;
+}
+
+// Send a reply to the client (server side)
+static int _rpc_method_send_reply_valist(rpc_connection_t *connection, va_list args)
+{
   rpc_message_t message;
   rpc_message_init(&message, connection);
 
@@ -1819,10 +2074,7 @@ int rpc_method_send_reply(rpc_connection_t *connection, ...)
   int error = rpc_message_send_int32(&message, RPC_MESSAGE_REPLY);
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
-  va_list args;
-  va_start(args, connection);
   error = rpc_message_send_args(&message, args);
-  va_end(args);
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
   error = rpc_message_send_int32(&message, RPC_MESSAGE_END);
@@ -1832,15 +2084,26 @@ int rpc_method_send_reply(rpc_connection_t *connection, ...)
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
 
-  // send: MESSAGE_ACK
-  error = rpc_message_send_int32(&message, RPC_MESSAGE_ACK);
-  if (error != RPC_ERROR_NO_ERROR)
-	return rpc_error(connection, error);
-  error = rpc_message_flush(&message);
-  if (error != RPC_ERROR_NO_ERROR)
-	return rpc_error(connection, error);
-
   return RPC_ERROR_NO_ERROR;
+}
+
+int rpc_method_send_reply(rpc_connection_t *connection, ...)
+{
+  D(bug("rpc_method_send_reply\n"));
+
+  if (connection == NULL)
+	return RPC_ERROR_CONNECTION_NULL;
+  if (_rpc_status(connection) == RPC_STATUS_CLOSED)
+	return RPC_ERROR_CONNECTION_CLOSED;
+
+  va_list args;
+  va_start(args, connection);
+  int ret = _rpc_method_send_reply_valist(connection, args);
+  va_end(args);
+
+  --connection->handle_depth;
+
+  return ret;
 }
 
 

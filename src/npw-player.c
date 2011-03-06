@@ -1284,17 +1284,17 @@ stream_new (Plugin *plugin,
 	    const gchar *src, const gchar *type, void *notify_data,
 	    NPError *error)
 {
-  NPError ret = NPERR_NO_ERROR;
+  StreamInstance *pstream   = NULL;
+  NPStream       *np_stream = NULL;
+  NPError         ret       = NPERR_NO_ERROR;
 
-  StreamInstance *pstream = g_new0 (StreamInstance, 1);
-  if (pstream == NULL)
+  if ((pstream = g_new0 (StreamInstance, 1)) == NULL)
     {
       ret = NPERR_OUT_OF_MEMORY_ERROR;
       goto l_error;
     }
 
-  NPStream *np_stream = np_stream_new (src, notify_data);
-  if (np_stream == NULL)
+  if ((np_stream = np_stream_new (src, notify_data)) == NULL)
     {
       ret = NPERR_OUT_OF_MEMORY_ERROR;
       goto l_error;
@@ -1643,10 +1643,6 @@ on_stream_close_cb (gpointer user_data)
 	{
 	  if (!(pstream->status & STREAM_STATUS_ACTIVE))
 	    {
-	      /* XXX: consider the stream in error if it was never started */
-	      if (pstream->buffers == NULL)
-		pstream->status |= STREAM_STATUS_ERROR;
-
 	      /* Special case for JavaScript that CURL could not handle */
 	      const gchar * const url = pstream->np_stream->url;
 	      if (g_ascii_strncasecmp (url, "javascript:", 11) == 0)
@@ -1697,6 +1693,10 @@ on_stream_close_cb (gpointer user_data)
 		      g_string_free (text, TRUE);
 		    }
 		}
+
+	      /* XXX: consider the stream in error if it was never started */
+	      if (pstream->buffers == NULL)
+		pstream->status |= STREAM_STATUS_ERROR;
 	    }
 
 	  stream_schedule_destroy (pstream, FALSE);

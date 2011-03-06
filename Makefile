@@ -193,7 +193,11 @@ test_rpc_client_CPPFLAGS = $(CPPFLAGS) -I$(SRC_PATH)/src -DBUILD_CLIENT -DNPW_CO
 test_rpc_server_CPPFLAGS = $(CPPFLAGS) -I$(SRC_PATH)/src -DBUILD_SERVER -DNPW_COMPONENT_NAME="\"Server\""
 test_rpc_CFLAGS			 = -I$(SRC_PATH)/src $(GLIB_CFLAGS)
 test_rpc_LDFLAGS		 = $(GLIB_LDFLAGS) $(libpthread_LDFLAGS) $(libsocket_LDFLAGS)
-test_rpc_RAWPROGS		 = test-rpc-types test-rpc-nested test-rpc-concurrent
+test_rpc_RAWPROGS		 = \
+	test-rpc-types \
+	test-rpc-nested-1 \
+	test-rpc-nested-2 \
+	test-rpc-concurrent
 test_rpc_PROGRAMS		 = \
 	$(test_rpc_RAWPROGS:%=%-client) \
 	$(test_rpc_RAWPROGS:%=%-server)

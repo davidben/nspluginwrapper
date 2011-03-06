@@ -1,5 +1,32 @@
-nspluginwrapper NEWS -- history of user-visible changes.  2008-11-07
+nspluginwrapper NEWS -- history of user-visible changes.  2008-12-08
 Copyright (C) 2005-2008 Gwenole Beauchesne
+
+Version 1.1.10 (BETA) - 08.Dec.2008
+* Fix NPPVpluginScriptableNPObject::Invalidate()
+* Fix condition for delayed NPN_ReleaseObject() call
+* Fix XEMBED (rework for lost events/focus regressions)
+* Fix RPC for calls initiated by the plugin (SYNC mode)
+* Fix invalid RPC after the plugin was NPP_Destroy()'ed
+
+Version 1.1.8 (BETA) - 01.Dec.2008
+* Delay NPN_ReleaseObject() if there is incoming RPC
+* Improve plugins restart machinery (Martin Stransky)
+* Close npviewer.bin sockets on exec()
+* Close all open files on fork() (initial patch by Dan Walsh)
+* Make `which` failures silent for soundwrappers (Stanislav Brabec)
+* Allow direct execution of native plugins if NPW_DIRECT_EXEC is set
+
+Version 1.1.6 (BETA) - 23.Nov.2008
+* Enable glib memory hooks by default
+* Lower priority of RPC events so that timeouts are triggered first
+* Fix string_of_NPVariant() that could make some plugins crash
+* Fix NPClass::Invoke(|Default)() args release
+* Fix memory leak in NPN_GetStringIdentifiers()
+* Fix NPN_ReleaseObject() that could dereference a deallocated NPObject
+* Fix (sync) NPObject referenceCount when the object is passed to the plugin
+* Fix plugin window resize in XEMBED hack mode
+* Fix "javascript:" streams requests in standalone player
+* Fix NPP_Write() and propagate negative lengths too (DiamondX plugin)
 
 Version 1.1.4 (BETA) - 07.Nov.2008
 * Fix memory leaks in NPRuntime bridge

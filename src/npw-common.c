@@ -25,6 +25,57 @@
 #define DEBUG 0
 #include "debug.h"
 
+
+/* ====================================================================== */
+/* === Plugin instances                                              === */
+/* ====================================================================== */
+
+void *
+npw_plugin_instance_new(NPW_PluginInstanceClass *klass)
+{
+  NPW_PluginInstance *plugin;
+  if (klass && klass->allocate)
+    plugin = klass->allocate ();
+  else
+    plugin = NPW_MemNew0 (NPW_PluginInstance, 1);
+  if (plugin)
+    {
+      plugin->klass = klass;
+      plugin->refcount = 1;
+    }
+  return plugin;
+}
+
+void *
+npw_plugin_instance_ref(void *ptr)
+{
+  NPW_PluginInstance *plugin = (NPW_PluginInstance *)ptr;
+  if (plugin)
+    plugin->refcount++;
+  return plugin;
+}
+
+void
+npw_plugin_instance_unref(void *ptr)
+{
+  NPW_PluginInstance *plugin = (NPW_PluginInstance *)ptr;
+  if (plugin == NULL)
+    return;
+  if (--plugin->refcount > 0)
+    return;
+  NPW_PluginInstanceClass *klass = plugin->klass;
+  if (klass && klass->finalize)
+    klass->finalize (plugin);
+  if (klass && klass->deallocate)
+    klass->deallocate (plugin);
+  else
+    NPW_MemFree (plugin);
+}
+
+/* ====================================================================== */
+/* === NPAPI interface                                                === */
+/* ====================================================================== */
+
 static NPNetscapeFuncs g_mozilla_funcs;
 static NPPluginFuncs   g_plugin_funcs;
 
@@ -37,10 +88,6 @@ NPW_InitializeFuncs (NPNetscapeFuncs *mozilla_funcs,
   memcpy (&g_plugin_funcs, plugin_funcs,
 	  MIN (sizeof (g_plugin_funcs), plugin_funcs->size));
 }
-
-/* ====================================================================== */
-/* === NPAPI interface                                                === */
-/* ====================================================================== */
 
 void *
 NPN_MemAlloc (uint32_t size)

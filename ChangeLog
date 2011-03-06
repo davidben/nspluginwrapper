@@ -1,3 +1,525 @@
+2008-12-07 22:35  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Destroy plugin window only if PluginInstance
+	  is finalize'd. This is because an NPPVpluginScriptableNPObject
+	  can still hold a reference to it (and a call to
+	  NPClass::Invalidate() would fail in that case).
+
+2008-12-07 22:30  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime-impl.h, src/npruntime.c: Use NPW memory allocator
+	  for NPObjectInfo objects. Reference count PluginInstance bound
+	  to an NPObject if it is known at NPClass::allocate() time.
+
+2008-12-07 22:02  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c, src/npw-wrapper.c: Re-add refcount debugging
+	  info for NPN_{Create,Retain,Release}Object().
+
+2008-12-07 21:48  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Remove delayed NPN_InvalidateRect() code as
+	  it's no longer necessary with RPC synchronous messaging.
+
+2008-12-07 19:25  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Make NPN_ReleaseObject() use
+	  rpc_method_invoke_possible() to check whether we can send it
+	  immediately. This detects the case where a call is made after
+	  rpc_method_send_reply() but before we return from the
+	  rpc_dispatch() handler.
+
+2008-12-07 19:22  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/rpc.c, src/rpc.h: Implement synchronous messaging. aka turns
+	  an async call (i.e. an rpc_method_invoke() with a connection in
+	  server mode) into a synchronous one. That way, the browser is
+	  notified that the plugin wants to make a call and then puts self
+	  into condition to receive the message (normal rpc_dispatch() or
+	  at the end of a toplevel NPP_*() function).
+	  
+	  This makes it RPC protocol v2.6.
+
+2008-12-07 15:30  Gwenole Beauchesne <gb.public@free.fr>
+
+	* tests/test-rpc-concurrent.c: Improve concurrent test to check we
+	  get the right answers (in case nested handling got wrong).
+	  Besides, make sure the client waits for all server's incoming
+	  calls prior to rpc_test_exit()'ing.
+
+2008-12-07 15:24  Gwenole Beauchesne <gb.public@free.fr>
+
+	* tests/test-rpc-common.c: Make sure to handle RPC on both ends,
+	  including the client's side.
+
+2008-12-07 08:12  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Fix NPP_HandleEvent() return value on error.
+
+2008-12-07 08:10  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c, src/npw-viewer.c, src/npw-wrapper.c: Add checks
+	  for all rpc_method_invoke() functions.
+
+2008-12-07 08:06  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/debug.h: Add npw_return_if_fail() and
+	  npw_return_val_if_fail() helpers.
+
+2008-12-07 07:16  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/rpc.c, src/rpc.h, tests/test-rpc-nested-2.c: Add
+	  rpc_method_invoke_possible() interface to check whether we are
+	  ready to call rpc_method_invoke() or not. i.e. in particular, if
+	  we are not trying to invoke functions after
+	  rpc_method_send_reply() and before we return from an RPC method
+	  handler.
+
+2008-12-06 18:21  Gwenole Beauchesne <gb.public@free.fr>
+
+	* tests/test-rpc-common.c, tests/test-rpc-concurrent.c,
+	  tests/test-rpc-nested-1.c, tests/test-rpc-types.c: Use helpers.
+	  In particular, don't use g_assert() but rather RPC_TEST_ENSURE()
+	  or RPC_TEST_ENSURE_NO_ERROR() which always evaluate.
+
+2008-12-06 18:13  Gwenole Beauchesne <gb.public@free.fr>
+
+	* Makefile, tests/test-rpc-nested-2.c: Add another testcase for
+	  nested rpc_method_invoke(). This time, we are also emitting a
+	  call just after an rpc_method_send_reply(). Note: this is not
+	  fixed yet.
+
+2008-12-06 18:11  Gwenole Beauchesne <gb.public@free.fr>
+
+	* tests/test-rpc-common.h: Add helpers.
+
+2008-12-06 18:10  Gwenole Beauchesne <gb.public@free.fr>
+
+	* Makefile, tests/test-rpc-nested-1.c, tests/test-rpc-nested.c:
+	  Rename.
+
+2008-12-06 09:08  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Rework the XEMBED hack. Don't let the browser
+	  cause Gtk to kill our window. i.e. don't process WM_DELETE_EVENT
+	  sent by the browser GtkSocket. That way, we will kill the window
+	  ourselves in NPP_Destroy().
+
+2008-12-04 21:31  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Process delayed calls in NPP_Destroy() only if
+	  PluginInstances match. Besides, don't care about pending
+	  NPN_InvalidateRect() requests if we already know the instance
+	  will pass away soon (i.e. we are in NPP_Destroy()).
+
+2008-12-03 22:56  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Delay all NPN_InvalidateRect() messages. An
+	  intermediate solution may be to delay the messages only if there
+	  is actually incoming RPC. Postpone this optimization for a
+	  future version (and smarter strategy to "compress" the
+	  region/requests).
+
+2008-12-03 20:51  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime-impl.h, src/npruntime.c: Add debug messages for
+	  NPClass::invoke_*() functions.
+
+2008-12-02 21:49  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c, src/npw-wrapper.c: Fix invalid RPC beyond
+	  NPP_Destroy(). This fixes the following scenario:
+	  
+	  Browser: NPP_Destroy()
+	  -> rpc_method_invoke()
+	  Viewer: NPN_InvalidateRect()
+	  -> rpc_method_invoke()
+	  -> rpc_dispatch() pending messages
+	  -> handle_NPP_Destroy()
+	  -> PluginInstance is killed
+	  -> send PluginInstance but it was killed...
+	  
+	  Now, with the help of reference counting, we can hold the
+	  PluginInstance. Besides, NPP_Destroy() will reset instance_id,
+	  thus RPC won't be sending a "valid" PluginInstance to the other
+	  side, thus reducing the other side call to a no-op. i.e. don't
+	  try to do anything with the browser NPP instance that was killed
+	  previously (the NPP_Destroy() call would have completed by the
+	  time the browser-side needs to handle incoming RPC).
+
+2008-12-02 21:00  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Preserve PluginInstance objects during
+	  invoke_NPN_*() function calls. This is because
+	  rpc_method_invoke() can handle pending messages, among which an
+	  NPP_Destroy() is possible. Since the latter unref the
+	  PluginInstance, we could arrive in a situation where we are
+	  dereferencing deallocated data.
+
+2008-12-02 20:44  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-common.h, src/npw-viewer.c, src/npw-wrapper.c: Replace
+	  all RPC_TYPE_NPP with RPC_TYPE_NPW_PLUGIN_INSTANCE.
+
+2008-12-02 20:15  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-rpc.c, src/npw-rpc.h: Add RPC_TYPE_NPW_PLUGIN_INSTANCE
+	  to marshal PluginInstance objects.
+
+2008-12-01 23:01  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Pass PluginInstance to invoke_NP*() functions.
+	  The next step is to replace RPC_TYPE_NPP with
+	  RPC_TYPE_NPW_PLUGIN_INSTANCE.
+
+2008-12-01 21:55  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c, src/npw-wrapper.c: Minor cleanups. Make sure
+	  plugin->instance is NULL on exit from NPP_Destroy().
+
+2008-12-01 21:47  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-common.h: Remove extraneous "extern" linkage keyword,
+	  this is default behaviour.
+
+2008-12-01 21:46  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-common.c, src/npw-common.h, src/npw-viewer.c,
+	  src/npw-wrapper.c: Add infrastructure to refcount PlugInstances.
+
+2008-12-01 20:28  Gwenole Beauchesne <gb.public@free.fr>
+
+	* configure, src/npruntime.c, src/npw-viewer.c: Disable PID check,
+	  this is not really useful unless a plugin does fork() without
+	  exec(). This could be reactivated with --enable-pid-check though.
+
+2008-12-01 20:06  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Fix pid_check() for USE_PID_CHECK == 0 (thanks
+	  Martin Stransky).
+
+2008-12-01 20:03  Gwenole Beauchesne <gb.public@free.fr>
+
+	* nspluginwrapper.spec: Bump release for development.
+
+2008-11-30 23:03  Gwenole Beauchesne <gb.public@free.fr>
+
+	* ChangeLog: Generated by svn2cl.
+
+2008-11-30 23:00  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Drop use of "extern inline" as some (older)
+	  compilers don't support ISO C semantics.
+
+2008-11-30 22:54  Gwenole Beauchesne <gb.public@free.fr>
+
+	* NEWS, nspluginwrapper.spec: Updates for 1.1.8.
+
+2008-11-30 22:39  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Process all pending calls in NPP_Destroy() as
+	  the data could become junk afterwards.
+
+2008-11-30 22:34  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Don't delay call to NPN_ReleaseObject() if we
+	  can handle it now.
+
+2008-11-30 21:52  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/rpc.c: Add rpc_method_*_valist() variants, internal only for
+	  now.
+
+2008-11-30 21:24  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Slightly improved delayed call mechanism. This
+	  is not fully satisfying yet as I believe a pipe should be better
+	  (glib GSource creation is slow). Fortunately, there doesn't seem
+	  to be that many calls to NPN_ReleaseObject().
+
+2008-11-30 21:07  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-malloc.h: Fix typo.
+
+2008-11-30 20:47  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c, src/npw-viewer.c: Delay calls to
+	  NPN_ReleaseObject. Revert:
+	  
+	  2008-11-22 10:43 Gwenole Beauchesne <gb.public@free.fr>
+	  
+	  * src/npw-wrapper.c: Fix NPN_ReleaseObject() reply, i.e. don't
+	  dereference npobj after the real call to NPN handler as it could
+	  be deallocated.
+
+2008-11-30 17:38  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c, src/npw-viewer.c, src/npw-wrapper.c: Add
+	  missing debugging messages.
+
+2008-11-30 17:21  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c: Fix pid_check() for the browser-side
+	  implementation.
+
+2008-11-30 17:14  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c, src/npw-viewer.c: Extend PID check to npruntime
+	  bridge.
+
+2008-11-30 15:52  Gwenole Beauchesne <gb.public@free.fr>
+
+	* lsb-build/stub_libs/libc_main.c: Add dirfd() for
+	  npw_close_all_open_files().
+
+2008-11-30 15:47  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Check that processes fork()'ed off
+	  npviewer.bin don't issue RPC calls. Initial patch by Martin
+	  Stransky.
+
+2008-11-30 14:56  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c: Rename is_npclass_valid() to
+	  is_valid_npobject_class().
+
+2008-11-30 14:50  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c, src/npw-wrapper.c: Remove wrong comment. The
+	  errors previously noticed were due to the fact that NPObjects
+	  were looked up in the wrong (previously deallocated) hash table.
+	  We now preserve that hash table.
+
+2008-11-30 14:33  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Likewise for npobject_bridge_destroy().
+
+2008-11-30 14:18  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Move id_init() into NP_Initialize(), likewise
+	  for id_kill() into NP_Shutdown(). Those functions are guaranteed
+	  to be called only once. g_NP_Initialize() and g_NP_Shutdown()
+	  could be called several times for the restart machinery but we
+	  don't want to clobber with IDs generated previously.
+
+2008-11-30 13:17  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Kill viewer if the parent browser died (Martin
+	  Stransky).
+
+2008-11-30 13:08  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c, src/npw-wrapper.c: Use
+	  rpc_connection_set_error_callback() to detect and handle an RPC
+	  connection loss (Martin Stransky). In that case, all NPObjects
+	  are invalidated. XXX: this is too global.
+
+2008-11-30 12:10  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime-impl.h, src/npruntime.c: Add a mechanism to stop
+	  calls to NPClass functions if the other end died. We get
+	  notified of this situation through npruntime_deactivate().
+	  Initial patch by Martin Stransky.
+
+2008-11-30 11:09  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/rpc.c, src/rpc.h: Introduce
+	  rpc_connection_set_error_callback() to register a callback for
+	  RPC errors (Martin Stransky).
+
+2008-11-30 10:41  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Warn out when we explicitly don't support
+	  specific variables for XPCOM in NPN_GetValue() (Martin Stransky).
+
+2008-11-30 09:18  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/rpc.c: Add SOCK_CLOEXEC to socket() flags. This is a Linux
+	  >= 2.6.27 extension.
+
+2008-11-30 09:01  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c, src/utils.c, src/utils.h: Close all open
+	  files on fork(). Initial patch by Dan Walsh.
+
+2008-11-29 14:49  Gwenole Beauchesne <gb.public@free.fr>
+
+	* utils/npw-shadow.c: Nuke dead file.
+
+2008-11-29 14:47  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Make it possible to execute native plugins
+	  directly (i.e. without npviewer.bin) if either "NPW_DIRECT_EXEC"
+	  or "NPW_DIRECT_EXECUTION" environment variable is set.
+
+2008-11-29 14:03  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/utils.c: Fix id_init() to create a new hash if it does not
+	  exist already.
+
+2008-11-25 22:11  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.sh: Make `which' failures silent for
+	  soudwrappers. It's also correct to work without a soundwrapper
+	  if the audio device is correctly multiplexed (Stanislav Brabec).
+
+2008-11-25 21:20  Gwenole Beauchesne <gb.public@free.fr>
+
+	* nspluginwrapper.spec: Bump release for development.
+
+2008-11-24 18:35  Gwenole Beauchesne <gb.public@free.fr>
+
+	* NEWS: Fix typo.
+
+2008-11-23 21:57  Gwenole Beauchesne <gb.public@free.fr>
+
+	* ChangeLog: Generated by svn2cl.
+
+2008-11-23 06:43  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Fix a warning (enumeration value not handled
+	  in switch).
+
+2008-11-23 06:39  Gwenole Beauchesne <gb.public@free.fr>
+
+	* NEWS, nspluginwrapper.spec: Updates for 1.1.6.
+	* README: Fix typos and mention trademark as there are commercial
+	  interests (and be on the safe side).
+
+2008-11-22 15:33  Gwenole Beauchesne <gb.public@free.fr>
+
+	* ChangeLog: Generated by svn2cl.
+
+2008-11-22 15:20  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c: Fix string_of_NPVariant() for NULL arguments.
+
+2008-11-22 15:04  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c: Release args variants prior to calling
+	  rpc_method_send_reply().
+
+2008-11-22 13:49  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c, src/npw-wrapper.c, src/utils.c, src/utils.h:
+	  Improve debug info for NP[PN]_[SG]etValue().
+
+2008-11-22 13:23  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Fix debug message in NPN_Write().
+
+2008-11-22 10:52  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Fix memory leak in NPN_GetStringIdentifiers()
+	  RPC handler.
+
+2008-11-22 10:50  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-malloc.h: Add NPW_MemNew() and NPW_MemNew0() helpers.
+
+2008-11-22 10:43  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Fix NPN_ReleaseObject() reply, i.e. don't
+	  dereference npobj after the real call to NPN handler as it could
+	  be deallocated.
+
+2008-11-22 10:01  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/debug.c, src/debug.h, src/npruntime.c, src/npw-viewer.c,
+	  src/npw-wrapper.c: Indent debugging messages.
+
+2008-11-22 08:54  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c, src/npw-viewer.c, src/npw-wrapper.c: Improve
+	  debugging messages. Nested invocations could confuse what the
+	  return value actually refers to.
+
+2008-11-22 07:54  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-rpc.c: Don't make the sync message a WARNING.
+
+2008-11-22 07:52  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-rpc.c: Always synchronize NPObject::referenceCount in
+	  case the plugin wants to inspect that. Synchronization through
+	  NPN_RetainObject()/NPN_ReleaseObject() should be enough though.
+
+2008-11-22 07:37  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Fix plugin window resize in XEMBED hack mode.
+
+2008-11-17 21:55  Gwenole Beauchesne <gb.public@free.fr>
+
+	* tests/test-plugins.html: Newer demo for the SqueakVM plugin.
+
+2008-11-17 21:40  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c, src/npw-wrapper.c: Lower priority of RPC
+	  handlers.
+
+2008-11-15 21:50  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-player.c: Fix for "javascript:" requests. Don't make
+	  them fail because we are starting those streams manually.
+
+2008-11-15 21:45  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-common.h: Fix npw_get_stream_instance().
+
+2008-11-09 17:02  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Update NPP_Write() comment for negative array
+	  lengths.
+
+2008-11-09 16:56  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Propagate NPP_Write() with negative lengths
+	  since the plugin may want to handle that case (e.g. close a
+	  stream?). In practise, this doesn't make much sense either.
+	  NPAPI specs need to be updated to mean "close the stream" if
+	  NPP_WriteReady() returns a negative value.
+
+2008-11-09 16:46  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/rpc.c, tests/test-rpc-types.c: Actually, since an array of
+	  negative size doesn't make sense, let it be the responsibility
+	  of the caller to check for bounds.
+
+2008-11-09 16:38  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/rpc.c, tests/test-rpc-types.c: Size of the array to
+	  RPC_TYPE_ARRAY argument is now an int32. Allow for NULL arrays
+	  or arrays of negative length. In that case, the returned array
+	  pointer in the other size is NULL.
+
+2008-11-09 15:26  Gwenole Beauchesne <gb.public@free.fr>
+
+	* tests/test-rpc-types.c: Add tests for arrays. Fix
+	  rpc_test_signature() for arrays.
+
+2008-11-09 15:24  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/rpc.c: Allow arrays of uint64 or double.
+
+2008-11-09 14:29  Gwenole Beauchesne <gb.public@free.fr>
+
+	* tests/test-rpc-common.c, tests/test-rpc-common.h,
+	  tests/test-rpc-concurrent.c, tests/test-rpc-nested.c,
+	  tests/test-rpc-types.c: Fix indentation (8-char tabs, not 4).
+
+2008-11-09 14:18  Gwenole Beauchesne <gb.public@free.fr>
+
+	* configure: Enable glib memory hooks by default if not
+	  configuring with --enable-generic.
+
+2008-11-09 14:13  Gwenole Beauchesne <gb.public@free.fr>
+
+	* nspluginwrapper.spec: Bump version for development.
+
+2008-11-06 22:36  Gwenole Beauchesne <gb.public@free.fr>
+
+	* ChangeLog: Generated by svn2cl.
+
 2008-11-06 22:28  Gwenole Beauchesne <gb.public@free.fr>
 
 	* NEWS, README, nspluginwrapper.spec: Updates for 1.1.4.

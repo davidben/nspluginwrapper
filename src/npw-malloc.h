@@ -30,4 +30,10 @@ NPW_MemAlloc0 (uint32_t size);
 void
 NPW_MemFree (void *ptr);
 
+#define NPW_MemNew(type, n) \
+  ((type *) NPW_MemAlloc ((n) * sizeof (type)))
+
+#define NPW_MemNew0(type, n) \
+  ((type *) NPW_MemAlloc0 ((n) * sizeof (type)))
+
 #endif /* NPW_MALLOC_H */

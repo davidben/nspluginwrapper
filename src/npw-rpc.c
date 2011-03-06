@@ -90,22 +90,19 @@ int rpc_type_of_NPPVariable(int variable)
 
 
 /*
- *  Process NPP objects
+ *  Process NPW_PluginInstance objects
  */
 
-static int do_send_NPP(rpc_message_t *message, void *p_value)
+static int do_send_NPW_PluginInstance(rpc_message_t *message, void *p_value)
 {
+  NPW_PluginInstance *plugin = (NPW_PluginInstance *)p_value;
   uint32_t instance_id = 0;
-  NPP instance = (NPP)p_value;
-  if (instance) {
-	NPW_PluginInstance *plugin = NPW_PLUGIN_INSTANCE(instance);
-	if (plugin)
-	  instance_id = plugin->instance_id;
-  }
+  if (plugin)
+	instance_id = plugin->instance_id;
   return rpc_message_send_uint32(message, instance_id);
 }
 
-static int do_recv_NPP(rpc_message_t *message, void *p_value)
+static int do_recv_NPW_PluginInstance(rpc_message_t *message, void *p_value)
 {
   int error;
   uint32_t instance_id;
@@ -115,9 +112,35 @@ static int do_recv_NPP(rpc_message_t *message, void *p_value)
 
   NPW_PluginInstance *plugin = id_lookup(instance_id);
   if (instance_id && plugin == NULL)
-	npw_printf("ERROR: passing an unknown instance\n");
-  if (plugin && plugin->instance == NULL)
-	npw_printf("ERROR: passing a NULL instance through plugin instance id\n");
+	npw_printf("ERROR: no valid NPP -> PluginInstance mapping found\n");
+  else if (plugin && plugin->instance == NULL)
+	npw_printf("ERROR: no valid PluginInstance -> NPP mapping found\n");
+  *((NPW_PluginInstance **)p_value) = plugin;
+  return RPC_ERROR_NO_ERROR;
+}
+
+
+/*
+ *  Process NPP objects
+ */
+
+static int do_send_NPP(rpc_message_t *message, void *p_value)
+{
+  NPP instance = (NPP)p_value;
+  NPW_PluginInstance *plugin = NULL;
+  if (instance)
+	plugin = NPW_PLUGIN_INSTANCE(instance);
+  return do_send_NPW_PluginInstance(message, plugin);
+}
+
+static int do_recv_NPP(rpc_message_t *message, void *p_value)
+{
+  int error;
+  NPW_PluginInstance *plugin;
+
+  if ((error = do_recv_NPW_PluginInstance(message, &plugin)) < 0)
+	return error;
+
   *((NPP *)p_value) = plugin ? plugin->instance : NULL;
   return RPC_ERROR_NO_ERROR;
 }
@@ -1145,7 +1168,6 @@ static int do_recv_NPPrintData(rpc_message_t *message, void *p_value)
  *  Process NPObject objects
  */
 
-// XXX propagate reference counters?
 static int do_send_NPObject(rpc_message_t *message, void *p_value)
 {
   uint32_t npobj_id = 0;
@@ -1165,7 +1187,19 @@ static int do_send_NPObject(rpc_message_t *message, void *p_value)
 #endif
 	assert(npobj_id != 0);
   }
-  return rpc_message_send_uint32(message, npobj_id);
+  int error = rpc_message_send_uint32(message, npobj_id);
+  if (error < 0)
+	return error;
+
+#ifdef BUILD_WRAPPER
+  // synchronize referenceCount
+  if (npobj) {
+	if ((error = rpc_message_send_uint32(message, npobj->referenceCount)) < 0)
+	  return error;
+  }
+#endif
+
+  return RPC_ERROR_NO_ERROR;
 }
 
 static int do_recv_NPObject(rpc_message_t *message, void *p_value)
@@ -1187,7 +1221,20 @@ static int do_recv_NPObject(rpc_message_t *message, void *p_value)
 	}
 #endif
 	assert(npobj != NULL);
+
+#ifdef BUILD_VIEWER
+	// synchronize referenceCount
+	uint32_t referenceCount;
+	if ((error = rpc_message_recv_uint32(message, &referenceCount)) < 0)
+	  return error;
+	if (npobj->referenceCount != referenceCount) {
+	  D(bug("synchronize NPObject::referenceCount (%d -> %d)\n",
+			npobj->referenceCount, referenceCount));
+	  npobj->referenceCount = referenceCount;
+	}
+#endif
   }
+
   *((NPObject **)p_value) = npobj;
   return RPC_ERROR_NO_ERROR;
 }
@@ -1450,6 +1497,12 @@ static const rpc_message_descriptor_t message_descs[] = {
 	sizeof(NPP),
 	do_send_NPP,
 	do_recv_NPP
+  },
+  {
+	RPC_TYPE_NPW_PLUGIN_INSTANCE,
+	sizeof(NPW_PluginInstance *),
+	do_send_NPW_PluginInstance,
+	do_recv_NPW_PluginInstance
   },
   {
 	RPC_TYPE_NP_STREAM,

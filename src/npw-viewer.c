@@ -52,21 +52,22 @@
 // [UNIMPLEMENTED] Define to use XPCOM emulation
 #define USE_XPCOM 0
 
-// Define to use XEMBED hack (GTK_WINDOW_POPUP toplevel instead of GtkPlug)
+// Define to use XEMBED hack (don't let browser kill our window)
 #define USE_XEMBED_HACK 1
 
 // Define to allow windowless plugins
 #define ALLOW_WINDOWLESS_PLUGINS 1
 
-
 // RPC global connections
 rpc_connection_t *g_rpc_connection attribute_hidden = NULL;
+
+// Viewer orignal pid - check against incorrect plugins
+static pid_t g_viewer_pid = 0;
 
 // Instance state information about the plugin
 typedef struct _PluginInstance {
   NPW_DECL_PLUGIN_INSTANCE;
   bool use_xembed;
-  bool use_xembed_hack;
   bool is_windowless;
   NPWindow window;
   uint32_t width, height;
@@ -76,6 +77,9 @@ typedef struct _PluginInstance {
 
 #define PLUGIN_INSTANCE(instance) \
   ((PluginInstance *)NPW_PLUGIN_INSTANCE(instance))
+
+#define PLUGIN_INSTANCE_NPP(plugin) \
+  NPW_PLUGIN_INSTANCE_NPP((NPW_PluginInstance *)(plugin))
 
 // Browser side data for an NPStream instance
 typedef struct _StreamInstance {
@@ -91,10 +95,136 @@ typedef struct _XtData {
 
 // Gtk wrapper data
 typedef struct _GtkData {
-  GdkWindow *browser_window;
   GtkWidget *container;
   GtkWidget *socket;
 } GtkData;
+
+// Prototypes
+static void destroy_window(PluginInstance *plugin);
+
+
+/* ====================================================================== */
+/* === Helpers                                                        === */
+/* ====================================================================== */
+
+// PluginInstance vfuncs
+static void *plugin_instance_allocate(void);
+static void plugin_instance_deallocate(PluginInstance *plugin);
+static void plugin_instance_finalize(PluginInstance *plugin);
+
+static NPW_PluginInstanceClass PluginInstanceClass = {
+  (NPW_PluginInstanceAllocateFunctionPtr)plugin_instance_allocate,
+  (NPW_PluginInstanceDeallocateFunctionPtr)plugin_instance_deallocate,
+  (NPW_PluginInstanceFinalizeFunctionPtr)plugin_instance_finalize
+};
+
+static void *plugin_instance_allocate(void)
+{
+  return NPW_MemNew0(PluginInstance, 1);
+}
+
+static void plugin_instance_deallocate(PluginInstance *plugin)
+{
+  NPW_MemFree(plugin);
+}
+
+static void plugin_instance_finalize(PluginInstance *plugin)
+{
+  if (plugin->browser_toplevel) {
+	g_object_unref(plugin->browser_toplevel);
+	plugin->browser_toplevel = NULL;
+  }
+  destroy_window(plugin);
+}
+
+// Pid support routines
+static void pid_init(void)
+{
+  g_viewer_pid = getpid();
+}
+
+bool pid_check(void)
+{
+#if USE_PID_CHECK
+  return (g_viewer_pid == getpid());
+#endif
+  return true;
+}
+
+// Delayed calls machinery
+// XXX: use a pipe, this should be faster (avoids GSource creation and
+// explicit memory allocation)
+enum {
+  RPC_DELAYED_NPN_RELEASE_OBJECT = 1,
+  RPC_DELAYED_NPN_INVALIDATE_RECT,
+};
+
+typedef struct _DelayedCall {
+  gint type;
+  gpointer data;
+} DelayedCall;
+
+static GList *g_delayed_calls = NULL;
+static guint g_delayed_calls_id = 0;
+
+static void g_NPN_ReleaseObject_Now(NPObject *npobj);
+static gboolean delayed_calls_process_cb(gpointer user_data);
+
+static void delayed_calls_add(int type, gpointer data)
+{
+  DelayedCall *dcall = NPW_MemNew(DelayedCall, 1);
+  if (dcall == NULL)
+	return;
+  dcall->type = type;
+  dcall->data = data;
+  g_delayed_calls = g_list_append(g_delayed_calls, dcall);
+
+  if (g_delayed_calls_id == 0)
+	g_delayed_calls_id = g_idle_add_full(G_PRIORITY_LOW,
+										 delayed_calls_process_cb, NULL, NULL);
+}
+
+// Returns whether there are pending calls left in the queue
+static gboolean delayed_calls_process(PluginInstance *plugin, gboolean is_in_NPP_Destroy)
+{
+  GList *l = g_delayed_calls;
+  while (l != NULL) {
+	GList *cl = l;
+	l = l->next;
+
+	if (!is_in_NPP_Destroy) {
+	  /* Continue later if there is incoming RPC */
+	  if (rpc_wait_dispatch(g_rpc_connection, 0) > 0)
+		return TRUE;
+	}
+
+	DelayedCall *dcall = (DelayedCall *)cl->data;
+	switch (dcall->type) {
+	case RPC_DELAYED_NPN_RELEASE_OBJECT:
+	  {
+		NPObject *npobj = (NPObject *)dcall->data;
+		g_NPN_ReleaseObject_Now(npobj);
+		break;
+	  }
+	}
+	NPW_MemFree(dcall);
+	g_delayed_calls = g_list_delete_link(g_delayed_calls, cl);
+  }
+
+  if (g_delayed_calls)
+	return TRUE;
+
+  if (g_delayed_calls_id) {
+	g_source_remove(g_delayed_calls_id);
+	g_delayed_calls_id = 0;
+  }
+  return FALSE;
+}
+
+static gboolean delayed_calls_process_cb(gpointer user_data)
+{
+  return delayed_calls_process(NULL, FALSE);
+}
 
 
 /* ====================================================================== */
@@ -420,20 +550,11 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
 	GtkData *toolkit = calloc(1, sizeof(*toolkit));
 	if (toolkit == NULL)
 	  return -1;
-	if (plugin->use_xembed_hack)
-	  toolkit->container = gtk_window_new(GTK_WINDOW_POPUP);
-	else
-	  toolkit->container = gtk_plug_new((GdkNativeWindow)window->window);
+	toolkit->container = gtk_plug_new((GdkNativeWindow)window->window);
 	if (toolkit->container == NULL)
 	  return -1;
 	gtk_widget_set_size_request(toolkit->container, window->width, window->height); 
 	gtk_widget_show(toolkit->container);
-	if (plugin->use_xembed_hack) {
-	  toolkit->browser_window = gdk_window_foreign_new((GdkNativeWindow)window->window);
-	  if (toolkit->browser_window == NULL)
-		return -1;
-	  gdk_window_reparent(toolkit->container->window, toolkit->browser_window, 0, 0);
-	}
 	toolkit->socket = gtk_socket_new();
 	if (toolkit->socket == NULL)
 	  return -1;
@@ -442,6 +563,14 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
 	gtk_widget_show_all(toolkit->container);
 	window->window = (void *)gtk_socket_get_id(GTK_SOCKET(toolkit->socket));
 	plugin->toolkit_data = toolkit;
+#if USE_XEMBED_HACK
+	// don't let the browser kill our window out of NPP_Destroy() scope
+	g_signal_connect(toolkit->container, "delete-event",
+					 G_CALLBACK(gtk_true), NULL);
+#endif
+	// make sure we don't try to destroy the widget again in destroy_window()
+	g_signal_connect(toolkit->container, "destroy",
+					 G_CALLBACK(gtk_widget_destroyed), &toolkit->container);
 	// keep the socket as the plugin tries to destroy the widget itself
 	g_signal_connect(toolkit->socket, "plug_removed",
 					 G_CALLBACK(gtk_true), NULL);
@@ -521,7 +650,7 @@ static int update_window(PluginInstance *plugin, NPWindow *window)
 	plugin->window.height = window->height;
 	if (plugin->toolkit_data) {
 	  if (plugin->use_xembed) {
-		// XXX check window size changes are already caught per the XEMBED protocol
+		// window size changes are already caught per the XEMBED protocol
 	  }
 	  else {
 		XtData *toolkit = (XtData *)plugin->toolkit_data;
@@ -589,11 +718,14 @@ g_NPN_ForceRedraw(NPP instance)
 
 // Asks the browser to create a stream for the specified URL
 static NPError
-invoke_NPN_GetURL(NPP instance, const char *url, const char *target)
+invoke_NPN_GetURL(PluginInstance *plugin, const char *url, const char *target)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_GET_URL,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_STRING, url,
 								RPC_TYPE_STRING, target,
 								RPC_TYPE_INVALID);
@@ -617,22 +749,36 @@ invoke_NPN_GetURL(NPP instance, const char *url, const char *target)
 static NPError
 g_NPN_GetURL(NPP instance, const char *url, const char *target)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_GetURL called from the wrong process\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+
   if (instance == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
-  D(bug("NPN_GetURL instance=%p\n", instance));
-  NPError ret = invoke_NPN_GetURL(instance, url, target);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  D(bugiI("NPN_GetURL instance=%p\n", instance));
+  npw_plugin_instance_ref(plugin);
+  NPError ret = invoke_NPN_GetURL(plugin, url, target);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_GetURL return: %d [%s]\n", ret, string_of_NPError(ret)));
   return ret;
 }
 
 // Requests creation of a new stream with the contents of the specified URL
 static NPError
-invoke_NPN_GetURLNotify(NPP instance, const char *url, const char *target, void *notifyData)
+invoke_NPN_GetURLNotify(PluginInstance *plugin, const char *url, const char *target, void *notifyData)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_GET_URL_NOTIFY,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_STRING, url,
 								RPC_TYPE_STRING, target,
 								RPC_TYPE_NP_NOTIFY_DATA, notifyData,
@@ -657,22 +803,36 @@ invoke_NPN_GetURLNotify(NPP instance, const char *url, const char *target, void 
 static NPError
 g_NPN_GetURLNotify(NPP instance, const char *url, const char *target, void *notifyData)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_GetURLNotify called from the wrong process\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+	
   if (instance == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
-  D(bug("NPN_GetURLNotify instance=%p\n", instance));
-  NPError ret = invoke_NPN_GetURLNotify(instance, url, target, notifyData);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  D(bugiI("NPN_GetURLNotify instance=%p\n", instance));
+  npw_plugin_instance_ref(plugin);
+  NPError ret = invoke_NPN_GetURLNotify(plugin, url, target, notifyData);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_GetURLNotify return: %d [%s]\n", ret, string_of_NPError(ret)));
   return ret;
 }
 
 // Allows the plug-in to query the browser for information
 static NPError
-invoke_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
+invoke_NPN_GetValue(PluginInstance *plugin, NPNVariable variable, void *value)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_GET_VALUE,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_UINT32, variable,
 								RPC_TYPE_INVALID);
 
@@ -691,7 +851,7 @@ invoke_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 		npw_perror("NPN_GetValue() wait for reply", error);
 		ret = NPERR_GENERIC_ERROR;
 	  }
-	  D(bug(" value: %u\n", n));
+	  D(bug("-> value: %u\n", n));
 	  *((unsigned int *)value) = n;
 	  break;
 	}
@@ -703,7 +863,7 @@ invoke_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 		npw_perror("NPN_GetValue() wait for reply", error);
 		ret = NPERR_GENERIC_ERROR;
 	  }
-	  D(bug(" value: %s\n", b ? "true" : "false"));
+	  D(bug("-> value: %s\n", b ? "true" : "false"));
 	  *((PRBool *)value) = b ? PR_TRUE : PR_FALSE;
 	  break;
 	}
@@ -715,7 +875,7 @@ invoke_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 		npw_perror("NPN_GetValue() wait for reply", error);
 		ret = NPERR_GENERIC_ERROR;
 	  }
-	  D(bug(" value: %p\n", npobj));
+	  D(bug("-> value: <object %p>\n", npobj));
 	  *((NPObject **)value) = npobj;
 	  break;
 	}
@@ -727,13 +887,29 @@ invoke_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 static NPError
 g_NPN_GetValue_real(NPP instance, NPNVariable variable, void *value)
 {
-  return invoke_NPN_GetValue(instance, variable, value);
+  PluginInstance *plugin = NULL;
+  if (instance)
+	plugin = PLUGIN_INSTANCE(instance);
+
+  npw_plugin_instance_ref(plugin);
+  NPError ret = invoke_NPN_GetValue(plugin, variable, value);
+  npw_plugin_instance_unref(plugin);
+  return ret;
 }
 
 static NPError
 g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 {
-  D(bug("NPN_GetValue instance=%p, variable=%d [%08x]\n", instance, variable & 0xffff, variable));
+  D(bug("NPN_GetValue instance=%p, variable=%d [%s]\n", instance, variable, string_of_NPNVariable(variable)));
+
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_GetValue called from the wrong process\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+
+  PluginInstance *plugin = NULL;
+  if (instance)
+	plugin = PLUGIN_INSTANCE(instance);
 
   switch (variable) {
   case NPNVxDisplay:
@@ -749,14 +925,23 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
   case NPNVserviceManager: {
 	nsIServiceManager *sm;
 	int ret = NS_GetServiceManager(&sm);
-	if (NS_FAILED(ret))
+	if (NS_FAILED(ret)) {
+	  npw_printf("WARNING: NS_GetServiceManager failed\n");
 	  return NPERR_GENERIC_ERROR;
+	}
 	*(nsIServiceManager **)value = sm;
 	break;
   }
+  case NPNVDOMWindow:
+  case NPNVDOMElement:
+	npw_printf("WARNING: %s is not supported by NPN_GetValue()\n", string_of_NPNVariable(variable));
+	return NPERR_INVALID_PARAM;
 #endif
-  case NPNVnetscapeWindow: {
-	PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  case NPNVnetscapeWindow:
+	if (plugin == NULL) {
+	  npw_printf("ERROR: NPNVnetscapeWindow requires a non NULL instance\n");
+	  return NPERR_INVALID_INSTANCE_ERROR;
+	}
 	if (plugin->browser_toplevel == NULL) {
 	  GdkNativeWindow netscape_xid = None;
 	  NPError error = g_NPN_GetValue_real(instance, variable, &netscape_xid);
@@ -770,7 +955,6 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 	}
 	*((GdkNativeWindow *)value) = GDK_WINDOW_XWINDOW(plugin->browser_toplevel);
 	break;
-  }
 #if ALLOW_WINDOWLESS_PLUGINS
   case NPNVSupportsWindowless:
 #endif
@@ -779,7 +963,7 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
   case NPNVPluginElementNPObject:
 	return g_NPN_GetValue_real(instance, variable, value);
   default:
-	npw_printf("WARNING: unhandled variable %d in NPN_GetValue()\n", variable);
+	npw_printf("WARNING: unhandled variable %d (%s) in NPN_GetValue()\n", variable, string_of_NPNVariable(variable));
 	return NPERR_INVALID_PARAM;
   }
 
@@ -788,11 +972,13 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 
 // Invalidates specified drawing area prior to repainting or refreshing a windowless plug-in
 static void
-invoke_NPN_InvalidateRect(NPP instance, NPRect *invalidRect)
+invoke_NPN_InvalidateRect(PluginInstance *plugin, NPRect *invalidRect)
 {
+  npw_return_if_fail(rpc_method_invoke_possible(g_rpc_connection));
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_INVALIDATE_RECT,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_RECT, invalidRect,
 								RPC_TYPE_INVALID);
 
@@ -812,12 +998,26 @@ invoke_NPN_InvalidateRect(NPP instance, NPRect *invalidRect)
 static void
 g_NPN_InvalidateRect(NPP instance, NPRect *invalidRect)
 {
-  if (instance == NULL || invalidRect == NULL)
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_InvalidateRect called from the wrong process\n");
+	return;
+  }
+
+  if (instance == NULL)
 	return;
 
-  D(bug("NPN_InvalidateRect instance=%p\n", instance));
-  invoke_NPN_InvalidateRect(instance, invalidRect);
-  D(bug(" done\n"));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return;
+
+  if (invalidRect == NULL)
+	return;
+
+  D(bugiI("NPN_InvalidateRect instance=%p\n", PLUGIN_INSTANCE_NPP(plugin)));
+  npw_plugin_instance_ref(plugin);
+  invoke_NPN_InvalidateRect(plugin, invalidRect);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_InvalidateRect done\n"));
 }
 
 // Invalidates specified region prior to repainting or refreshing a windowless plug-in
@@ -833,10 +1033,10 @@ g_NPN_InvalidateRegion(NPP instance, NPRegion invalidRegion)
 static void *
 g_NPN_MemAlloc(uint32 size)
 {
-  D(bug("NPN_MemAlloc size=%d\n", size));
+  D(bugiI("NPN_MemAlloc size=%d\n", size));
 
   void *ptr = NPW_MemAlloc(size);
-  D(bug(" return: %p\n", ptr));
+  D(bugiD("NPN_MemAlloc return: %p\n", ptr));
   return ptr;
 }
 
@@ -845,7 +1045,6 @@ static uint32
 g_NPN_MemFlush(uint32 size)
 {
   D(bug("NPN_MemFlush size=%d\n", size));
-
   return 0;
 }
 
@@ -853,18 +1052,21 @@ g_NPN_MemFlush(uint32 size)
 static void
 g_NPN_MemFree(void *ptr)
 {
-  D(bug("NPN_MemFree ptr=%p\n", ptr));
-
+  D(bugiI("NPN_MemFree ptr=%p\n", ptr));
   NPW_MemFree(ptr);
+  D(bugiD("NPN_MemFree done\n"));
 }
 
 // Posts data to a URL
 static NPError
-invoke_NPN_PostURL(NPP instance, const char *url, const char *target, uint32 len, const char *buf, NPBool file)
+invoke_NPN_PostURL(PluginInstance *plugin, const char *url, const char *target, uint32 len, const char *buf, NPBool file)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_POST_URL,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_STRING, url,
 								RPC_TYPE_STRING, target,
 								RPC_TYPE_ARRAY, RPC_TYPE_CHAR, len, buf,
@@ -890,22 +1092,36 @@ invoke_NPN_PostURL(NPP instance, const char *url, const char *target, uint32 len
 static NPError
 g_NPN_PostURL(NPP instance, const char *url, const char *target, uint32 len, const char *buf, NPBool file)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_PostURL called from the wrong process\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+
   if (instance == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
-  D(bug("NPN_PostURL instance=%p\n", instance));
-  NPError ret = invoke_NPN_PostURL(instance, url, target, len, buf, file);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  D(bugiI("NPN_PostURL instance=%p\n", instance));
+  npw_plugin_instance_ref(plugin);
+  NPError ret = invoke_NPN_PostURL(plugin, url, target, len, buf, file);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_PostURL return: %d [%s]\n", ret, string_of_NPError(ret)));
   return ret;
 }
 
 // Posts data to a URL, and receives notification of the result
 static NPError
-invoke_NPN_PostURLNotify(NPP instance, const char *url, const char *target, uint32 len, const char *buf, NPBool file, void *notifyData)
+invoke_NPN_PostURLNotify(PluginInstance *plugin, const char *url, const char *target, uint32 len, const char *buf, NPBool file, void *notifyData)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_POST_URL_NOTIFY,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_STRING, url,
 								RPC_TYPE_STRING, target,
 								RPC_TYPE_ARRAY, RPC_TYPE_CHAR, len, buf,
@@ -932,12 +1148,23 @@ invoke_NPN_PostURLNotify(NPP instance, const char *url, const char *target, uint
 static NPError
 g_NPN_PostURLNotify(NPP instance, const char *url, const char *target, uint32 len, const char *buf, NPBool file, void *notifyData)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_PostURLNotify called from the wrong process\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+	
   if (instance == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
-  D(bug("NPN_PostURLNotify instance=%p\n", instance));
-  NPError ret = invoke_NPN_PostURLNotify(instance, url, target, len, buf, file, notifyData);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  D(bugiI("NPN_PostURLNotify instance=%p\n", instance));
+  npw_plugin_instance_ref(plugin);
+  NPError ret = invoke_NPN_PostURLNotify(plugin, url, target, len, buf, file, notifyData);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_PostURLNotify return: %d [%s]\n", ret, string_of_NPError(ret)));
   return ret;
 }
 
@@ -972,6 +1199,9 @@ g_NPN_GetJavaPeer(NPP instance)
 static NPError
 invoke_NPN_RequestRead(NPStream *stream, NPByteRange *rangeList)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_REQUEST_READ,
 								RPC_TYPE_NP_STREAM, stream,
@@ -997,12 +1227,17 @@ invoke_NPN_RequestRead(NPStream *stream, NPByteRange *rangeList)
 static NPError
 g_NPN_RequestRead(NPStream *stream, NPByteRange *rangeList)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_RequestRead called from the wrong process\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+
   if (stream == NULL || stream->ndata == NULL || rangeList == NULL)
 	return NPERR_INVALID_PARAM;
 
-  D(bug("NPN_RequestRead stream=%p\n", stream));
+  D(bugiI("NPN_RequestRead stream=%p\n", stream));
   NPError ret = invoke_NPN_RequestRead(stream, rangeList);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  D(bugiD("NPN_RequestRead return: %d [%s]\n", ret, string_of_NPError(ret)));
   return ret;
 }
 
@@ -1018,9 +1253,12 @@ invoke_NPN_SetValue(PluginInstance *plugin, NPPVariable variable, void *value)
 	return NPERR_INVALID_PARAM;
   }
 
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_SET_VALUE,
-								RPC_TYPE_NPP, plugin->instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_UINT32, variable,
 								RPC_TYPE_BOOLEAN, (uint32_t)(uintptr_t)value,
 								RPC_TYPE_INVALID);
@@ -1042,6 +1280,11 @@ invoke_NPN_SetValue(PluginInstance *plugin, NPPVariable variable, void *value)
 static NPError
 g_NPN_SetValue(NPP instance, NPPVariable variable, void *value)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_SetValue called from the wrong process\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+
   if (instance == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
@@ -1049,19 +1292,23 @@ g_NPN_SetValue(NPP instance, NPPVariable variable, void *value)
   if (plugin == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
-  D(bug("NPN_SetValue instance=%p, variable=%d\n", instance, variable));
+  D(bugiI("NPN_SetValue instance=%p, variable=%d [%s]\n", instance, variable, string_of_NPPVariable(variable)));
+  npw_plugin_instance_ref(plugin);
   NPError ret = invoke_NPN_SetValue(plugin, variable, value);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_SetValue return: %d [%s]\n", ret, string_of_NPError(ret)));
   return ret;
 }
 
 // Displays a message on the status line of the browser window
 static void
-invoke_NPN_Status(NPP instance, const char *message)
+invoke_NPN_Status(PluginInstance *plugin, const char *message)
 {
+  npw_return_if_fail(rpc_method_invoke_possible(g_rpc_connection));
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_STATUS,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_STRING, message,
 								RPC_TYPE_INVALID);
 
@@ -1081,23 +1328,42 @@ invoke_NPN_Status(NPP instance, const char *message)
 static void
 g_NPN_Status(NPP instance, const char *message)
 {
-  D(bug("NPN_Status instance=%p\n", instance));
-  invoke_NPN_Status(instance, message);
-  D(bug(" done\n"));
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_Status called from the wrong process\n");
+	return;
+  }
+
+  PluginInstance *plugin = NULL;
+  if (instance)
+	plugin = PLUGIN_INSTANCE(instance);
+
+  D(bugiI("NPN_Status instance=%p, message='%s'\n", instance, message));
+  npw_plugin_instance_ref(plugin);
+  invoke_NPN_Status(plugin, message);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_Status done\n"));
 }
 
 // Returns the browser's user agent field
 static char *
 invoke_NPN_UserAgent(void)
 {
-  int error = rpc_method_invoke(g_rpc_connection, RPC_METHOD_NPN_USER_AGENT, RPC_TYPE_INVALID);
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), NULL);
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_USER_AGENT,
+								RPC_TYPE_INVALID);
+
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPN_UserAgent() invoke", error);
 	return NULL;
   }
 
   char *user_agent;
-  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_STRING, &user_agent, RPC_TYPE_INVALID);
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_STRING, &user_agent,
+									RPC_TYPE_INVALID);
+
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPN_UserAgent() wait for reply", error);
 	return NULL;
@@ -1109,20 +1375,28 @@ invoke_NPN_UserAgent(void)
 static const char *
 g_NPN_UserAgent(NPP instance)
 {
-  D(bug("NPN_UserAgent instance=%p\n", instance));
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_UserAgent called from the wrong process\n");
+	return NULL;
+  }
+
+  D(bugiI("NPN_UserAgent instance=%p\n", instance));
   if (g_user_agent == NULL)
 	g_user_agent = invoke_NPN_UserAgent();
-  D(bug(" user_agent='%s'\n", g_user_agent));
+  D(bugiD("NPN_UserAgent return: '%s'\n", g_user_agent));
   return g_user_agent;
 }
 
 // Requests the creation of a new data stream produced by the plug-in and consumed by the browser
 static NPError
-invoke_NPN_NewStream(NPP instance, NPMIMEType type, const char *target, NPStream **pstream)
+invoke_NPN_NewStream(PluginInstance *plugin, NPMIMEType type, const char *target, NPStream **pstream)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_NEW_STREAM,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_STRING, type,
 								RPC_TYPE_STRING, target,
 								RPC_TYPE_INVALID);
@@ -1191,26 +1465,40 @@ invoke_NPN_NewStream(NPP instance, NPMIMEType type, const char *target, NPStream
 static NPError
 g_NPN_NewStream(NPP instance, NPMIMEType type, const char *target, NPStream **stream)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_NewStream called from the wrong process\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+
   if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
   if (stream == NULL)
 	return NPERR_INVALID_PARAM;
   *stream = NULL;
 
-  D(bug("NPN_NewStream instance=%p\n", instance));
-  NPError ret = invoke_NPN_NewStream(instance, type, target, stream);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  D(bugiI("NPN_NewStream instance=%p\n", instance));
+  npw_plugin_instance_ref(plugin);
+  NPError ret = invoke_NPN_NewStream(plugin, type, target, stream);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_NewStream return: %d [%s]\n", ret, string_of_NPError(ret)));
   return ret;
 }
 
 // Closes and deletes a stream
 static NPError
-invoke_NPN_DestroyStream(NPP instance, NPStream *stream, NPError reason)
+invoke_NPN_DestroyStream(PluginInstance *plugin, NPStream *stream, NPError reason)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_DESTROY_STREAM,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_STREAM, stream,
 								RPC_TYPE_INT32, (int32_t)reason,
 								RPC_TYPE_INVALID);
@@ -1236,16 +1524,27 @@ invoke_NPN_DestroyStream(NPP instance, NPStream *stream, NPError reason)
 static NPError
 g_NPN_DestroyStream(NPP instance, NPStream *stream, NPError reason)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_DestroyStream called from the wrong process\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+  
   if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
   if (stream == NULL)
 	return NPERR_INVALID_PARAM;
 
-  D(bug("NPN_DestroyStream instance=%p, stream=%p, reason=%s\n",
+  D(bugiI("NPN_DestroyStream instance=%p, stream=%p, reason=%s\n",
 		instance, stream, string_of_NPReason(reason)));
-  NPError ret = invoke_NPN_DestroyStream(instance, stream, reason);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  npw_plugin_instance_ref(plugin);
+  NPError ret = invoke_NPN_DestroyStream(plugin, stream, reason);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_DestroyStream return: %d [%s]\n", ret, string_of_NPError(ret)));
 
   // Mozilla calls NPP_DestroyStream() for its streams, keep stream
   // info in that case
@@ -1263,11 +1562,13 @@ g_NPN_DestroyStream(NPP instance, NPStream *stream, NPError reason)
 
 // Pushes data into a stream produced by the plug-in and consumed by the browser
 static int
-invoke_NPN_Write(NPP instance, NPStream *stream, int32 len, void *buf)
+invoke_NPN_Write(PluginInstance *plugin, NPStream *stream, int32 len, void *buf)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), -1);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_WRITE,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_STREAM, stream,
 								RPC_TYPE_ARRAY, RPC_TYPE_CHAR, len, buf,
 								RPC_TYPE_INVALID);
@@ -1293,25 +1594,38 @@ invoke_NPN_Write(NPP instance, NPStream *stream, int32 len, void *buf)
 static int32
 g_NPN_Write(NPP instance, NPStream *stream, int32 len, void *buf)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_Write called from the wrong process\n");
+	return -1;
+  }
+  
   if (instance == NULL)
+	return -1;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
 	return -1;
 
   if (stream == NULL)
 	return -1;
 
-  D(bug("NPN_Write instance=%p, stream=%p, len=%d, buf=%p\n", instance, stream, len, buf));
-  int32 ret = invoke_NPN_Write(instance, stream, len, buf);
-  D(bug(" return: %d\n", ret));
+  D(bugiI("NPN_Write instance=%p, stream=%p, len=%d, buf=%p\n", instance, stream, len, buf));
+  npw_plugin_instance_ref(plugin);
+  int32 ret = invoke_NPN_Write(plugin, stream, len, buf);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_Write return: %d\n", ret));
   return ret;
 }
 
 // Enable popups while executing code where popups should be enabled
 static void
-invoke_NPN_PushPopupsEnabledState(NPP instance, NPBool enabled)
+invoke_NPN_PushPopupsEnabledState(PluginInstance *plugin, NPBool enabled)
 {
+  npw_return_if_fail(rpc_method_invoke_possible(g_rpc_connection));
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_PUSH_POPUPS_ENABLED_STATE,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_UINT32, (uint32_t)enabled,
 								RPC_TYPE_INVALID);
 
@@ -1329,21 +1643,34 @@ invoke_NPN_PushPopupsEnabledState(NPP instance, NPBool enabled)
 static void
 g_NPN_PushPopupsEnabledState(NPP instance, NPBool enabled)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_PushPopupsEnabledState called from the wrong process\n");
+	return;
+  }
+
   if (instance == NULL)
 	return;
 
-  D(bug("NPN_PushPopupsEnabledState instance=%p, enabled=%d\n", instance, enabled));
-  invoke_NPN_PushPopupsEnabledState(instance, enabled);
-  D(bug(" done\n"));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return;
+
+  D(bugiI("NPN_PushPopupsEnabledState instance=%p, enabled=%d\n", instance, enabled));
+  npw_plugin_instance_ref(plugin);
+  invoke_NPN_PushPopupsEnabledState(plugin, enabled);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_PushPopupsEnabledState done\n"));
 }
 
 // Restore popups state
 static void
-invoke_NPN_PopPopupsEnabledState(NPP instance)
+invoke_NPN_PopPopupsEnabledState(PluginInstance *plugin)
 {
+  npw_return_if_fail(rpc_method_invoke_possible(g_rpc_connection));
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_POP_POPUPS_ENABLED_STATE,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -1360,12 +1687,23 @@ invoke_NPN_PopPopupsEnabledState(NPP instance)
 static void
 g_NPN_PopPopupsEnabledState(NPP instance)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_PophPopupsEnabledState called from the wrong process\n");
+	return;
+  }
+
   if (instance == NULL)
 	return;
 
-  D(bug("NPN_PopPopupsEnabledState instance=%p\n", instance));
-  invoke_NPN_PopPopupsEnabledState(instance);
-  D(bug(" done\n"));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return;
+
+  D(bugiI("NPN_PopPopupsEnabledState instance=%p\n", instance));
+  npw_plugin_instance_ref(plugin);
+  invoke_NPN_PopPopupsEnabledState(plugin);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_PopPopupsEnabledState done\n"));
 }
 
 
@@ -1375,11 +1713,13 @@ g_NPN_PopPopupsEnabledState(NPP instance)
 
 // Allocates a new NPObject
 static uint32_t
-invoke_NPN_CreateObject(NPP instance)
+invoke_NPN_CreateObject(PluginInstance *plugin)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), 0);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_CREATE_OBJECT,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -1403,22 +1743,38 @@ invoke_NPN_CreateObject(NPP instance)
 static NPObject *
 g_NPN_CreateObject(NPP instance, NPClass *class)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_CreateObject called from the wrong process\n");
+	return NULL;
+  }
+  
   if (instance == NULL)
+	return NULL;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
 	return NULL;
 
   if (class == NULL)
 	return NULL;
 
-  D(bug("NPN_CreateObject\n"));
-  uint32_t npobj_id = invoke_NPN_CreateObject(instance);
-  D(bug(" return: %d\n", npobj_id));
-  return npobject_new(npobj_id, instance, class);
+  D(bugiI("NPN_CreateObject\n"));
+  npw_plugin_instance_ref(plugin);
+  uint32_t npobj_id = invoke_NPN_CreateObject(plugin);
+  npw_plugin_instance_unref(plugin);
+  assert(npobj_id != 0);
+  NPObject *npobj = npobject_new(npobj_id, instance, class);
+  D(bugiD("NPN_CreateObject return: %p (refcount: %d)\n", npobj, npobj->referenceCount));
+  return npobj;
 }
 
 // Increments the reference count of the given NPObject
 static uint32_t
 invoke_NPN_RetainObject(NPObject *npobj)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 npobj->referenceCount);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_RETAIN_OBJECT,
 								RPC_TYPE_NP_OBJECT, npobj,
@@ -1443,12 +1799,17 @@ invoke_NPN_RetainObject(NPObject *npobj)
 static NPObject *
 g_NPN_RetainObject(NPObject *npobj)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_RetainObject called from the wrong process\n");
+	return NULL;
+  }
+	
   if (npobj == NULL)
 	return NULL;
 
-  D(bug("NPN_RetainObject %p\n", npobj));
+  D(bugiI("NPN_RetainObject npobj=%p\n", npobj));
   uint32_t refcount = invoke_NPN_RetainObject(npobj);
-  D(bug(" return: %d\n", refcount));
+  D(bugiD("NPN_RetainObject return: %p (refcount: %d)\n", npobj, refcount));
   npobj->referenceCount = refcount;
   return npobj;
 }
@@ -1457,6 +1818,9 @@ g_NPN_RetainObject(NPObject *npobj)
 static uint32_t
 invoke_NPN_ReleaseObject(NPObject *npobj)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 npobj->referenceCount);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_RELEASE_OBJECT,
 								RPC_TYPE_NP_OBJECT, npobj,
@@ -1479,27 +1843,53 @@ invoke_NPN_ReleaseObject(NPObject *npobj)
 }
 
 static void
-g_NPN_ReleaseObject(NPObject *npobj)
+g_NPN_ReleaseObject_Now(NPObject *npobj)
 {
-  if (npobj == NULL)
-	return;
-
-  D(bug("NPN_ReleaseObject %p\n", npobj));
+  D(bugiI("NPN_ReleaseObject npobj=%p\n", npobj));
   uint32_t refcount = invoke_NPN_ReleaseObject(npobj);
-  D(bug(" return: %d\n", refcount));
+  D(bugiD("NPN_ReleaseObject done (refcount: %d)\n", refcount));
 
   if ((npobj->referenceCount = refcount) == 0)
 	npobject_destroy(npobj);
 }
 
+static void
+g_NPN_ReleaseObject_Delayed(NPObject *npobj)
+{
+  delayed_calls_add(RPC_DELAYED_NPN_RELEASE_OBJECT, npobj);
+}
+
+static void
+g_NPN_ReleaseObject(NPObject *npobj)
+{
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_ReleaseObject called from the wrong process\n");
+	return;
+  }
+	
+  if (npobj == NULL)
+	return;
+
+  if (rpc_method_invoke_possible(g_rpc_connection)) {
+	D(bug("NPN_ReleaseObject <now>\n"));
+	g_NPN_ReleaseObject_Now(npobj);
+  }
+  else {
+	D(bug("NPN_ReleaseObject <delayed>\n"));
+	g_NPN_ReleaseObject_Delayed(npobj);
+  }
+}
+
 // Invokes a method on the given NPObject
 static bool
-invoke_NPN_Invoke(NPP instance, NPObject *npobj, NPIdentifier methodName,
+invoke_NPN_Invoke(PluginInstance *plugin, NPObject *npobj, NPIdentifier methodName,
 				  const NPVariant *args, uint32_t argCount, NPVariant *result)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_INVOKE,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
 								RPC_TYPE_NP_IDENTIFIER, methodName,
 								RPC_TYPE_ARRAY, RPC_TYPE_NP_VARIANT, argCount, args,
@@ -1528,26 +1918,42 @@ static bool
 g_NPN_Invoke(NPP instance, NPObject *npobj, NPIdentifier methodName,
 			 const NPVariant *args, uint32_t argCount, NPVariant *result)
 {
-  if (!instance || !npobj || !npobj->_class || !npobj->_class->invoke)
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_Invoke called from the wrong process\n");
+	return false;
+  }
+
+  if (instance == NULL)
 	return false;
 
-  D(bug("NPN_Invoke instance=%p, npobj=%p, methodName=%p\n", instance, npobj, methodName));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+	
+  if (!npobj || !npobj->_class || !npobj->_class->invoke)
+	return false;
+
+  D(bugiI("NPN_Invoke instance=%p, npobj=%p, methodName=%p\n", instance, npobj, methodName));
   print_npvariant_args(args, argCount);
-  bool ret = invoke_NPN_Invoke(instance, npobj, methodName, args, argCount, result);
+  npw_plugin_instance_ref(plugin);
+  bool ret = invoke_NPN_Invoke(plugin, npobj, methodName, args, argCount, result);
+  npw_plugin_instance_unref(plugin);
   gchar *result_str = string_of_NPVariant(result);
-  D(bug(" return: %d (%s)\n", ret, result_str));
+  D(bugiD("NPN_Invoke return: %d (%s)\n", ret, result_str));
   g_free(result_str);
   return ret;
 }
 
 // Invokes the default method on the given NPObject
 static bool
-invoke_NPN_InvokeDefault(NPP instance, NPObject *npobj,
+invoke_NPN_InvokeDefault(PluginInstance *plugin, NPObject *npobj,
 						 const NPVariant *args, uint32_t argCount, NPVariant *result)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_INVOKE_DEFAULT,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
 								RPC_TYPE_ARRAY, RPC_TYPE_NP_VARIANT, argCount, args,
 								RPC_TYPE_INVALID);
@@ -1575,25 +1981,41 @@ static bool
 g_NPN_InvokeDefault(NPP instance, NPObject *npobj,
 					const NPVariant *args, uint32_t argCount, NPVariant *result)
 {
-  if (!instance || !npobj || !npobj->_class || !npobj->_class->invokeDefault)
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_InvokeDefault called from the wrong process\n");
+	return false;
+  }
+
+  if (instance == NULL)
 	return false;
 
-  D(bug("NPN_InvokeDefault instance=%p, npobj=%p\n", instance, npobj));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+
+  if (!npobj || !npobj->_class || !npobj->_class->invokeDefault)
+	return false;
+
+  D(bugiI("NPN_InvokeDefault instance=%p, npobj=%p\n", instance, npobj));
   print_npvariant_args(args, argCount);
-  bool ret = invoke_NPN_InvokeDefault(instance, npobj, args, argCount, result);
+  npw_plugin_instance_ref(plugin);
+  bool ret = invoke_NPN_InvokeDefault(plugin, npobj, args, argCount, result);
+  npw_plugin_instance_unref(plugin);
   gchar *result_str = string_of_NPVariant(result);
-  D(bug(" return: %d (%s)\n", ret, result_str));
+  D(bugiD("NPN_InvokeDefault return: %d (%s)\n", ret, result_str));
   g_free(result_str);
   return ret;
 }
 
 // Evaluates a script on the scope of a given NPObject
 static bool
-invoke_NPN_Evaluate(NPP instance, NPObject *npobj, NPString *script, NPVariant *result)
+invoke_NPN_Evaluate(PluginInstance *plugin, NPObject *npobj, NPString *script, NPVariant *result)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_EVALUATE,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
 								RPC_TYPE_NP_STRING, script,
 								RPC_TYPE_INVALID);
@@ -1620,28 +2042,44 @@ invoke_NPN_Evaluate(NPP instance, NPObject *npobj, NPString *script, NPVariant *
 static bool
 g_NPN_Evaluate(NPP instance, NPObject *npobj, NPString *script, NPVariant *result)
 {
-  if (!instance || !npobj)
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_Evaluate called from the wrong process\n");
+	return false;
+  }
+
+  if (instance == NULL)
+	return false;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+
+  if (!npobj)
 	return false;
 
   if (!script || !script->utf8length || !script->utf8characters)
 	return true; // nothing to evaluate
 
-  D(bug("NPN_Evaluate instance=%p, npobj=%p\n", instance, npobj));
-  bool ret = invoke_NPN_Evaluate(instance, npobj, script, result);
+  D(bugiI("NPN_Evaluate instance=%p, npobj=%p\n", instance, npobj));
+  npw_plugin_instance_ref(plugin);
+  bool ret = invoke_NPN_Evaluate(plugin, npobj, script, result);
+  npw_plugin_instance_unref(plugin);
   gchar *result_str = string_of_NPVariant(result);
-  D(bug(" return: %d (%s)\n", ret, result_str));
+  D(bugiD("NPN_Evaluate return: %d (%s)\n", ret, result_str));
   g_free(result_str);
   return ret;
 }
 
 // Gets the value of a property on the given NPObject
 static bool
-invoke_NPN_GetProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName,
+invoke_NPN_GetProperty(PluginInstance *plugin, NPObject *npobj, NPIdentifier propertyName,
 					   NPVariant *result)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_GET_PROPERTY,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
 								RPC_TYPE_NP_IDENTIFIER, propertyName,
 								RPC_TYPE_INVALID);
@@ -1669,25 +2107,41 @@ static bool
 g_NPN_GetProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName,
 				  NPVariant *result)
 {
-  if (!instance || !npobj || !npobj->_class || !npobj->_class->getProperty)
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_GetProperty called from the wrong process\n");
+	return false;
+  }
+
+  if (instance == NULL)
 	return false;
 
-  D(bug("NPN_GetProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
-  bool ret = invoke_NPN_GetProperty(instance, npobj, propertyName, result);
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+
+  if (!npobj || !npobj->_class || !npobj->_class->getProperty)
+	return false;
+
+  D(bugiI("NPN_GetProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
+  npw_plugin_instance_ref(plugin);
+  bool ret = invoke_NPN_GetProperty(plugin, npobj, propertyName, result);
+  npw_plugin_instance_unref(plugin);
   gchar *result_str = string_of_NPVariant(result);
-  D(bug(" return: %d (%s)\n", ret, result_str));
+  D(bugiD("NPN_GetProperty return: %d (%s)\n", ret, result_str));
   g_free(result_str);
   return ret;
 }
 
 // Sets the value of a property on the given NPObject
 static bool
-invoke_NPN_SetProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName,
+invoke_NPN_SetProperty(PluginInstance *plugin, NPObject *npobj, NPIdentifier propertyName,
 					   const NPVariant *value)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_SET_PROPERTY,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
 								RPC_TYPE_NP_IDENTIFIER, propertyName,
 								RPC_TYPE_NP_VARIANT, value,
@@ -1715,22 +2169,38 @@ static bool
 g_NPN_SetProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName,
 				  const NPVariant *value)
 {
-  if (!instance || !npobj || !npobj->_class || !npobj->_class->setProperty)
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_SetProperty called from the wrong process\n");
+	return false;
+  }
+
+  if (instance == NULL)
 	return false;
 
-  D(bug("NPN_SetProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
-  bool ret = invoke_NPN_SetProperty(instance, npobj, propertyName, value);
-  D(bug(" return: %d\n", ret));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+
+  if (!npobj || !npobj->_class || !npobj->_class->setProperty)
+	return false;
+
+  D(bugiI("NPN_SetProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
+  npw_plugin_instance_ref(plugin);
+  bool ret = invoke_NPN_SetProperty(plugin, npobj, propertyName, value);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_SetProperty return: %d\n", ret));
   return ret;
 }
 
 // Removes a property on the given NPObject
 static bool
-invoke_NPN_RemoveProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName)
+invoke_NPN_RemoveProperty(PluginInstance *plugin, NPObject *npobj, NPIdentifier propertyName)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_REMOVE_PROPERTY,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
 								RPC_TYPE_NP_IDENTIFIER, propertyName,
 								RPC_TYPE_INVALID);
@@ -1756,22 +2226,38 @@ invoke_NPN_RemoveProperty(NPP instance, NPObject *npobj, NPIdentifier propertyNa
 static bool
 g_NPN_RemoveProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName)
 {
-  if (!instance || !npobj || !npobj->_class || !npobj->_class->removeProperty)
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_RemoveProperty called from the wrong process\n");
+	return false;
+  }
+
+  if (instance == NULL)
 	return false;
 
-  D(bug("NPN_RemoveProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
-  bool ret = invoke_NPN_RemoveProperty(instance, npobj, propertyName);
-  D(bug(" return: %d\n", ret));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+
+  if (!npobj || !npobj->_class || !npobj->_class->removeProperty)
+	return false;
+
+  D(bugiI("NPN_RemoveProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
+  npw_plugin_instance_ref(plugin);
+  bool ret = invoke_NPN_RemoveProperty(plugin, npobj, propertyName);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_RemoveProperty return: %d\n", ret));
   return ret;
 }
 
 // Checks if a given property exists on the given NPObject
 static bool
-invoke_NPN_HasProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName)
+invoke_NPN_HasProperty(PluginInstance *plugin, NPObject *npobj, NPIdentifier propertyName)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_HAS_PROPERTY,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
 								RPC_TYPE_NP_IDENTIFIER, propertyName,
 								RPC_TYPE_INVALID);
@@ -1797,22 +2283,38 @@ invoke_NPN_HasProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName)
 static bool
 g_NPN_HasProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName)
 {
-  if (!instance || !npobj || !npobj->_class || !npobj->_class->hasProperty)
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_HasProperty called from the wrong process\n");
+	return false;
+  }
+
+  if (instance == NULL)
 	return false;
 
-  D(bug("NPN_HasProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
-  bool ret = invoke_NPN_HasProperty(instance, npobj, propertyName);
-  D(bug(" return: %d\n", ret));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+
+  if (!npobj || !npobj->_class || !npobj->_class->hasProperty)
+	return false;
+
+  D(bugiI("NPN_HasProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
+  npw_plugin_instance_ref(plugin);
+  bool ret = invoke_NPN_HasProperty(plugin, npobj, propertyName);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_HasProperty return: %d\n", ret));
   return ret;
 }
 
 // Checks if a given method exists on the given NPObject
 static bool
-invoke_NPN_HasMethod(NPP instance, NPObject *npobj, NPIdentifier methodName)
+invoke_NPN_HasMethod(PluginInstance *plugin, NPObject *npobj, NPIdentifier methodName)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_HAS_METHOD,
-								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
 								RPC_TYPE_NP_OBJECT, npobj,
 								RPC_TYPE_NP_IDENTIFIER, methodName,
 								RPC_TYPE_INVALID);
@@ -1838,12 +2340,26 @@ invoke_NPN_HasMethod(NPP instance, NPObject *npobj, NPIdentifier methodName)
 static bool
 g_NPN_HasMethod(NPP instance, NPObject *npobj, NPIdentifier methodName)
 {
-  if (!instance || !npobj || !npobj->_class || !npobj->_class->hasMethod)
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_HasMethod called from the wrong process\n");
+	return false;
+  }
+
+  if (instance == NULL)
 	return false;
 
-  D(bug("NPN_HasMethod instance=%p, npobj=%p, methodName=%p\n", instance, npobj, methodName));
-  bool ret = invoke_NPN_HasMethod(instance, npobj, methodName);
-  D(bug(" return: %d\n", ret));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+
+  if (!npobj || !npobj->_class || !npobj->_class->hasMethod)
+	return false;
+
+  D(bugiI("NPN_HasMethod instance=%p, npobj=%p, methodName=%p\n", instance, npobj, methodName));
+  npw_plugin_instance_ref(plugin);
+  bool ret = invoke_NPN_HasMethod(plugin, npobj, methodName);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_HasMethod return: %d\n", ret));
   return ret;
 }
 
@@ -1851,6 +2367,8 @@ g_NPN_HasMethod(NPP instance, NPObject *npobj, NPIdentifier methodName)
 static void
 invoke_NPN_SetException(NPObject *npobj, const NPUTF8 *message)
 {
+  npw_return_if_fail(rpc_method_invoke_possible(g_rpc_connection));
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_SET_EXCEPTION,
 								RPC_TYPE_NP_OBJECT, npobj,
@@ -1873,24 +2391,31 @@ invoke_NPN_SetException(NPObject *npobj, const NPUTF8 *message)
 static void
 g_NPN_SetException(NPObject *npobj, const NPUTF8 *message)
 {
-  D(bug("NPN_SetException npobj=%p, message='%s'\n", npobj, message));
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_SetException called from the wrong process\n");
+	return;
+  }
+
+  D(bugiI("NPN_SetException npobj=%p, message='%s'\n", npobj, message));
   invoke_NPN_SetException(npobj, message);
-  D(bug(" done\n"));
+  D(bugiD("NPN_SetException done\n"));
 }
 
 // Releases the value in the given variant
 static void
 g_NPN_ReleaseVariantValue(NPVariant *variant)
 {
-  D(bug("NPN_ReleaseVariantValue\n"));
+  D(bugiI("NPN_ReleaseVariantValue\n"));
   npvariant_clear(variant);
-  D(bug(" done\n"));
+  D(bugiD("NPN_ReleaseVariantValue done\n"));
 }
 
 // Returns an opaque identifier for the string that is passed in
 static NPIdentifier
 invoke_NPN_GetStringIdentifier(const NPUTF8 *name)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), NULL);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_GET_STRING_IDENTIFIER,
 								RPC_TYPE_STRING, name,
@@ -1917,12 +2442,17 @@ invoke_NPN_GetStringIdentifier(const NPUTF8 *name)
 static NPIdentifier
 g_NPN_GetStringIdentifier(const NPUTF8 *name)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_GetStringIdentifier called from the wrong process\n");
+	return NULL;
+  }
+
   if (name == NULL)
 	return NULL;
 
-  D(bug("NPN_GetStringIdentifier name='%s'\n", name));
+  D(bugiI("NPN_GetStringIdentifier name='%s'\n", name));
   NPIdentifier ret = invoke_NPN_GetStringIdentifier(name);
-  D(bug(" return: %p\n", ret));
+  D(bugiD("NPN_GetStringIdentifier return: %p\n", ret));
   return ret;
 }
 
@@ -1930,6 +2460,8 @@ g_NPN_GetStringIdentifier(const NPUTF8 *name)
 static void
 invoke_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIdentifier *identifiers)
 {
+  npw_return_if_fail(rpc_method_invoke_possible(g_rpc_connection));
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_GET_STRING_IDENTIFIERS,
 								RPC_TYPE_ARRAY, RPC_TYPE_STRING, nameCount, names,
@@ -1966,21 +2498,28 @@ invoke_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIden
 static void
 g_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIdentifier *identifiers)
 {
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_GetStringIdentifiers called from the wrong process\n");
+	return;
+  }
+
   if (names == NULL)
 	return;
 
   if (identifiers == NULL)
 	return;
 
-  D(bug("NPN_GetStringIdentifiers names=%p\n", names));
+  D(bugiI("NPN_GetStringIdentifiers names=%p\n", names));
   invoke_NPN_GetStringIdentifiers(names, nameCount, identifiers);
-  D(bug(" done\n"));
+  D(bugiD("NPN_GetStringIdentifiers done\n"));
 }
 
 // Returns an opaque identifier for the integer that is passed in
 static NPIdentifier
 invoke_NPN_GetIntIdentifier(int32_t intid)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), NULL);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_GET_INT_IDENTIFIER,
 								RPC_TYPE_INT32, intid,
@@ -2007,9 +2546,14 @@ invoke_NPN_GetIntIdentifier(int32_t intid)
 static NPIdentifier
 g_NPN_GetIntIdentifier(int32_t intid)
 {
-  D(bug("NPN_GetIntIdentifier intid=%d\n", intid));
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_GetIntIdentifier called from the wrong process\n");
+	return NULL;
+  }
+
+  D(bugiI("NPN_GetIntIdentifier intid=%d\n", intid));
   NPIdentifier ret = invoke_NPN_GetIntIdentifier(intid);
-  D(bug(" return: %p\n", ret));
+  D(bugiD("NPN_GetIntIdentifier return: %p\n", ret));
   return ret;
 }
 
@@ -2017,6 +2561,8 @@ g_NPN_GetIntIdentifier(int32_t intid)
 static bool
 invoke_NPN_IdentifierIsString(NPIdentifier identifier)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_IDENTIFIER_IS_STRING,
 								RPC_TYPE_NP_IDENTIFIER, identifier,
@@ -2043,9 +2589,14 @@ invoke_NPN_IdentifierIsString(NPIdentifier identifier)
 static bool
 g_NPN_IdentifierIsString(NPIdentifier identifier)
 {
-  D(bug("NPN_IdentifierIsString identifier=%p\n", identifier));
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_IdentifierIsString called from the wrong process\n");
+	return false;
+  }
+  
+  D(bugiI("NPN_IdentifierIsString identifier=%p\n", identifier));
   bool ret = invoke_NPN_IdentifierIsString(identifier);
-  D(bug(" return: %d\n", ret));
+  D(bugiD("NPN_IdentifierIsString return: %d\n", ret));
   return ret;
 }
 
@@ -2053,6 +2604,8 @@ g_NPN_IdentifierIsString(NPIdentifier identifier)
 static NPUTF8 *
 invoke_NPN_UTF8FromIdentifier(NPIdentifier identifier)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), NULL);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_UTF8_FROM_IDENTIFIER,
 								RPC_TYPE_NP_IDENTIFIER, identifier,
@@ -2079,9 +2632,14 @@ invoke_NPN_UTF8FromIdentifier(NPIdentifier identifier)
 static NPUTF8 *
 g_NPN_UTF8FromIdentifier(NPIdentifier identifier)
 {
-  D(bug("NPN_UTF8FromIdentifier identifier=%p\n", identifier));
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_UTF8FromIdentifier called from the wrong process\n");
+	return NULL;
+  }
+
+  D(bugiI("NPN_UTF8FromIdentifier identifier=%p\n", identifier));
   NPUTF8 *ret = invoke_NPN_UTF8FromIdentifier(identifier);
-  D(bug(" return: '%s'\n", ret));
+  D(bugiD("NPN_UTF8FromIdentifier return: '%s'\n", ret));
   return ret;
 }
 
@@ -2090,6 +2648,8 @@ g_NPN_UTF8FromIdentifier(NPIdentifier identifier)
 static int32_t
 invoke_NPN_IntFromIdentifier(NPIdentifier identifier)
 {
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), -1);
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_INT_FROM_IDENTIFIER,
 								RPC_TYPE_NP_IDENTIFIER, identifier,
@@ -2116,9 +2676,14 @@ invoke_NPN_IntFromIdentifier(NPIdentifier identifier)
 static int32_t
 g_NPN_IntFromIdentifier(NPIdentifier identifier)
 {
-  D(bug("NPN_IntFromIdentifier identifier=%p\n", identifier));
+  if (!pid_check()) {
+	npw_printf("WARNING: NPN_IntFromIdentifier called from the wrong process\n");
+	return 0;
+  }
+  
+  D(bugiI("NPN_IntFromIdentifier identifier=%p\n", identifier));
   int32_t ret = invoke_NPN_IntFromIdentifier(identifier);
-  D(bug(" return: %d\n", ret));
+  D(bugiD("NPN_IntFromIdentifier return: %d\n", ret));
   return ret;
 }
 
@@ -2158,9 +2723,9 @@ g_NP_GetMIMEDescription(void)
   if (g_plugin_NP_GetMIMEDescription == NULL)
 	return NULL;
 
-  D(bug("NP_GetMIMEDescription\n"));
+  D(bugiI("NP_GetMIMEDescription\n"));
   char *str = g_plugin_NP_GetMIMEDescription();
-  D(bug(" return: %s\n", str ? str : "<empty>"));
+  D(bugiD("NP_GetMIMEDescription return: %s\n", str ? str : "<empty>"));
   return str;
 }
 
@@ -2185,9 +2750,9 @@ g_NP_GetValue(NPPVariable variable, void *value)
   if (g_plugin_NP_GetValue == NULL)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
 
-  D(bug("NP_GetValue variable=%d\n", variable));
+  D(bugiI("NP_GetValue variable=%d [%s]\n", variable, string_of_NPPVariable(variable)));
   NPError ret = g_plugin_NP_GetValue(NULL, variable, value);
-  D(bug(" return: %d\n", ret));
+  D(bugiD("NP_GetValue return: %d\n", ret));
   return ret;
 }
 
@@ -2297,9 +2862,9 @@ g_NP_Initialize(uint32_t version)
   // XXX: remove the local copies from this file
   NPW_InitializeFuncs(&mozilla_funcs, &plugin_funcs);
 
-  D(bug("NP_Initialize\n"));
+  D(bugiI("NP_Initialize\n"));
   NPError ret = g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
-  D(bug(" return: %d\n", ret));
+  D(bugiD("NP_Initialize return: %d\n", ret));
   return ret;
 }
 
@@ -2328,9 +2893,9 @@ g_NP_Shutdown(void)
   if (g_plugin_NP_Shutdown == NULL)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
 
-  D(bug("NP_Shutdown\n"));
+  D(bugiI("NP_Shutdown\n"));
   NPError ret = g_plugin_NP_Shutdown();
-  D(bug(" done\n"));
+  D(bugiD("NP_Shutdown done\n"));
 
   if (NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING))
 	npobject_bridge_destroy();
@@ -2359,10 +2924,9 @@ static NPError g_NPP_New(NPMIMEType plugin_type, uint32_t instance_id,
 						 uint16_t mode, int16_t argc, char *argn[], char *argv[],
 						 NPSavedData *saved)
 {
-  PluginInstance *plugin = malloc(sizeof(*plugin));
+  PluginInstance *plugin = npw_plugin_instance_new(&PluginInstanceClass);
   if (plugin == NULL)
 	return NPERR_OUT_OF_MEMORY_ERROR;
-  memset(plugin, 0, sizeof(*plugin));
   plugin->instance_id = instance_id;
   id_link(instance_id, plugin);
 
@@ -2387,9 +2951,9 @@ static NPError g_NPP_New(NPMIMEType plugin_type, uint32_t instance_id,
 	}
   }
 
-  D(bug("NPP_New instance=%p\n", instance));
+  D(bugiI("NPP_New instance=%p\n", instance));
   NPError ret = plugin_funcs.newp(plugin_type, instance, mode, argc, argn, argv, saved);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  D(bugiD("NPP_New return: %d [%s]\n", ret, string_of_NPError(ret)));
 
   // check if XEMBED is to be used
   PRBool supports_XEmbed = PR_FALSE;
@@ -2402,17 +2966,6 @@ static NPError g_NPP_New(NPMIMEType plugin_type, uint32_t instance_id,
 		plugin->use_xembed = supports_XEmbed && needs_XEmbed;
 	}
   }
-
-#if USE_XEMBED_HACK
-  // check if XEMBED hack is to be used
-  if (plugin->use_xembed && plugin_funcs.getvalue) {
-	NPNToolkitType toolkit = 0;
-	NPError error = g_NPN_GetValue_real(NULL, NPNVToolkit, (void *)&toolkit);
-	if (error == NPERR_NO_ERROR && toolkit == NPNVGtk2)
-	  plugin->use_xembed_hack = true;
-  }
-#endif
-
   return ret;
 }
 
@@ -2467,33 +3020,45 @@ static NPError g_NPP_Destroy(NPP instance, NPSavedData **sdata)
   if (instance == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
   if (sdata)
 	*sdata = NULL;
 
-  D(bug("NPP_Destroy instance=%p\n", instance));
-  NPError ret = plugin_funcs.destroy(instance, sdata);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  // Process all pending calls as the data could become junk afterwards
+  // XXX: this also processes delayed calls from other instances
+  delayed_calls_process(plugin, TRUE);
 
-  PluginInstance *plugin = instance->ndata;
-  if (plugin) {
-	if (plugin->browser_toplevel) {
-	  g_object_unref(plugin->browser_toplevel);
-	  plugin->browser_toplevel = NULL;
-	}
-	destroy_window(plugin);
-	id_remove(plugin->instance_id);
-	free(plugin);
-  }
+  D(bugiI("NPP_Destroy instance=%p\n", instance));
+  NPError ret = plugin_funcs.destroy(instance, sdata);
+  D(bugiD("NPP_Destroy return: %d [%s]\n", ret, string_of_NPError(ret)));
+
+  /* NPP instance is no longer valid beyond this point. So, let's also
+	 drop the link to the PluginInstance now */
+  plugin->instance = NULL;
+  instance->ndata = NULL;
+  id_remove(plugin->instance_id);
+  plugin->instance_id = 0;
+  /* ... reset instance_id so that future RPC with this PluginInstance
+	 will actually emit a NULL instance, which the other side will
+	 deal as a no-op for all functions but NPN_GetValue() */
   free(instance);
 
+  npw_plugin_instance_unref(plugin);
   return ret;
 }
 
 static int handle_NPP_Destroy(rpc_connection_t *connection)
 {
+  D(bug("handle_NPP_Destroy\n"));
+
   int error;
-  NPP instance;
-  error = rpc_method_get_args(connection, RPC_TYPE_NPP, &instance, RPC_TYPE_INVALID);
+  PluginInstance *plugin;
+  error = rpc_method_get_args(connection,
+							  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
+							  RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPP_Destroy() get args", error);
@@ -2501,9 +3066,13 @@ static int handle_NPP_Destroy(rpc_connection_t *connection)
   }
 
   NPSavedData *save_area;
-  NPError ret = g_NPP_Destroy(instance, &save_area);
+  NPError ret = g_NPP_Destroy(PLUGIN_INSTANCE_NPP(plugin), &save_area);
 
-  error = rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_NP_SAVED_DATA, save_area, RPC_TYPE_INVALID);
+  error = rpc_method_send_reply(connection,
+								RPC_TYPE_INT32, ret,
+								RPC_TYPE_NP_SAVED_DATA, save_area,
+								RPC_TYPE_INVALID);
+
   rpc_connection_unref(connection);
   return error;
 }
@@ -2515,12 +3084,12 @@ g_NPP_SetWindow(NPP instance, NPWindow *np_window)
   if (instance == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
-  if (plugin_funcs.setwindow == NULL)
-	return NPERR_INVALID_FUNCTABLE_ERROR;
-
-  PluginInstance *plugin = instance->ndata;
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
   if (plugin == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
+
+  if (plugin_funcs.setwindow == NULL)
+	return NPERR_INVALID_FUNCTABLE_ERROR;
 
   plugin->is_windowless = np_window && np_window->type == NPWindowTypeDrawable;
 
@@ -2537,9 +3106,9 @@ g_NPP_SetWindow(NPP instance, NPWindow *np_window)
 	window = &plugin->window;
   }
 
-  D(bug("NPP_SetWindow instance=%p, window=%p\n", instance, window ? window->window : NULL));
+  D(bugiI("NPP_SetWindow instance=%p, window=%p\n", instance, window ? window->window : NULL));
   NPError ret = plugin_funcs.setwindow(instance, window);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  D(bugiD("NPP_SetWindow return: %d [%s]\n", ret, string_of_NPError(ret)));
 
   if (np_window == NULL || (np_window->window == NULL && !plugin->is_windowless))
 	destroy_window(plugin);
@@ -2552,11 +3121,11 @@ static int handle_NPP_SetWindow(rpc_connection_t *connection)
   D(bug("handle_NPP_SetWindow\n"));
 
   int error;
-  NPP instance;
+  PluginInstance *plugin;
   NPWindow *window;
 
   error = rpc_method_get_args(connection,
-							  RPC_TYPE_NPP, &instance,
+							  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
 							  RPC_TYPE_NP_WINDOW, &window,
 							  RPC_TYPE_INVALID);
 
@@ -2565,27 +3134,13 @@ static int handle_NPP_SetWindow(rpc_connection_t *connection)
 	return error;
   }
 
-  NPError ret = g_NPP_SetWindow(instance, window);
+  NPError ret = g_NPP_SetWindow(PLUGIN_INSTANCE_NPP(plugin), window);
   if (window)
 	free(window);
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
 // NPP_GetValue
-static NPError
-g_NPP_GetValue_fixes(NPP instance, NPPVariable variable, void *value)
-{
-  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
-  switch (variable) {
-  case NPPVpluginNeedsXEmbed:
-	// claim we don't support XEMBED though we actually do
-	if (plugin->use_xembed_hack)
-	  *((PRBool *)value) = PR_FALSE;
-	break;
-  }
-  return NPERR_NO_ERROR;
-}
-
 static NPError
 g_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
 {
@@ -2595,22 +3150,22 @@ g_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
   if (plugin_funcs.getvalue == NULL)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
 
-  D(bug("NPP_GetValue instance=%p, variable=%d\n", instance, variable));
+  D(bugiI("NPP_GetValue instance=%p, variable=%d [%s]\n", instance, variable, string_of_NPPVariable(variable)));
   NPError ret = plugin_funcs.getvalue(instance, variable, value);
-  if (ret == NPERR_NO_ERROR)
-	ret = g_NPP_GetValue_fixes(instance, variable, value);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  D(bugiD("NPP_GetValue return: %d [%s]\n", ret, string_of_NPError(ret)));
   return ret;
 }
 
 static int handle_NPP_GetValue(rpc_connection_t *connection)
 {
+  D(bug("handle_NPP_GetValue\n"));
+
   int error;
-  NPP instance;
+  PluginInstance *plugin;
   int32_t variable;
 
   error = rpc_method_get_args(connection,
-							  RPC_TYPE_NPP, &instance,
+							  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
 							  RPC_TYPE_INT32, &variable,
 							  RPC_TYPE_INVALID);
 
@@ -2626,25 +3181,25 @@ static int handle_NPP_GetValue(rpc_connection_t *connection)
   case RPC_TYPE_STRING:
 	{
 	  char *str = NULL;
-	  ret = g_NPP_GetValue(instance, variable, (void *)&str);
+	  ret = g_NPP_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&str);
 	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_STRING, str, RPC_TYPE_INVALID);
 	}
   case RPC_TYPE_INT32:
 	{
 	  uint32_t n = 0;
-	  ret = g_NPP_GetValue(instance, variable, (void *)&n);
+	  ret = g_NPP_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&n);
 	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INT32, n, RPC_TYPE_INVALID);
 	}
   case RPC_TYPE_BOOLEAN:
 	{
 	  PRBool b = PR_FALSE;
-	  ret = g_NPP_GetValue(instance, variable, (void *)&b);
+	  ret = g_NPP_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&b);
 	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_BOOLEAN, b, RPC_TYPE_INVALID);
 	}
   case RPC_TYPE_NP_OBJECT:
 	{
 	  NPObject *npobj = NULL;
-	  ret = g_NPP_GetValue(instance, variable, (void *)&npobj);
+	  ret = g_NPP_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&npobj);
 	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_NP_OBJECT, npobj, RPC_TYPE_INVALID);
 	}
   }
@@ -2662,22 +3217,24 @@ g_NPP_URLNotify(NPP instance, const char *url, NPReason reason, void *notifyData
   if (plugin_funcs.urlnotify == NULL)
 	return;
 
-  D(bug("NPP_URLNotify instance=%p, url='%s', reason=%s, notifyData=%p\n",
+  D(bugiI("NPP_URLNotify instance=%p, url='%s', reason=%s, notifyData=%p\n",
 		instance, url, string_of_NPReason(reason), notifyData));
   plugin_funcs.urlnotify(instance, url, reason, notifyData);
-  D(bug(" done\n"));
+  D(bugiD("NPP_URLNotify done\n"));
 }
 
 static int handle_NPP_URLNotify(rpc_connection_t *connection)
 {
+  D(bug("handle_NPP_URLNotify\n"));
+
   int error;
-  NPP instance;
+  PluginInstance *plugin;
   char *url;
   int32_t reason;
   void *notifyData;
 
   error = rpc_method_get_args(connection,
-							  RPC_TYPE_NPP, &instance,
+							  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
 							  RPC_TYPE_STRING, &url,
 							  RPC_TYPE_INT32, &reason,
 							  RPC_TYPE_NP_NOTIFY_DATA, &notifyData,
@@ -2688,7 +3245,7 @@ static int handle_NPP_URLNotify(rpc_connection_t *connection)
 	return error;
   }
 
-  g_NPP_URLNotify(instance, url, reason, notifyData);
+  g_NPP_URLNotify(PLUGIN_INSTANCE_NPP(plugin), url, reason, notifyData);
 
   if (url)
 	free(url);
@@ -2706,17 +3263,19 @@ g_NPP_NewStream(NPP instance, NPMIMEType type, NPStream *stream, NPBool seekable
   if (plugin_funcs.newstream == NULL)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
 
-  D(bug("NPP_NewStream instance=%p, stream=%p, url='%s', type='%s', seekable=%d, stype=%s, notifyData=%p\n",
+  D(bugiI("NPP_NewStream instance=%p, stream=%p, url='%s', type='%s', seekable=%d, stype=%s, notifyData=%p\n",
 		instance, stream, stream->url, type, seekable, string_of_NPStreamType(*stype), stream->notifyData));
   NPError ret = plugin_funcs.newstream(instance, type, stream, seekable, stype);
-  D(bug(" return: %d [%s], stype=%s\n", ret, string_of_NPError(ret), string_of_NPStreamType(*stype)));
+  D(bugiD("NPP_NewStream return: %d [%s], stype=%s\n", ret, string_of_NPError(ret), string_of_NPStreamType(*stype)));
   return ret;
 }
 
 static int handle_NPP_NewStream(rpc_connection_t *connection)
 {
+  D(bug("handle_NPP_NewStream\n"));
+
   int error;
-  NPP instance;
+  PluginInstance *plugin;
   uint32_t stream_id;
   uint32_t seekable;
   NPMIMEType type;
@@ -2727,7 +3286,7 @@ static int handle_NPP_NewStream(rpc_connection_t *connection)
   memset(stream, 0, sizeof(*stream));
 
   error = rpc_method_get_args(connection,
-							  RPC_TYPE_NPP, &instance,
+							  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
 							  RPC_TYPE_STRING, &type,
 							  RPC_TYPE_UINT32, &stream_id,
 							  RPC_TYPE_STRING, &stream->url,
@@ -2754,7 +3313,7 @@ static int handle_NPP_NewStream(rpc_connection_t *connection)
   stream_ndata->is_plugin_stream = 0;
 
   uint16 stype = NP_NORMAL;
-  NPError ret = g_NPP_NewStream(instance, type, stream, seekable, &stype);
+  NPError ret = g_NPP_NewStream(PLUGIN_INSTANCE_NPP(plugin), type, stream, seekable, &stype);
 
   if (type)
 	free(type);
@@ -2779,10 +3338,10 @@ g_NPP_DestroyStream(NPP instance, NPStream *stream, NPReason reason)
   if (stream == NULL)
 	return NPERR_INVALID_PARAM;
 
-  D(bug("NPP_DestroyStream instance=%p, stream=%p, reason=%s\n",
+  D(bugiI("NPP_DestroyStream instance=%p, stream=%p, reason=%s\n",
 		instance, stream, string_of_NPReason(reason)));
   NPError ret = plugin_funcs.destroystream(instance, stream, reason);
-  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  D(bugiD("NPP_DestroyStream return: %d [%s]\n", ret, string_of_NPError(ret)));
 
   StreamInstance *stream_ndata = stream->ndata;
   if (stream_ndata) {
@@ -2800,11 +3359,11 @@ static int handle_NPP_DestroyStream(rpc_connection_t *connection)
 {
   D(bug("handle_NPP_DestroyStream\n"));
 
-  NPP instance;
+  PluginInstance *plugin;
   NPStream *stream;
   int32_t reason;
   int error = rpc_method_get_args(connection,
-								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
 								  RPC_TYPE_NP_STREAM, &stream,
 								  RPC_TYPE_INT32, &reason,
 								  RPC_TYPE_INVALID);
@@ -2814,7 +3373,7 @@ static int handle_NPP_DestroyStream(rpc_connection_t *connection)
 	return error;
   }
 
-  NPError ret = g_NPP_DestroyStream(instance, stream, reason);
+  NPError ret = g_NPP_DestroyStream(PLUGIN_INSTANCE_NPP(plugin), stream, reason);
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
@@ -2831,9 +3390,9 @@ g_NPP_WriteReady(NPP instance, NPStream *stream)
   if (stream == NULL)
 	return 0;
 
-  D(bug("NPP_WriteReady instance=%p, stream=%p\n", instance, stream));
+  D(bugiI("NPP_WriteReady instance=%p, stream=%p\n", instance, stream));
   int32 ret = plugin_funcs.writeready(instance, stream);
-  D(bug(" return: %d\n", ret));
+  D(bugiD("NPP_WriteReady return: %d\n", ret));
   return ret;
 }
 
@@ -2841,10 +3400,10 @@ static int handle_NPP_WriteReady(rpc_connection_t *connection)
 {
   D(bug("handle_NPP_WriteReady\n"));
 
-  NPP instance;
+  PluginInstance *plugin;
   NPStream *stream;
   int error = rpc_method_get_args(connection,
-								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
 								  RPC_TYPE_NP_STREAM, &stream,
 								  RPC_TYPE_INVALID);
 
@@ -2853,7 +3412,7 @@ static int handle_NPP_WriteReady(rpc_connection_t *connection)
 	return error;
   }
 
-  int32 ret = g_NPP_WriteReady(instance, stream);
+  int32 ret = g_NPP_WriteReady(PLUGIN_INSTANCE_NPP(plugin), stream);
 
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
@@ -2871,20 +3430,22 @@ g_NPP_Write(NPP instance, NPStream *stream, int32 offset, int32 len, void *buf)
   if (stream == NULL)
 	return -1;
 
-  D(bug("NPP_Write instance=%p, stream=%p, offset=%d, len=%d, buf=%p\n", instance, stream, offset, len, buf));
+  D(bugiI("NPP_Write instance=%p, stream=%p, offset=%d, len=%d, buf=%p\n", instance, stream, offset, len, buf));
   int32 ret = plugin_funcs.write(instance, stream, offset, len, buf);
-  D(bug(" return: %d\n", ret));
+  D(bugiD("NPP_Write return: %d\n", ret));
   return ret;
 }
 
 static int handle_NPP_Write(rpc_connection_t *connection)
 {
-  NPP instance;
+  D(bug("handle_NPP_Write\n"));
+
+  PluginInstance *plugin;
   NPStream *stream;
   unsigned char *buf;
   int32_t offset, len;
   int error = rpc_method_get_args(connection,
-								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
 								  RPC_TYPE_NP_STREAM, &stream,
 								  RPC_TYPE_INT32, &offset,
 								  RPC_TYPE_ARRAY, RPC_TYPE_CHAR, &len, &buf,
@@ -2895,7 +3456,7 @@ static int handle_NPP_Write(rpc_connection_t *connection)
 	return error;
   }
 
-  int32 ret = g_NPP_Write(instance, stream, offset, len, buf);
+  int32 ret = g_NPP_Write(PLUGIN_INSTANCE_NPP(plugin), stream, offset, len, buf);
 
   if (buf)
 	free(buf);
@@ -2916,18 +3477,20 @@ g_NPP_StreamAsFile(NPP instance, NPStream *stream, const char *fname)
   if (stream == NULL)
 	return;
 
-  D(bug("NPP_StreamAsFile instance=%p, stream=%p, fname='%s'\n", instance, stream, fname));
+  D(bugiI("NPP_StreamAsFile instance=%p, stream=%p, fname='%s'\n", instance, stream, fname));
   plugin_funcs.asfile(instance, stream, fname);
-  D(bug(" done\n"));
+  D(bugiD("NPP_StreamAsFile done\n"));
 }
 
 static int handle_NPP_StreamAsFile(rpc_connection_t *connection)
 {
-  NPP instance;
+  D(bug("handle_NPP_StreamAsFile\n"));
+
+  PluginInstance *plugin;
   NPStream *stream;
   char *fname;
   int error = rpc_method_get_args(connection,
-								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
 								  RPC_TYPE_NP_STREAM, &stream,
 								  RPC_TYPE_STRING, &fname,
 								  RPC_TYPE_INVALID);
@@ -2937,7 +3500,7 @@ static int handle_NPP_StreamAsFile(rpc_connection_t *connection)
 	return error;
   }
 
-  g_NPP_StreamAsFile(instance, stream, fname);
+  g_NPP_StreamAsFile(PLUGIN_INSTANCE_NPP(plugin), stream, fname);
 
   if (fname)
 	free(fname);
@@ -2955,9 +3518,9 @@ g_NPP_Print(NPP instance, NPPrint *printInfo)
   if (printInfo == NULL)
 	return;
 
-  D(bug("NPP_Print instance=%p, printInfo->mode=%d\n", instance, printInfo->mode));
+  D(bugiI("NPP_Print instance=%p, printInfo->mode=%d\n", instance, printInfo->mode));
   plugin_funcs.print(instance, printInfo);
-  D(bug(" done\n"));
+  D(bugiD("NPP_Print done\n"));
 }
 
 static void
@@ -2965,6 +3528,8 @@ invoke_NPN_PrintData(PluginInstance *plugin, uint32_t platform_print_id, NPPrint
 {
   if (printData == NULL)
 	return;
+
+  npw_return_if_fail(rpc_method_invoke_possible(g_rpc_connection));
 
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NPN_PRINT_DATA,
@@ -2987,11 +3552,13 @@ invoke_NPN_PrintData(PluginInstance *plugin, uint32_t platform_print_id, NPPrint
 
 static int handle_NPP_Print(rpc_connection_t *connection)
 {
-  NPP instance;
+  D(bug("handle_NPP_Print\n"));
+
+  PluginInstance *plugin;
   NPPrint printInfo;
   uint32_t platform_print_id;
   int error = rpc_method_get_args(connection,
-								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
 								  RPC_TYPE_UINT32, &platform_print_id,
 								  RPC_TYPE_NP_PRINT, &printInfo,
 								  RPC_TYPE_INVALID);
@@ -3017,7 +3584,7 @@ static int handle_NPP_Print(rpc_connection_t *connection)
 	break;
   }
 
-  g_NPP_Print(instance, &printInfo);
+  g_NPP_Print(PLUGIN_INSTANCE_NPP(plugin), &printInfo);
 
   // send back the printed data
   if (printer.fp) {
@@ -3034,12 +3601,16 @@ static int handle_NPP_Print(rpc_connection_t *connection)
 		  npw_printf("ERROR: unexpected end-of-file or error condition in NPP_Print\n");
 		  break;
 		}
-		invoke_NPN_PrintData(instance->ndata, platform_print_id, &printData);
+		npw_plugin_instance_ref(plugin);
+		invoke_NPN_PrintData(plugin, platform_print_id, &printData);
+		npw_plugin_instance_unref(plugin);
 	  }
 	  printData.size = file_size % printDataMaxSize;
 	  if (fread(&printData.data, printData.size, 1, printer.fp) != 1)
 		npw_printf("ERROR: unexpected end-of-file or error condition in NPP_Print\n");
-	  invoke_NPN_PrintData(instance->ndata, platform_print_id, &printData);
+	  npw_plugin_instance_ref(plugin);
+	  invoke_NPN_PrintData(plugin, platform_print_id, &printData);
+	  npw_plugin_instance_unref(plugin);
 	}
 	fclose(printer.fp);
   }
@@ -3071,9 +3642,9 @@ g_NPP_HandleEvent(NPP instance, NPEvent *event)
   if (event == NULL)
 	return false;
 
-  D(bug("NPP_HandleEvent instance=%p, event=%p [%s]\n", instance, event, string_of_NPEvent_type(event->type)));
+  D(bugiI("NPP_HandleEvent instance=%p, event=%p [%s]\n", instance, event, string_of_NPEvent_type(event->type)));
   int16 ret = plugin_funcs.event(instance, event);
-  D(bug(" return: %d\n", ret));
+  D(bugiD("NPP_HandleEvent return: %d\n", ret));
 
   /* XXX: let's have a chance to commit the pixmap before it's gone */
   if (event->type == GraphicsExpose)
@@ -3084,10 +3655,12 @@ g_NPP_HandleEvent(NPP instance, NPEvent *event)
 
 static int handle_NPP_HandleEvent(rpc_connection_t *connection)
 {
-  NPP instance;
+  D(bug("handle_NPP_HandleEvent\n"));
+
+  PluginInstance *plugin;
   NPEvent event;
   int error = rpc_method_get_args(connection,
-								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
 								  RPC_TYPE_NP_EVENT, &event,
 								  RPC_TYPE_INVALID);
 
@@ -3097,7 +3670,7 @@ static int handle_NPP_HandleEvent(rpc_connection_t *connection)
   }
 
   event.xany.display = x_display;
-  int16 ret = g_NPP_HandleEvent(instance, &event);
+  int16 ret = g_NPP_HandleEvent(PLUGIN_INSTANCE_NPP(plugin), &event);
 
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
@@ -3191,6 +3764,14 @@ static GSourceFuncs rpc_event_funcs = {
   (GSourceDummyMarshal)NULL
 };
 
+// RPC error callback -- kill the plugin
+static void rpc_error_callback_cb(rpc_connection_t *connection, void *user_data)
+{
+  D(bug("RPC connection %p is in a bad state, closing the plugin\n",connection));
+  rpc_connection_set_error_callback(connection, NULL, NULL);
+  gtk_main_quit();
+}
+
 
 /* ====================================================================== */
 /* === Main program                                                   === */
@@ -3208,6 +3789,9 @@ static int do_main(int argc, char **argv, const char *connection_path)
   }
   D(bug("  Plugin connection: %s\n", connection_path));
 
+  pid_init();
+  D(bug("  Plugin viewer pid: %d\n", g_viewer_pid));
+  
   // Cleanup environment, the program may fork/exec a native shell
   // script and having 32-bit libraries in LD_PRELOAD is not right,
   // though not a fatal error
@@ -3289,7 +3873,7 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	npw_printf("ERROR: failed to initialize plugin-side RPC events listener\n");
 	return 1;
   }
-  g_source_set_priority(rpc_source, GDK_PRIORITY_EVENTS);
+  g_source_set_priority(rpc_source, G_PRIORITY_LOW);
   g_source_attach(rpc_source, NULL);
   rpc_event_poll_fd.fd = rpc_listen_socket(g_rpc_connection);
   rpc_event_poll_fd.events = G_IO_IN;
@@ -3297,6 +3881,9 @@ static int do_main(int argc, char **argv, const char *connection_path)
   g_source_set_callback(rpc_source, (GSourceFunc)rpc_dispatch, g_rpc_connection, NULL);
   g_source_add_poll(rpc_source, &rpc_event_poll_fd);
 
+  // Set error handler - stop plugin if there's a connection error
+  rpc_connection_set_error_callback(g_rpc_connection, rpc_error_callback_cb, NULL);
+ 
   gtk_main();
   D(bug("--- EXIT ---\n"));
 

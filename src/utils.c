@@ -18,12 +18,17 @@
  *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#define _GNU_SOURCE 1
 #include "sysdeps.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <glib.h> /* <glib/ghash.h> */
+#include <fcntl.h>
+#include <dirent.h>
+#include <unistd.h>
+#include <sys/resource.h>
 
 #include "utils.h"
 #include "rpc.h"
@@ -51,7 +56,9 @@ static inline void *id_key(uint32_t id)
 
 bool id_init(void)
 {
-  return (g_ids = g_hash_table_new(NULL, NULL)) != NULL;
+  if (g_ids == NULL)
+	g_ids = g_hash_table_new(NULL, NULL);
+  return g_ids != NULL;
 }
 
 void id_kill(void)
@@ -219,6 +226,64 @@ const char *string_of_NPEvent_type(int type)
 
   return str;
 }
+
+const char *string_of_NPPVariable(int variable)
+{
+  const char *str;
+
+  switch (variable) {
+#define _(VAL) case VAL: str = #VAL; break;
+	_(NPPVpluginNameString);
+	_(NPPVpluginDescriptionString);
+	_(NPPVpluginWindowBool);
+	_(NPPVpluginTransparentBool);
+	_(NPPVjavaClass);
+	_(NPPVpluginWindowSize);
+	_(NPPVpluginTimerInterval);
+	_(NPPVpluginScriptableInstance);
+	_(NPPVpluginScriptableIID);
+	_(NPPVjavascriptPushCallerBool);
+	_(NPPVpluginKeepLibraryInMemory);
+	_(NPPVpluginNeedsXEmbed);
+	_(NPPVpluginScriptableNPObject);
+	_(NPPVformValue);
+#undef _
+  default:
+	str = "<unknown variable>";
+	break;
+  }
+
+  return str;
+}
+
+const char *string_of_NPNVariable(int variable)
+{
+  const char *str;
+
+  switch (variable) {
+#define _(VAL) case VAL: str = #VAL; break;
+	_(NPNVxDisplay);
+	_(NPNVxtAppContext);
+	_(NPNVnetscapeWindow);
+	_(NPNVjavascriptEnabledBool);
+	_(NPNVasdEnabledBool);
+	_(NPNVisOfflineBool);
+	_(NPNVserviceManager);
+	_(NPNVDOMElement);
+	_(NPNVDOMWindow);
+	_(NPNVToolkit);
+	_(NPNVSupportsXEmbedBool);
+	_(NPNVWindowNPObject);
+	_(NPNVPluginElementNPObject);
+	_(NPNVSupportsWindowless);
+#undef _
+  default:
+	str = "<unknown variable>";
+	break;
+  }
+
+  return str;
+}
 #endif
 
 
@@ -263,6 +328,58 @@ char *npw_asprintf(const char *format, ...)
 	return NULL;
   }
   return str;
+}
+
+/* Return 1 + max value the system can allocate to a new fd */
+static int get_open_max(void)
+{
+  int open_max = -1;
+  /* SCO OpenServer has an fcntl() to retrieve the highest *currently
+	 open* file descriptor.  */
+#ifdef F_GETHFDO
+  if ((open_max = fcntl(-1, F_GETHFDO, 0)) >= 0)
+	return open_max + 1;
+#endif
+  /* IEEE Std 1003.1-2001/Cor 1-2002 clarified the fact that return
+	 value of sysconf(_SC_OPEN_MAX) may change if setrlimit() was
+	 called to set RLIMIT_NOFILE. So, we should be on the safe side to
+	 call getrlimit() first to get the soft limit.
+
+	 Note: dgettablesize() was a possibility but (i) it's equivalent
+	 to getrlimit(), and (ii) it is not recommended for new code.  */
+  struct rlimit ru;
+  if (getrlimit(RLIMIT_NOFILE, &ru) == 0)
+	return ru.rlim_cur;
+  if ((open_max = sysconf(_SC_OPEN_MAX)) >= 0)
+	return open_max;
+  /* XXX: simply guess something reasonable.  */
+  return 256;
+}
+
+void npw_close_all_open_files(void)
+{
+  const int min_fd = 3;
+
+  DIR *dir = opendir("/proc/self/fd");
+  if (dir) {
+	const int dfd = dirfd(dir);
+	struct dirent *d;
+	while ((d = readdir(dir)) != NULL) {
+	  char *end;
+	  long n = strtol(d->d_name, &end, 10);
+	  if (*end == '\0') {
+		int fd = n;
+		if (fd >= min_fd && fd != dfd)
+		  close(fd);
+	  }
+	}
+	closedir(dir);
+  }
+  else {
+	const int open_max = get_open_max();
+	for (int fd = min_fd; fd < open_max; fd++)
+	  close(fd);
+  }
 }
 
 

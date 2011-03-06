@@ -55,16 +55,46 @@
 
 /* PluginInstance */
 #define NPW_DECL_PLUGIN_INSTANCE		\
-  NPP      instance;				\
-  uint32_t instance_id;
+  NPW_PluginInstanceClass *klass;		\
+  uint32_t                 refcount;		\
+  NPP                      instance;		\
+  uint32_t                 instance_id;
 
-typedef struct _NPW_PluginInstance NPW_PluginInstance;
+typedef struct _NPW_PluginInstance	NPW_PluginInstance;
+typedef struct _NPW_PluginInstanceClass	NPW_PluginInstanceClass;
+
 struct _NPW_PluginInstance
 {
   NPW_DECL_PLUGIN_INSTANCE;
 };
 
-#define NPW_PLUGIN_INSTANCE(instance) npw_get_plugin_instance (instance)
+typedef void *
+(*NPW_PluginInstanceAllocateFunctionPtr) (void);
+
+typedef void
+(*NPW_PluginInstanceDeallocateFunctionPtr) (NPW_PluginInstance *plugin);
+
+typedef void
+(*NPW_PluginInstanceFinalizeFunctionPtr) (NPW_PluginInstance *plugin);
+
+struct _NPW_PluginInstanceClass
+{
+  NPW_PluginInstanceAllocateFunctionPtr   allocate;
+  NPW_PluginInstanceDeallocateFunctionPtr deallocate;
+  NPW_PluginInstanceFinalizeFunctionPtr   finalize;
+};
+
+void *
+npw_plugin_instance_new(NPW_PluginInstanceClass *klass) attribute_hidden;
+
+void *
+npw_plugin_instance_ref(void *ptr) attribute_hidden;
+
+void
+npw_plugin_instance_unref(void *ptr) attribute_hidden;
+
+#define NPW_PLUGIN_INSTANCE(instance)	npw_get_plugin_instance (instance)
+#define NPW_PLUGIN_INSTANCE_NPP(plugin)	npw_get_plugin_instance_npp (plugin)
 
 static inline NPW_PluginInstance *
 _npw_get_plugin_instance (NPP instance)
@@ -95,6 +125,12 @@ npw_get_plugin_instance (NPP instance)
   return NULL;
 }
 
+static inline NPP
+npw_get_plugin_instance_npp (NPW_PluginInstance *plugin)
+{
+  return plugin ? plugin->instance : NULL;
+}
+
 /* StreamInstance */
 #define NPW_DECL_STREAM_INSTANCE		\
   NPStream *stream;				\
@@ -110,12 +146,24 @@ struct _NPW_StreamInstance
 #define NPW_STREAM_INSTANCE(stream) npw_get_stream_instance (stream)
 
 static inline NPW_StreamInstance *
+_npw_get_stream_instance (NPStream *np_stream)
+{
+  return (NPW_StreamInstance *)np_stream->_NPW_INSTANCE_PRIVATE_DATA;
+}
+
+static inline NPW_StreamInstance *
 npw_get_stream_instance (NPStream *np_stream)
 {
-  NPW_StreamInstance *stream;
-  stream = (NPW_StreamInstance *)np_stream->_NPW_INSTANCE_PRIVATE_DATA;
-  assert (stream->stream == np_stream);
-  return stream;
+  if (np_stream)
+    {
+      NPW_StreamInstance *stream;
+      if ((stream = _npw_get_stream_instance (np_stream)) != NULL)
+	{
+	  assert (stream->stream == np_stream);
+	  return stream;
+	}
+    }
+  return NULL;
 }
 
 /* Unimplemented functions */
@@ -124,7 +172,7 @@ npw_get_stream_instance (NPStream *np_stream)
 			  __func__, __FILE__, __LINE__)
 
 /* Initialize NPAPI hooks */
-extern void
+void
 NPW_InitializeFuncs (NPNetscapeFuncs *mozilla_funcs,
 		     NPPluginFuncs   *plugin_funcs)
   attribute_hidden;
@@ -146,19 +194,19 @@ struct _NPW_Identifier
 };
 
 /* Create identifier from an integer */
-extern NPW_Identifier
+NPW_Identifier
 NPW_CreateIntIdentifier (int32_t value);
 
 /* Create identifier from a string (that is copied) */
-extern NPW_Identifier
+NPW_Identifier
 NPW_CreateStringIdentifier (const char *str);
 
 /* Create identifier from a string (that is now owned by the identifier) */
-extern NPW_Identifier
+NPW_Identifier
 NPW_CreateStringIdentifierSink (char *str);
 
 /* Destroy identifier */
-extern void
+void
 NPW_DestroyIdentifier (NPW_Identifier id);
 
 /* Check whether identifier is an integer */
