@@ -29,6 +29,7 @@
 
 #include "sysdeps.h"
 
+#include <assert.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
@@ -274,6 +275,135 @@ static inline int rpc_poll(int op, int socket, int timeout)
   return ret;
 }
 
+// Hash tables (implemented as simple tables at this time)
+typedef void (*rpc_map_entry_destroy_func_t)(void *value);
+
+typedef struct {
+  void *value;
+  int key;
+  int use_count;
+} rpc_map_entry_t;
+
+typedef struct {
+  int n_entries;
+  int n_entries_max;
+  rpc_map_entry_t *entries;
+  rpc_map_entry_destroy_func_t destroy_func;
+} rpc_map_t;
+
+static rpc_map_t *rpc_map_new(void)
+{
+  rpc_map_t *map = (rpc_map_t *)malloc(sizeof(*map));
+  if (map == NULL)
+	return NULL;
+  map->entries = NULL;
+  map->n_entries = 0;
+  map->n_entries_max = 0;
+  map->destroy_func = NULL;
+  return map;
+}
+
+static rpc_map_t *rpc_map_new_full(rpc_map_entry_destroy_func_t destroy_func)
+{
+  rpc_map_t *map = rpc_map_new();
+  if (map == NULL)
+	return NULL;
+  map->destroy_func = destroy_func;
+  return map;
+}
+
+static void rpc_map_destroy(rpc_map_t *map)
+{
+  if (map == NULL)
+	return;
+  if (map->entries) {
+	if (map->destroy_func) {
+	  for (int i = 0; i < map->n_entries; i++) {
+		map->destroy_func(map->entries[i].value);
+		map->entries[i].value = NULL;
+	  }
+	}
+	free(map->entries);
+	map->entries = NULL;
+  }
+  free(map);
+}
+
+static rpc_map_entry_t *_rpc_map_lookup(const rpc_map_t *map, int key)
+{
+  assert(map != NULL);
+
+  if (map->entries == NULL)
+	return NULL;
+
+  for (int i = 0; i < map->n_entries; i++)
+	if (map->entries[i].key == key)
+	  return &map->entries[i];
+  return NULL;
+}
+
+static void *rpc_map_lookup(const rpc_map_t *map, int key)
+{
+  rpc_map_entry_t *entry = _rpc_map_lookup(map, key);
+  if (entry == NULL)
+	return NULL;
+  entry->use_count++;
+  return entry->value;
+}
+
+static int rpc_map_remove(rpc_map_t *map, int key)
+{
+  assert(map != NULL);
+
+  rpc_map_entry_t *entry = _rpc_map_lookup(map, key);
+  if (entry) {
+	entry->key = -1;
+	entry->value = 0;
+	entry->use_count = 0;
+  }
+  return 0;
+}
+
+static int rpc_map_insert(rpc_map_t *map, int key, void *value)
+{
+  assert(map != NULL);
+  assert(value != NULL);
+
+  const int N_ENTRIES_ALLOC = 7;
+  int i = map->n_entries_max;
+
+  // override any existing entry
+  rpc_map_entry_t *entry = _rpc_map_lookup(map, key);
+  if (entry) {
+	entry->value = value;
+	entry->use_count = 0;
+	return RPC_ERROR_NO_ERROR;
+  }
+
+  // look for a free slot
+  if (map->entries) {
+	for (i = 0; i < map->n_entries_max; i++) {
+	  if (map->entries[i].value == NULL)
+		break;
+	}
+  }
+
+  // none found, reallocate
+  if (i >= map->n_entries_max) {
+	if ((map->entries = (rpc_map_entry_t *)realloc(map->entries, (map->n_entries_max + N_ENTRIES_ALLOC) * sizeof(map->entries[0]))) == NULL)
+	  return RPC_ERROR_NO_MEMORY;
+	i = map->n_entries;
+	memset(&map->entries[i], 0, N_ENTRIES_ALLOC * sizeof(map->entries[0]));
+	map->n_entries_max += N_ENTRIES_ALLOC;
+  }
+
+  map->entries[i].key = key;
+  map->entries[i].value = value;
+  map->entries[i].use_count = 0;
+  ++map->n_entries;
+  return 0;
+}
+
 
 /* ====================================================================== */
 /* === RPC Connection Handling                                        === */
@@ -286,18 +416,76 @@ enum {
 };
 
 // Client / Server connection
-struct rpc_connection_t {
+struct rpc_connection {
   int type;
+  int refcnt;
+  int status;
   int socket;
   char *socket_path;
   int server_socket;
   int server_thread_active;
   pthread_t server_thread;
-  rpc_method_descriptor_t *callbacks;
-  int n_callbacks;
-  int send_offset;
-  char send_buffer[BUFSIZ];
+  rpc_map_t *types;
+  rpc_map_t *methods;
 };
+
+// Increment connection reference count
+rpc_connection_t *rpc_connection_ref(rpc_connection_t *connection)
+{
+  if (connection)
+	++connection->refcnt;
+  return connection;
+}
+
+// Decrement connection reference count and destroy it if it reaches zero
+void rpc_connection_unref(rpc_connection_t *connection)
+{
+  if (connection && --connection->refcnt == 0) {
+	D(bug("Close unused connection\n"));
+	rpc_exit(connection);
+  }
+}
+
+// Returns connection status
+static inline int _rpc_status(rpc_connection_t *connection)
+{
+  return connection->status;
+}
+
+int rpc_status(rpc_connection_t *connection)
+{
+  if (connection == NULL)
+	return RPC_STATUS_BROKEN;
+  return _rpc_status(connection);
+}
+
+// Set connection status
+static void _rpc_set_status(rpc_connection_t *connection, int error)
+{
+  if (connection->status == RPC_STATUS_ACTIVE) {
+	switch (error) {
+	case RPC_ERROR_NO_ERROR:
+	  connection->status = RPC_STATUS_ACTIVE;
+	  break;
+	case RPC_ERROR_CONNECTION_CLOSED:
+	  connection->status = RPC_STATUS_CLOSED;
+	  break;
+	default:
+	  connection->status = RPC_STATUS_BROKEN;
+	  break;
+	}
+  }
+}
+
+static inline int rpc_error(rpc_connection_t *connection, int error)
+{
+  // XXX: this function must be called only in case of error
+  // (otherwise, it's an internal error)
+  assert(error < 0);
+  assert(connection != NULL);
+  _rpc_set_status(connection, error);
+  return error;
+}
 
 // Returns socket fd or -1 if invalid connection
 int rpc_socket(rpc_connection_t *connection)
@@ -374,10 +562,18 @@ rpc_connection_t *rpc_init_server(const char *ident)
   if (connection == NULL)
 	return NULL;
   connection->type = RPC_CONNECTION_SERVER;
+  connection->refcnt = 1;
+  connection->status = RPC_STATUS_CLOSED;
   connection->socket = -1;
   connection->server_thread_active = 0;
-  connection->callbacks = NULL;
-  connection->n_callbacks = 0;
+  if ((connection->types = rpc_map_new_full((free))) == NULL) {
+	rpc_exit(connection);
+	return NULL;
+  }
+  if ((connection->methods = rpc_map_new()) == NULL) {
+	rpc_exit(connection);
+	return NULL;
+  }
 
   if ((connection->server_socket = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
 	perror("server socket");
@@ -404,6 +600,7 @@ rpc_connection_t *rpc_init_server(const char *ident)
 	return NULL;
   }
 
+  connection->status = RPC_STATUS_ACTIVE;
   return connection;
 }
 
@@ -423,9 +620,17 @@ rpc_connection_t *rpc_init_client(const char *ident)
   if (connection == NULL)
 	return NULL;
   connection->type = RPC_CONNECTION_CLIENT;
+  connection->refcnt = 1;
+  connection->status = RPC_STATUS_CLOSED;
   connection->server_socket = -1;
-  connection->callbacks = NULL;
-  connection->n_callbacks = 0;
+  if ((connection->types = rpc_map_new_full((free))) == NULL) {
+	rpc_exit(connection);
+	return NULL;
+  }
+  if ((connection->methods = rpc_map_new()) == NULL) {
+	rpc_exit(connection);
+	return NULL;
+  }
 
   if ((connection->socket = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
 	perror("client socket");
@@ -467,6 +672,7 @@ rpc_connection_t *rpc_init_client(const char *ident)
 	return NULL;
   }
 
+  connection->status = RPC_STATUS_ACTIVE;
   return connection;
 }
 
@@ -507,9 +713,13 @@ int rpc_exit(rpc_connection_t *connection)
 	}
   }
 
-  if (connection->callbacks) {
-	free(connection->callbacks);
-	connection->callbacks = NULL;
+  if (connection->types) {
+	rpc_map_destroy(connection->types);
+	connection->types = NULL;
+  }
+  if (connection->methods) {
+	rpc_map_destroy(connection->methods);
+	connection->methods = NULL;
   }
 
   free(connection);
@@ -611,66 +821,43 @@ enum {
 
 // Message type
 struct rpc_message_t {
+  const rpc_map_t *types;
   int socket;
   int offset;
   unsigned char buffer[BUFSIZ];
 };
 
-// User-defined marshalers
-static struct {
-  rpc_message_descriptor_t *descs;
-  int last;
-  int count;
-} g_message_descriptors = { NULL, 0, 0 };
-static pthread_mutex_t g_message_descriptors_lock = PTHREAD_MUTEX_INITIALIZER;
-
 // Add a user-defined marshaler
-static int rpc_message_add_callback(const rpc_message_descriptor_t *desc)
+int rpc_connection_add_message_descriptor(rpc_connection_t *connection, const rpc_message_descriptor_t *idesc)
 {
-  D(bug("rpc_message_add_callback\n"));
+  D(bug("rpc_connection_add_message_descriptor for type %d\n", idesc->id));
 
-  const int N_ENTRIES_ALLOC = 8;
-  int error = RPC_ERROR_NO_ERROR;
+  if (connection == NULL)
+	return RPC_ERROR_CONNECTION_NULL;
 
-  pthread_mutex_lock(&g_message_descriptors_lock);
-  if (g_message_descriptors.descs == NULL) {
-	g_message_descriptors.count = N_ENTRIES_ALLOC;
-	if ((g_message_descriptors.descs = (rpc_message_descriptor_t *)malloc(g_message_descriptors.count * sizeof(g_message_descriptors.descs[0]))) == NULL) {
-	  pthread_mutex_unlock(&g_message_descriptors_lock);
-	  return RPC_ERROR_NO_MEMORY;
-	}
-	g_message_descriptors.last = 0;
-  }
-  else if (g_message_descriptors.last >= g_message_descriptors.count) {
-	g_message_descriptors.count += N_ENTRIES_ALLOC;
-	if ((g_message_descriptors.descs = (rpc_message_descriptor_t *)realloc(g_message_descriptors.descs, g_message_descriptors.count * sizeof(g_message_descriptors.descs[0]))) == NULL) {
-	  pthread_mutex_unlock(&g_message_descriptors_lock);
-	  return RPC_ERROR_NO_MEMORY;
-	}
-  }
-
-  // XXX only one callback per ID
-  int i;
-  for (i = 0; i < g_message_descriptors.last; i++) {
-	if (g_message_descriptors.descs[i].id == desc->id) {
-	  pthread_mutex_unlock(&g_message_descriptors_lock);
+  rpc_message_descriptor_t *desc;
+  if ((desc = (rpc_message_descriptor_t *)rpc_map_lookup(connection->types, idesc->id)) != NULL) {
+	if (memcmp(desc, idesc, sizeof(*desc)) == 0)
 	  return RPC_ERROR_NO_ERROR;
-	}
+	fprintf(stderr, "duplicate message type %d\n", desc->id);
+	return RPC_ERROR_GENERIC;
   }
 
-  g_message_descriptors.descs[g_message_descriptors.last++] = *desc;
-  pthread_mutex_unlock(&g_message_descriptors_lock);
-  return error;
+  if ((desc = (rpc_message_descriptor_t *)malloc(sizeof(*desc))) == NULL)
+	return RPC_ERROR_NO_MEMORY;
+  memcpy(desc, idesc, sizeof(*desc));
+
+  return rpc_map_insert(connection->types, desc->id, desc);
 }
 
 // Add user-defined marshalers
-int rpc_message_add_callbacks(const rpc_message_descriptor_t *descs, int n_descs)
+int rpc_connection_add_message_descriptors(rpc_connection_t *connection, const rpc_message_descriptor_t *descs, int n_descs)
 {
-  D(bug("rpc_message_add_callbacks\n"));
+  D(bug("rpc_connection_add_message_descriptors\n"));
 
-  int i, error;
-  for (i = 0; i < n_descs; i++) {
-	if ((error = rpc_message_add_callback(&descs[i])) < 0)
+  for (int i = 0; i < n_descs; i++) {
+	int error = rpc_connection_add_message_descriptor(connection, &descs[i]);
+	if (error < 0)
 	  return error;
   }
 
@@ -678,17 +865,12 @@ int rpc_message_add_callbacks(const rpc_message_descriptor_t *descs, int n_descs
 }
 
 // Find user-defined marshaler
-static rpc_message_descriptor_t *rpc_message_find_descriptor(int id)
+static inline rpc_message_descriptor_t *rpc_message_descriptor_lookup(rpc_message_t *message, int id)
 {
-  D(bug("rpc_message_find_descriptor\n"));
+  D(bug("rpc_message_descriptor_lookup\n"));
 
-  if (g_message_descriptors.descs) {
-	int i;
-	for (i = 0; i < g_message_descriptors.count; i++) {
-	  if (g_message_descriptors.descs[i].id == id)
-		return &g_message_descriptors.descs[i];
-	}
-  }
+  if (message && message->types)
+	return (rpc_message_descriptor_t *)rpc_map_lookup(message->types, id);
 
   return NULL;
 }
@@ -696,6 +878,7 @@ static rpc_message_descriptor_t *rpc_message_find_descriptor(int id)
 // Initialize message
 static inline void rpc_message_init(rpc_message_t *message, rpc_connection_t *connection)
 {
+  message->types  = connection->types;
   message->socket = connection->socket;
   message->offset = 0;
 }
@@ -897,29 +1080,12 @@ static int rpc_message_send_args(rpc_message_t *message, va_list args)
 		break;
 	  }
 	  default:
-		if ((desc = rpc_message_find_descriptor(array_type)) != NULL) {
-		  if (desc->size <= sizeof(void *)) {	// arguments are passed by value
-			switch (desc->size) {
-			case sizeof(void *): {
-			  void **array = va_arg(args, void **);
-			  for (i = 0; i < array_size; i++) {
-				if ((error = desc->send_callback(message, array[i])) < 0)
-				  break;
-			  }
+		if ((desc = rpc_message_descriptor_lookup(message, array_type)) != NULL) {
+		  // arguments are passed by value (XXX: needs a way to differenciate reference/value)
+		  uint8_t *array = va_arg(args, uint8_t *);
+		  for (i = 0; i < array_size; i++) {
+			if ((error = desc->send_callback(message, &array[i * desc->size])) < 0)
 			  break;
-			}
-			default:
-			  fprintf(stderr, "invalid argument passing by value with type size of %d bytes\n", desc->size);
-			  error = RPC_ERROR_MESSAGE_ARGUMENT_INVALID;
-			  break;
-			}
-		  }
-		  else {								// arguments are passed by reference
-			uint8_t *array = va_arg(args, uint8_t *);
-			for (i = 0; i < array_size; i++) {
-			  if ((error = desc->send_callback(message, &array[i * desc->size])) < 0)
-				break;
-			}
 		  }
 		}
 		else {
@@ -931,7 +1097,7 @@ static int rpc_message_send_args(rpc_message_t *message, va_list args)
 	  break;
 	}
 	default:
-	  if ((desc = rpc_message_find_descriptor(type)) != NULL)
+	  if ((desc = rpc_message_descriptor_lookup(message, type)) != NULL)
 		error = desc->send_callback(message, va_arg(args, uint8_t *));
 	  else {
 		fprintf(stderr, "unknown arg type %d to send\n", type);
@@ -1190,9 +1356,10 @@ static int rpc_message_recv_args(rpc_message_t *message, va_list args)
 		break;
 	  }
 	  default:
-		if ((desc = rpc_message_find_descriptor(array_type)) != NULL) {
-		  char *array;
-		  if ((array = (char *)malloc(array_size * desc->size)) == NULL)
+		if ((desc = rpc_message_descriptor_lookup(message, array_type)) != NULL) {
+		  // arguments are passed by value (XXX: needs a way to differenciate reference/value)
+		  uint8_t *array;
+		  if ((array = (uint8_t *)malloc(array_size * desc->size)) == NULL)
 			return RPC_ERROR_NO_MEMORY;
 		  for (i = 0; i < array_size; i++) {
 			if ((error = desc->recv_callback(message, &array[i * desc->size])) < 0)
@@ -1209,7 +1376,7 @@ static int rpc_message_recv_args(rpc_message_t *message, va_list args)
 	  break;
 	}
 	default:
-	  if ((desc = rpc_message_find_descriptor(type)) != NULL)
+	  if ((desc = rpc_message_descriptor_lookup(message, type)) != NULL)
 		error = desc->recv_callback(message, p_value);
 	  else {
 		fprintf(stderr, "unknown arg type %d to send\n", type);
@@ -1266,16 +1433,9 @@ static int rpc_message_skip_arg(rpc_message_t *message, int type)
   return error;
 }
 
-static rpc_method_callback_t rpc_lookup_callback(rpc_connection_t *connection, int method)
+static inline rpc_method_callback_t rpc_lookup_callback(rpc_connection_t *connection, int method)
 {
-  if (connection->callbacks) {
-	int i;
-	for (i = 0; i < connection->n_callbacks; i++) {
-	  if (connection->callbacks[i].id == method)
-		return connection->callbacks[i].callback;
-	}
-  }
-  return NULL;
+  return (rpc_method_callback_t)rpc_map_lookup(connection->methods, method);
 }
 
 // Dispatch message received in the server loop
@@ -1305,9 +1465,10 @@ static int _rpc_dispatch(rpc_connection_t *connection, rpc_message_t *message)
 
   // call: <method>
   rpc_method_callback_t callback = rpc_lookup_callback(connection, method);
-  if (callback == NULL)
-	return RPC_ERROR_MESSAGE_HANDLER_INVALID;
-  error = callback(connection);
+  if (callback)
+	error = callback(connection);
+  else
+	error = RPC_ERROR_MESSAGE_HANDLER_INVALID;
   if (error != RPC_ERROR_NO_ERROR) {
 	int error_code = error;
 
@@ -1344,11 +1505,14 @@ int rpc_dispatch(rpc_connection_t *connection)
   int32_t msg_tag;
   int error = rpc_message_recv_int32(&message, &msg_tag);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
   if (msg_tag != RPC_MESSAGE_START)
-	return RPC_ERROR_MESSAGE_TYPE_INVALID;
+	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
 
-  return _rpc_dispatch(connection, &message);
+  int method = _rpc_dispatch(connection, &message);
+  if (method < 0)
+	return rpc_error(connection, method);
+  return method;
 }
 
 
@@ -1357,48 +1521,34 @@ int rpc_dispatch(rpc_connection_t *connection)
 /* ====================================================================== */
 
 // Add a user-defined method callback (server side)
-static int rpc_method_add_callback(rpc_connection_t *connection, const rpc_method_descriptor_t *desc)
+int rpc_connection_add_method_descriptor(rpc_connection_t *connection, const rpc_method_descriptor_t *idesc)
 {
-  const int N_ENTRIES_ALLOC = 8;
-  int i;
+  D(bug("rpc_connection_add_method_descriptor for method %d\n", idesc->id));
 
-  // pre-allocate up to N_ENTRIES_ALLOC entries
-  if (connection->callbacks == NULL) {
-	if ((connection->callbacks = (rpc_method_descriptor_t *)calloc(N_ENTRIES_ALLOC, sizeof(connection->callbacks[0]))) == NULL)
-	  return RPC_ERROR_NO_MEMORY;
-	connection->n_callbacks = N_ENTRIES_ALLOC;
+  if (connection == NULL)
+	return RPC_ERROR_CONNECTION_NULL;
+
+  rpc_method_callback_t callback;
+  if ((callback = (rpc_method_callback_t)rpc_map_lookup(connection->methods, idesc->id)) != NULL) {
+	if (callback == idesc->callback)
+	  return RPC_ERROR_NO_ERROR;
+	fprintf(stderr, "duplicate method %d\n", idesc->id);
+	return RPC_ERROR_GENERIC;
   }
 
-  // look for a free slot
-  for (i = connection->n_callbacks - 1; i >= 0; i--) {
-	if (connection->callbacks[i].callback == NULL)
-	  break;
-  }
-
-  // none found, reallocate
-  if (i < 0) {
-	if ((connection->callbacks = (rpc_method_descriptor_t *)realloc(connection->callbacks, (connection->n_callbacks + N_ENTRIES_ALLOC) * sizeof(connection->callbacks[0]))) == NULL)
-	  return RPC_ERROR_NO_MEMORY;
-	i = connection->n_callbacks;
-	memset(&connection->callbacks[i], 0, N_ENTRIES_ALLOC * sizeof(connection->callbacks[0]));
-	connection->n_callbacks += N_ENTRIES_ALLOC;
-  }
-
-  D(bug("rpc_method_add_callback for method %d in slot %d\n", desc->id, i));
-  connection->callbacks[i] = *desc;
-  return RPC_ERROR_NO_ERROR;
+  return rpc_map_insert(connection->methods, idesc->id, (void *)idesc->callback);
 }
 
 // Add user-defined method callbacks (server side)
-int rpc_method_add_callbacks(rpc_connection_t *connection, const rpc_method_descriptor_t *descs, int n_descs)
+int rpc_connection_add_method_descriptors(rpc_connection_t *connection, const rpc_method_descriptor_t *descs, int n_descs)
 {
-  D(bug("rpc_method_add_callbacks\n"));
+  D(bug("rpc_connection_add_method_descriptors\n"));
 
   if (connection == NULL)
 	return RPC_ERROR_CONNECTION_NULL;
 
   while (--n_descs >= 0) {
-	int error = rpc_method_add_callback(connection, &descs[n_descs]);
+	int error = rpc_connection_add_method_descriptor(connection, &descs[n_descs]);
 	if (error != RPC_ERROR_NO_ERROR)
 	  return error;
   }
@@ -1407,33 +1557,26 @@ int rpc_method_add_callbacks(rpc_connection_t *connection, const rpc_method_desc
 }
 
 // Remove a user-defined method callback (common code)
-int rpc_method_remove_callback_id(rpc_connection_t *connection, int id)
+int rpc_connection_remove_method_descriptor(rpc_connection_t *connection, int id)
 {
-  D(bug("rpc_method_remove_callback_id\n"));
-
-  if (connection->callbacks) {
-	int i;
-	for (i = 0; i < connection->n_callbacks; i++) {
-	  if (connection->callbacks[i].id == id) {
-		connection->callbacks[i].callback = NULL;
-		return RPC_ERROR_NO_ERROR;
-	  }
-	}
-  }
-
-  return RPC_ERROR_GENERIC;
-}
-
-// Remove user-defined method callbacks (server side)
-int rpc_method_remove_callbacks(rpc_connection_t *connection, const rpc_method_descriptor_t *callbacks, int n_callbacks)
-{
-  D(bug("rpc_method_remove_callbacks\n"));
+  D(bug("rpc_connection_remove_method_descriptor\n"));
 
   if (connection == NULL)
 	return RPC_ERROR_CONNECTION_NULL;
 
-  while (--n_callbacks >= 0) {
-	int error = rpc_method_remove_callback_id(connection, callbacks[n_callbacks].id);
+  return rpc_map_remove(connection->methods, id);
+}
+
+// Remove user-defined method callbacks (server side)
+int rpc_connection_remove_method_descriptors(rpc_connection_t *connection, const rpc_method_descriptor_t *descs, int n_descs)
+{
+  D(bug("rpc_connection_remove_method_descriptors\n"));
+
+  if (connection == NULL)
+	return RPC_ERROR_CONNECTION_NULL;
+
+  while (--n_descs >= 0) {
+	int error = rpc_connection_remove_method_descriptor(connection, descs[n_descs].id);
 	if (error != RPC_ERROR_NO_ERROR)
 	  return error;
   }
@@ -1453,6 +1596,8 @@ int rpc_method_invoke(rpc_connection_t *connection, int method, ...)
 
   if (connection == NULL)
 	return RPC_ERROR_CONNECTION_NULL;
+  if (_rpc_status(connection) == RPC_STATUS_CLOSED)
+	return RPC_ERROR_CONNECTION_CLOSED;
 
   rpc_message_t message;
   rpc_message_init(&message, connection);
@@ -1469,24 +1614,24 @@ int rpc_method_invoke(rpc_connection_t *connection, int method, ...)
   // send: <invoke> = MESSAGE_START <method-id> MESSAGE_END
   int error = rpc_message_send_int32(&message, RPC_MESSAGE_START);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
   error = rpc_message_send_int32(&message, method);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
   error = rpc_message_send_int32(&message, RPC_MESSAGE_END);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
   error = rpc_message_flush(&message);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
 
   // wait: MESSAGE_ACK
   int32_t msg_tag;
   error = rpc_message_recv_int32(&message, &msg_tag);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
   if (msg_tag != RPC_MESSAGE_ACK)
-	return RPC_ERROR_MESSAGE_TYPE_INVALID;
+	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
 
   // send optional arguments
   va_list args;
@@ -1500,19 +1645,19 @@ int rpc_method_invoke(rpc_connection_t *connection, int method, ...)
 	error = rpc_message_send_args(&message, args);
 	va_end(args);
 	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
+	  return rpc_error(connection, error);
 	error = rpc_message_flush(&message);
 	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
+	  return rpc_error(connection, error);
 
 	// wait: MESSAGE_ACK
 	error = rpc_message_recv_int32(&message, &msg_tag);
 	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
+	  return rpc_error(connection, error);
 	if (msg_tag != RPC_MESSAGE_ACK)
-	  return RPC_ERROR_MESSAGE_TYPE_INVALID;
+	  return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
   }
-  
+
   return RPC_ERROR_NO_ERROR;
 }
 
@@ -1523,6 +1668,8 @@ int rpc_method_get_args(rpc_connection_t *connection, ...)
 
   if (connection == NULL)
 	return RPC_ERROR_CONNECTION_NULL;
+  if (_rpc_status(connection) == RPC_STATUS_CLOSED)
+	return RPC_ERROR_CONNECTION_CLOSED;
 
   rpc_message_t message;
   rpc_message_init(&message, connection);
@@ -1533,15 +1680,15 @@ int rpc_method_get_args(rpc_connection_t *connection, ...)
   int error = rpc_message_recv_args(&message, args);
   va_end(args);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
 
   // send: MESSAGE_ACK
   error = rpc_message_send_int32(&message, RPC_MESSAGE_ACK);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
   error = rpc_message_flush(&message);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
 
   return RPC_ERROR_NO_ERROR;
 }
@@ -1551,17 +1698,14 @@ int rpc_method_wait_for_reply(rpc_connection_t *connection, ...)
 {
   D(bug("rpc_method_wait_for_reply\n"));
 
-  int error, type;
-  va_list args;
-  rpc_message_t message;
-
   if (connection == NULL)
 	return RPC_ERROR_CONNECTION_NULL;
+  if (_rpc_status(connection) == RPC_STATUS_CLOSED)
+	return RPC_ERROR_CONNECTION_CLOSED;
 
+  int error;
+  rpc_message_t message;
   rpc_message_init(&message, connection);
-  va_start(args, connection);
-  type = va_arg(args, int);
-  va_end(args);
 
   // call: rpc_dispatch() (pending remote calls)
   int32_t msg_tag;
@@ -1569,11 +1713,11 @@ int rpc_method_wait_for_reply(rpc_connection_t *connection, ...)
   while (!done) {
 	error = rpc_message_recv_int32(&message, &msg_tag);
 	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
+	  return rpc_error(connection, error);
 	switch (msg_tag) {
 	case RPC_MESSAGE_START:
 	  if ((error = _rpc_dispatch(connection, &message)) < 0)
-		return error;
+		return rpc_error(connection, error);
 	  break;
 	case RPC_MESSAGE_REPLY:
 	case RPC_MESSAGE_ACK:
@@ -1585,47 +1729,53 @@ int rpc_method_wait_for_reply(rpc_connection_t *connection, ...)
 		int32_t error_code;
 		error = rpc_message_recv_int32(&message, &error_code);
 		if (error != RPC_ERROR_NO_ERROR)
-		  return error;
-		return error_code;
+		  return rpc_error(connection, error);
+		// return other-side error code
+		return rpc_error(connection, error_code);
 	  }
 	default:
-	  return RPC_ERROR_MESSAGE_TYPE_INVALID;
+	  return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
 	}
   }
+
+  va_list args;
+  va_start(args, connection);
+  int type = va_arg(args, int);
+  va_end(args);
 
   if (type != RPC_TYPE_INVALID) {
 
 	// wait: <reply>
 	if (msg_tag != RPC_MESSAGE_REPLY)
-	  return RPC_ERROR_MESSAGE_TYPE_INVALID;
+	  return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
 	va_start(args, connection);
 	error = rpc_message_recv_args(&message, args);
 	va_end(args);
 	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
+	  return rpc_error(connection, error);
 	error = rpc_message_recv_int32(&message, &msg_tag);
 	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
+	  return rpc_error(connection, error);
 	if (msg_tag != RPC_MESSAGE_END)
-	  return RPC_ERROR_MESSAGE_TYPE_INVALID;
+	  return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
 
 	// send: MESSAGE_ACK
 	error = rpc_message_send_int32(&message, RPC_MESSAGE_ACK);
 	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
+	  return rpc_error(connection, error);
 	error = rpc_message_flush(&message);
 	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
+	  return rpc_error(connection, error);
 
 	// wait: MESSAGE_ACK (prepare for final ACK)
 	error = rpc_message_recv_int32(&message, &msg_tag);
 	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
+	  return rpc_error(connection, error);
   }
 
   // wait: MESSAGE_ACK
   if (msg_tag != RPC_MESSAGE_ACK)
-	return RPC_ERROR_MESSAGE_TYPE_INVALID;
+	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
   
   return RPC_ERROR_NO_ERROR;
 }
@@ -1636,7 +1786,9 @@ int rpc_method_send_reply(rpc_connection_t *connection, ...)
   D(bug("rpc_method_send_reply\n"));
 
   if (connection == NULL)
-	return RPC_ERROR_GENERIC;
+	return RPC_ERROR_CONNECTION_NULL;
+  if (_rpc_status(connection) == RPC_STATUS_CLOSED)
+	return RPC_ERROR_CONNECTION_CLOSED;
 
   rpc_message_t message;
   rpc_message_init(&message, connection);
@@ -1644,27 +1796,27 @@ int rpc_method_send_reply(rpc_connection_t *connection, ...)
   // send: <reply> = MESSAGE_REPLY [ <method-args> ] MESSAGE_END
   int error = rpc_message_send_int32(&message, RPC_MESSAGE_REPLY);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
   va_list args;
   va_start(args, connection);
   error = rpc_message_send_args(&message, args);
   va_end(args);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
   error = rpc_message_send_int32(&message, RPC_MESSAGE_END);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
   error = rpc_message_flush(&message);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
 
   // wait: MESSAGE_ACK
   int32_t msg_tag;
   error = rpc_message_recv_int32(&message, &msg_tag);
   if (error != RPC_ERROR_NO_ERROR)
-	return error;
+	return rpc_error(connection, error);
   if (msg_tag != RPC_MESSAGE_ACK)
-	return RPC_ERROR_MESSAGE_TYPE_INVALID;
+	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
 
   return RPC_ERROR_NO_ERROR;
 }
@@ -1700,7 +1852,7 @@ static int do_send_point(rpc_message_t *message, void *p_value)
 {
   D(bug("do_send_point\n"));
 
-  struct Point *pt = p_value;
+  struct Point *pt = (struct Point *)p_value;
   int error;
 
   if ((error = rpc_message_send_int32(message, pt->x)) < 0)
@@ -1714,7 +1866,7 @@ static int do_recv_point(rpc_message_t *message, void *p_value)
 {
   D(bug("do_recv_point\n"));
 
-  struct Point *pt = p_value;
+  struct Point *pt = (struct Point *)p_value;
   int error;
   int32_t value;
 
@@ -1880,19 +2032,24 @@ static int run_server(void)
   g_server_pid = getpid();
   printf("Server PID: %d\n", g_server_pid);
 
-  if (rpc_message_add_callbacks(&point_desc, 1) < 0) {
-	fprintf(stderr, "ERROR: failed to add Point marshaler\n");
-	return 0;
-  }
-
   if ((connection = rpc_init_server(g_npn_connection_path)) == NULL) {
 	fprintf(stderr, "ERROR: failed to initialize RPC server connection to NPN\n");
 	return 0;
   }
   g_npn_connection = connection;
 
+  if (rpc_connection_add_message_descriptors(g_npn_connection, &point_desc, 1) < 0) {
+	fprintf(stderr, "ERROR: failed to add server-side Point marshaler\n");
+	return 0;
+  }
+
   if ((g_npp_connection = rpc_init_client(g_npp_connection_path)) == NULL) {
 	fprintf(stderr, "ERROR: failed to initialize RPC server connection to NPP\n");
+	return 0;
+  }
+
+  if (rpc_connection_add_message_descriptors(g_npp_connection, &point_desc, 1) < 0) {
+	fprintf(stderr, "ERROR: failed to add client-side Point marshaler\n");
 	return 0;
   }
 
@@ -1903,11 +2060,11 @@ static int run_server(void)
 	{ TEST_RPC_METHOD_PID,		handle_server_PID },
 	{ TEST_RPC_METHOD_EXIT,		handle_EXIT },
   };
-  if (rpc_method_add_callbacks(connection, &vtable1[0], sizeof(vtable1) / sizeof(vtable1[0])) < 0) {
+  if (rpc_connection_add_method_descriptors(connection, vtable1, sizeof(vtable1) / sizeof(vtable1[0])) < 0) {
 	fprintf(stderr, "ERROR: failed to setup method callbacks\n");
 	return 0;
   }
-  if (rpc_method_remove_callback_id(connection, TEST_RPC_METHOD_PID) < 0) {
+  if (rpc_connection_remove_method_descriptor(connection, TEST_RPC_METHOD_PID) < 0) {
 	fprintf(stderr, "ERROR: failed to remove superfluous callback %d\n", TEST_RPC_METHOD_PID);
 	return 0;
   }
@@ -1916,7 +2073,7 @@ static int run_server(void)
 	{ TEST_RPC_METHOD_STRINGS,	handle_STRINGS },
 	{ TEST_RPC_METHOD_POINTS,	handle_POINTS },
   };
-  if (rpc_method_add_callbacks(connection, &vtable2[0], sizeof(vtable2) / sizeof(vtable2[0])) < 0) {
+  if (rpc_connection_add_method_descriptors(connection, vtable2, sizeof(vtable2) / sizeof(vtable2[0])) < 0) {
 	fprintf(stderr, "ERROR: failed to setup method callbacks\n");
 	return 0;
   }
@@ -1943,15 +2100,10 @@ static int run_server(void)
 static int run_client(void)
 {
   rpc_connection_t *connection;
-  int i, error;
+  int error;
 
   g_client_pid = getpid();
   printf("Client PID: %d\n", g_client_pid);
-
-  if (rpc_message_add_callbacks(&point_desc, 1) < 0) {
-	fprintf(stderr, "ERROR: failed to add Point marshaler\n");
-	return 0;
-  }
 
   if ((connection = rpc_init_client(g_npn_connection_path)) == NULL) {
 	fprintf(stderr, "ERROR: failed to initialize RPC client connection to NPN\n");
@@ -1959,8 +2111,18 @@ static int run_client(void)
   }
   g_npn_connection = connection;
 
+  if (rpc_connection_add_message_descriptors(g_npn_connection, &point_desc, 1) < 0) {
+	fprintf(stderr, "ERROR: failed to add server-side Point marshaler\n");
+	return 0;
+  }
+
   if ((g_npp_connection = rpc_init_server(g_npp_connection_path)) == NULL) {
 	fprintf(stderr, "ERROR: failed to initialize RPC server connection to NPP\n");
+	return 0;
+  }
+
+  if (rpc_connection_add_message_descriptors(g_npp_connection, &point_desc, 1) < 0) {
+	fprintf(stderr, "ERROR: failed to add client-side Point marshaler\n");
 	return 0;
   }
 
@@ -1968,7 +2130,7 @@ static int run_client(void)
 	{ TEST_RPC_METHOD_PID,		handle_client_PID },
 	{ TEST_RPC_METHOD_EXIT,		handle_EXIT },
   };
-  if (rpc_method_add_callbacks(g_npp_connection, &vtable[0], sizeof(vtable) / sizeof(vtable[0])) < 0) {
+  if (rpc_connection_add_method_descriptors(g_npp_connection, vtable, sizeof(vtable) / sizeof(vtable[0])) < 0) {
 	fprintf(stderr, "ERROR: failed to setup method callbacks\n");
 	return 0;
   }
@@ -2035,7 +2197,7 @@ static int run_client(void)
   }
   printf("  done\n");
 
-  printf("Call STRINGS\n", str);
+  printf("Call STRINGS\n");
   const char *strtab[] = { "un", "deux", "trois", "quatre" };
   if ((error = rpc_method_invoke(connection, TEST_RPC_METHOD_STRINGS, RPC_TYPE_ARRAY, RPC_TYPE_STRING, 4, strtab, RPC_TYPE_INVALID)) < 0) {
 	fprintf(stderr, "ERROR: failed to send STRINGS message [%d]\n", error);
@@ -2047,7 +2209,7 @@ static int run_client(void)
   }
   printf("  done\n");
 
-  printf("Call POINTS\n", str);
+  printf("Call POINTS\n");
   const struct Point pttab[] = {
 	{ -1,  0 },
 	{  2, -1 },

@@ -21,6 +21,10 @@
 #ifndef RPC_H
 #define RPC_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Error Types
 enum {
   RPC_ERROR_NO_ERROR					= 0,
@@ -41,7 +45,10 @@ enum {
 extern const char *rpc_strerror(int error) attribute_hidden;
 
 // Connection Handling
-typedef struct rpc_connection_t rpc_connection_t;
+typedef struct rpc_connection rpc_connection_t;
+extern rpc_connection_t *rpc_connection_ref(rpc_connection_t *connection) attribute_hidden;
+extern void rpc_connection_unref(rpc_connection_t *connection) attribute_hidden;
+
 extern rpc_connection_t *rpc_init_server(const char *ident) attribute_hidden;
 extern rpc_connection_t *rpc_init_client(const char *ident) attribute_hidden;
 extern int rpc_exit(rpc_connection_t *connection) attribute_hidden;
@@ -50,6 +57,13 @@ extern int rpc_listen(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_dispatch(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_wait_dispatch(rpc_connection_t *connection, int timeout) attribute_hidden;
 extern int rpc_socket(rpc_connection_t *connection) attribute_hidden;
+
+enum {
+  RPC_STATUS_BROKEN						= -1,
+  RPC_STATUS_CLOSED						= 0,
+  RPC_STATUS_ACTIVE						= 1,
+};
+extern int rpc_status(rpc_connection_t *connection) attribute_hidden;
 
 // Message Passing
 enum {
@@ -78,6 +92,7 @@ extern int rpc_message_recv_uint64(rpc_message_t *message, uint64_t *ret) attrib
 extern int rpc_message_recv_double(rpc_message_t *message, double *ret) attribute_hidden;
 extern int rpc_message_recv_string(rpc_message_t *message, char **ret) attribute_hidden;
 extern int rpc_message_recv_bytes(rpc_message_t *message, unsigned char *bytes, int count) attribute_hidden;
+
 typedef int (*rpc_message_callback_t)(rpc_message_t *message, void *p_value);
 typedef struct {
   int id;
@@ -85,7 +100,8 @@ typedef struct {
   rpc_message_callback_t send_callback;
   rpc_message_callback_t recv_callback;
 } rpc_message_descriptor_t;
-extern int rpc_message_add_callbacks(const rpc_message_descriptor_t *descs, int n_descs) attribute_hidden;
+extern int rpc_connection_add_message_descriptor(rpc_connection_t *connection, const rpc_message_descriptor_t *desc) attribute_hidden;
+extern int rpc_connection_add_message_descriptors(rpc_connection_t *connection, const rpc_message_descriptor_t *descs, int n_descs) attribute_hidden;
 
 // Method Callbacks Handling
 typedef int (*rpc_method_callback_t)(rpc_connection_t *connection);
@@ -93,14 +109,17 @@ typedef struct {
   int id;
   rpc_method_callback_t callback;
 } rpc_method_descriptor_t;
-extern int rpc_method_add_callbacks(rpc_connection_t *connection, const rpc_method_descriptor_t *descs, int n_descs) attribute_hidden;
-extern int rpc_method_remove_callback_id(rpc_connection_t *connection, int id) attribute_hidden;
-extern int rpc_method_remove_callbacks(rpc_connection_t *connection, const rpc_method_descriptor_t *descs, int n_descs) attribute_hidden;
+extern int rpc_connection_add_method_descriptor(rpc_connection_t *connection, const rpc_method_descriptor_t *desc) attribute_hidden;
+extern int rpc_connection_add_method_descriptors(rpc_connection_t *connection, const rpc_method_descriptor_t *descs, int n_descs) attribute_hidden;
 
 // Remote Procedure Call (method invocation)
 extern int rpc_method_invoke(rpc_connection_t *connection, int method, ...) attribute_hidden;
 extern int rpc_method_wait_for_reply(rpc_connection_t *connection, ...) attribute_hidden;
 extern int rpc_method_get_args(rpc_connection_t *connection, ...) attribute_hidden;
 extern int rpc_method_send_reply(rpc_connection_t *connection, ...) attribute_hidden;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* RPC_H */

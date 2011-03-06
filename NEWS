@@ -1,5 +1,10 @@
-nspluginwrapper NEWS -- history of user-visible changes.  2008-06-29
+nspluginwrapper NEWS -- history of user-visible changes.  2008-07-06
 Copyright (C) 2005-2008 Gwenole Beauchesne
+
+Version 1.1.0 (BETA) - 06.Jul.2008
+* Add support for windowless plugins (Flash Player 10 beta 2)
+* Add standalone plugins player (nspluginplayer)
+* Restart plugins viewer on error (Martin Stransky)
 
 Version 1.0.0 - 29.Jun.2008
 * Don't wrap root plugins to system locations, keep them private

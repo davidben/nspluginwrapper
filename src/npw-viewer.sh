@@ -21,6 +21,11 @@ NPW_VIEWER_DIR=$NPW_LIBDIR/$TARGET_ARCH/$TARGET_OS
 # Set a new LD_LIBRARY_PATH that is TARGET specific
 export LD_LIBRARY_PATH=$NPW_VIEWER_DIR
 
+# Note that a clever DBT will work at the function level and XShm
+# should be possible with a proper native replacement to emulated code
+# XXX: BTW, anything other than "yes" is interpreted as "no"
+NPW_USE_XSHM=${NPW_USE_XSHM:-yes}
+
 case $ARCH in
 i?86)
     ARCH=i386
@@ -49,6 +54,8 @@ if test "$ARCH" != "$TARGET_ARCH"; then
 	    LOADER="none"
 	else
 	    LOADER=`which qemu-i386`
+	    # Don't allow Xshm with qemu
+	    NPW_USE_XSHM=no
 	fi
 	;;
     ppc)
@@ -60,6 +67,8 @@ if test "$ARCH" != "$TARGET_ARCH"; then
 	    esac
 	else
 	    LOADER=`which qemu-ppc`
+	    # Don't allow Xshm with qemu
+	    NPW_USE_XSHM=no
 	fi
 	;;
     esac
@@ -68,6 +77,18 @@ if test "$ARCH" != "$TARGET_ARCH"; then
     elif test -z "$LOADER" -o ! -x "$LOADER"; then
 	echo "*** NSPlugin Viewer *** preloader not found"
 	exit 1
+    fi
+fi
+
+# Disallow Xshm (implying XVideo too)
+if test "$NPW_USE_XSHM" != "yes"; then
+    if test -x "$NPW_VIEWER_DIR/libnoxshm.so"; then
+	if test -n "$LD_PRELOAD"; then
+	    LD_PRELOAD="$LD_PRELOAD:$NPW_VIEWER_DIR/libnoxshm.so"
+	else
+	    LD_PRELOAD="$NPW_VIEWER_DIR/libnoxshm.so"
+	fi
+	export LD_PRELOAD
     fi
 fi
 

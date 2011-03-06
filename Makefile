@@ -35,6 +35,8 @@ ifeq ($(ALLOW_STRIP), yes)
 STRIP_OPT = -s
 endif
 
+LN_S = ln -sf
+
 ifneq (,$(findstring $(OS),linux))
 libdl_LDFLAGS = -ldl
 endif
@@ -121,6 +123,13 @@ npviewer_OBJECTS += npviewer-cxxabi-compat.o
 npviewer_LDFLAGS += -lsupc++
 endif
 
+npplayer_PROGRAM  = npplayer
+npplayer_SOURCES  = npw-player.c debug.c rpc.c utils.c glibcurl.c gtk2xtbin.c $(tidy_SOURCES)
+npplayer_OBJECTS  = $(npplayer_SOURCES:%.c=npplayer-%.o)
+npplayer_CFLAGS   = $(GTK_CFLAGS) $(MOZILLA_CFLAGS) $(CURL_CFLAGS) $(X_CFLAGS)
+npplayer_LDFLAGS  = $(GTK_LDFLAGS) $(CURL_LDFLAGS) $(X_LDFLAGS)
+npplayer_LDFLAGS += -lgthread-2.0 $(libpthread_LDFLAGS)
+
 libxpcom_LIBRARY = libxpcom.so
 libxpcom_RAWSRCS = libxpcom.c debug.c
 libxpcom_SOURCES = $(libxpcom_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
@@ -129,6 +138,16 @@ libxpcom_CFLAGS  = $(PIC_CFLAGS)
 ifeq ($(biarch),yes)
 libxpcom_CFLAGS += -I$(LSB_INC_DIR)
 libxpcom_LDFLAGS = $(LDFLAGS_32) -L$(LSB_OBJ_DIR)
+endif
+
+libnoxshm_LIBRARY = libnoxshm.so
+libnoxshm_RAWSRCS = libnoxshm.c
+libnoxshm_SOURCES = $(libnoxshm_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
+libnoxshm_OBJECTS = $(libnoxshm_RAWSRCS:%.c=libnoxshm-%.o)
+libnoxshm_CFLAGS  = $(PIC_CFLAGS)
+ifeq ($(biarch),yes)
+libnoxshm_CFLAGS += -I$(LSB_INC_DIR)
+libnoxshm_LDFLAGS = $(LDFLAGS_32) -L$(LSB_OBJ_DIR)
 endif
 
 npconfig_PROGRAM = npconfig
@@ -154,6 +173,10 @@ TARGETS		+= $(npwrapper_LIBRARY)
 ifeq ($(build_viewer),yes)
 TARGETS		+= $(npviewer_PROGRAM)
 TARGETS		+= $(libxpcom_LIBRARY)
+TARGETS		+= $(libnoxshm_LIBRARY)
+endif
+ifeq ($(build_player),yes)
+TARGETS		+= $(npplayer_PROGRAM)
 endif
 
 archivedir	= files/
@@ -192,7 +215,7 @@ clean:
 distclean: clean
 	rm -f config-host.* config.*
 
-uninstall: uninstall.wrapper uninstall.viewer uninstall.libxpcom uninstall.loader uninstall.config uninstall.mkruntime uninstall.dirs
+uninstall: uninstall.player uninstall.wrapper uninstall.viewer uninstall.libxpcom uninstall.libnoxshm uninstall.loader uninstall.config uninstall.mkruntime uninstall.dirs
 uninstall.dirs:
 	rmdir $(DESTDIR)$(pkglibdir)/noarch
 	rmdir $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)
@@ -201,6 +224,8 @@ ifneq ($(ARCH),$(ARCH_32))
 	rmdir $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)
 	rmdir $(DESTDIR)$(pkglibdir)/$(ARCH_32)
 endif
+uninstall.player:
+	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npplayer_PROGRAM)
 uninstall.wrapper:
 	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npwrapper_LIBRARY)
 uninstall.viewer:
@@ -208,6 +233,8 @@ uninstall.viewer:
 	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(npviewer_PROGRAM:%.bin=%)
 uninstall.libxpcom:
 	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libxpcom_LIBRARY)
+uninstall.libnoxshm:
+	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libnoxshm_LIBRARY)
 uninstall.loader:
 	rm -f $(DESTDIR)$(pkglibdir)/noarch/$(nploader_PROGRAM)
 uninstall.config:
@@ -216,7 +243,7 @@ uninstall.config:
 uninstall.mkruntime:
 	rm -f $(DESTDIR)$(pkglibdir)/noarch/mkruntime
 
-install: install.dirs install.wrapper install.viewer install.libxpcom install.loader install.config install.mkruntime
+install: install.dirs install.player install.wrapper install.viewer install.libxpcom install.libnoxshm install.loader install.config install.mkruntime
 install.dirs:
 	mkdir -p $(DESTDIR)$(pkglibdir)/noarch
 	mkdir -p $(DESTDIR)$(pkglibdir)/$(ARCH)
@@ -225,14 +252,24 @@ ifneq ($(ARCH),$(ARCH_32))
 	mkdir -p $(DESTDIR)$(pkglibdir)/$(ARCH_32)
 	mkdir -p $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)
 endif
+ifeq ($(build_player),yes)
+install.player: $(npplayer_PROGRAM)
+	install -m 755 $(STRIP_OPT) $(npplayer_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npplayer_PROGRAM)
+	mkdir -p $(DESTDIR)$(bindir)
+	$(LN_S) $(pkglibdir)/$(ARCH)/$(OS)/$(npplayer_PROGRAM) $(DESTDIR)$(bindir)/nspluginplayer
+else
+install.player:
+endif
 install.wrapper: $(npwrapper_LIBRARY)
 	install -m 755 $(STRIP_OPT) $(npwrapper_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npwrapper_LIBRARY)
 ifeq ($(build_viewer),yes)
 install.viewer: install.viewer.bin install.viewer.glue
 install.libxpcom: do.install.libxpcom
+install.libnoxshm: do.install.libnoxshm
 else
 install.viewer:
 install.libxpcom:
+install.libnoxshm:
 endif
 install.viewer.bin: $(npviewer_PROGRAM)
 	install -m 755 $(STRIP_OPT) $(npviewer_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(npviewer_PROGRAM)
@@ -245,10 +282,12 @@ install.viewer.glue::
 	chmod 755 $$p
 do.install.libxpcom: $(libxpcom_LIBRARY)
 	install -m 755 $(STRIP_OPT) $(libxpcom_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libxpcom_LIBRARY)
+do.install.libnoxshm: $(libnoxshm_LIBRARY)
+	install -m 755 $(STRIP_OPT) $(libnoxshm_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libnoxshm_LIBRARY)
 install.config: $(npconfig_PROGRAM)
 	install -m 755 $(STRIP_OPT) $(npconfig_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM)
 	mkdir -p $(DESTDIR)$(bindir)
-	ln -sf $(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM) $(DESTDIR)$(bindir)/nspluginwrapper
+	$(LN_S) $(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM) $(DESTDIR)$(bindir)/nspluginwrapper
 install.loader: $(nploader_PROGRAM)
 	install -m 755 $(nploader_PROGRAM) $(DESTDIR)$(pkglibdir)/noarch/$(nploader_PROGRAM)
 install.mkruntime: $(SRC_PATH)/utils/mkruntime.sh
@@ -290,7 +329,7 @@ localrpm: $(archivedir)$(SRCARCHIVE).bz2
 
 changelog: ../common/authors.xml
 	svn_prefix=`svn info .|sed -n '/^URL *: .*\/svn\/\(.*\)$$/s//\1\//p'`; \
-	LC_ALL=C TZ=GMT svn2cl --strip-prefix=$$svn_prefix --authors=../common/authors.xml --accum || :
+	LC_ALL=C TZ=GMT svn2cl --strip-prefix=$$svn_prefix --authors=../common/authors.xml || :
 changelog.commit: changelog
 	svn commit -m "Generated by svn2cl." ChangeLog
 
@@ -309,11 +348,25 @@ npviewer-%.o: $(SRC_PATH)/src/%.c
 npviewer-%.o: $(SRC_PATH)/src/%.cpp
 	$(CXX) $(CFLAGS_32) -o $@ -c $< $(CPPFLAGS) $(npviewer_CFLAGS) -DBUILD_VIEWER
 
+$(npplayer_PROGRAM): $(npplayer_OBJECTS) $(npplayer_MAPFILE) $(LSB_OBJ_DIR) $(LSB_LIBS)
+	$(CC) $(LDFLAGS) -o $@ $(npplayer_OBJECTS) $(npplayer_LDFLAGS)
+
+npplayer-%.o: $(SRC_PATH)/src/%.c
+	$(CC) $(CFLAGS) -o $@ -c $< $(CPPFLAGS) $(npplayer_CFLAGS) -DBUILD_PLAYER
+npplayer-%.o: $(SRC_PATH)/src/tidy/%.c
+	$(CC) $(CFLAGS) -o $@ -c $< $(CPPFLAGS) $(npplayer_CFLAGS) -DBUILD_PLAYER
+
 $(libxpcom_LIBRARY): $(libxpcom_OBJECTS) $(LSB_OBJ_DIR) $(LSB_LIBS)
 	$(CC) $(LDFLAGS_32) $(DSO_LDFLAGS) -o $@ $(libxpcom_OBJECTS) $(libxpcom_LDFLAGS) -Wl,--soname,libxpcom.so
 
 libxpcom-%.o: $(SRC_PATH)/src/%.c
 	$(CC) $(CFLAGS_32) -o $@ -c $< $(CPPFLAGS) $(libxpcom_CFLAGS) -DBUILD_XPCOM
+
+$(libnoxshm_LIBRARY): $(libnoxshm_OBJECTS) $(LSB_OBJ_DIR) $(LSB_LIBS)
+	$(CC) $(LDFLAGS_32) $(DSO_LDFLAGS) -o $@ $(libnoxshm_OBJECTS) $(libnoxshm_LDFLAGS) -Wl,--soname,libnoxshm.so
+
+libnoxshm-%.o: $(SRC_PATH)/src/%.c
+	$(CC) $(CFLAGS_32) -o $@ -c $< $(CPPFLAGS) $(libnoxshm_CFLAGS)
 
 $(npconfig_PROGRAM): $(npconfig_OBJECTS)
 	$(CC) -o $@ $(npconfig_OBJECTS) $(npconfig_LDFLAGS)
@@ -339,7 +392,7 @@ $(LSB_OBJ_DIR)/libc.so: $(LSB_OBJ_DIR)/libc_main.so $(LSB_OBJ_DIR)/libc_nonshare
 	@echo "GROUP ( $(LSB_OBJ_DIR)/libc_main.so $(LSB_OBJ_DIR)/libc_nonshared.a )" >> $@
 
 $(LSB_OBJ_DIR)/libgcc_s_32.so: $(LSB_OBJ_DIR)/libgcc_s.so
-	ln -sf libgcc_s.so $@
+	$(LN_S) libgcc_s.so $@
 
 $(LSB_OBJ_DIR)/%.so: $(LSB_OBJ_DIR)/%.o
 	$(CC) $(LDFLAGS_32) -nostdlib $(DSO_LDFLAGS) $< -o $@ \

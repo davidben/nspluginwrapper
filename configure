@@ -26,6 +26,7 @@ lib64=""
 x_base_dirs=""
 biarch="guess"
 build_viewer="guess"
+build_player="yes"
 linux_only="guess"
 strip="no"
 cc="gcc"
@@ -108,6 +109,12 @@ case "$opt" in
 --disable-viewer)
     build_viewer="no"
     ;;
+--enable-player)
+    build_player="yes"
+    ;;
+--disable-player)
+    build_player="no"
+    ;;
 --with-lib32=*)
     lib32=`echo $opt | cut -d '=' -f 2`
     ;;
@@ -147,7 +154,7 @@ if test "$biarch" = "guess"; then
     esac
 fi
 
-# check for viewer builds
+# check for viewer build
 if test "$build_viewer" = "guess"; then
     build_viewer="no"
     case $host_os in
@@ -355,7 +362,7 @@ fi
 rm -f $TMPC $TMPE
 
 # check for GTK+ 2.0 compile CFLAGS
-if test "$build_viewer" = "yes"; then
+if test "$build_viewer" = "yes" -o "$build_player" = "yes"; then
     if $pkgconfig --exists gtk+-2.0; then
 	GTK_CFLAGS=`$pkgconfig --cflags gtk+-2.0`
 	GTK_LDFLAGS=`$pkgconfig --libs gtk+-2.0`
@@ -372,6 +379,36 @@ int main(void) {
 EOF
     if ! $cc $CFLAGS $GTK_CFLAGS $GTK_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
 	echo "GTK+ 2.0 environment not usable"
+	rm -f $TMPC
+	exit 1
+    fi
+    rm -f $TMPC $TMPE
+fi
+
+# check for cURL compile CFLAGS
+if test "$build_player" = "yes"; then
+    if $pkgconfig --exists libcurl; then
+	CURL_CFLAGS=`$pkgconfig --cflags libcurl`
+	CURL_LDFLAGS=`$pkgconfig --libs libcurl`
+    else
+	curlconfig=`which curl-config`
+	if test -n "$curlconfig"; then
+	    CURL_CFLAGS=`$curlconfig --cflags`
+	    CURL_LDFLAGS=`$curlconfig --libs`
+	else
+	    echo "cURL environment not found"
+	    exit 1
+	fi
+    fi
+    cat > $TMPC << EOF
+#include <curl/curl.h>
+int main(void) {
+    curl_global_init(CURL_GLOBAL_NOTHING);
+    return 0;
+}
+EOF
+    if ! $cc $CFLAGS $CURL_CFLAGS $CURL_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
+	echo "cURL environment not usable"
 	rm -f $TMPC
 	exit 1
     fi
@@ -511,6 +548,7 @@ echo "  --pkglibdir=ROOT            install private files in ROOT [$pkglibdir]"
 echo "  --target-os=OS              build plugin support for target OS [$target_os]"
 echo "  --target-cpu=CPU            build plugin support for target CPU [$target_cpu]"
 echo "  --enable-viewer             build viewer [$build_viewer]"
+echo "  --enable-player             build player [$build_player]"
 echo ""
 echo "Advanced options (experts only):"
 echo "  --source-path=PATH          path of source code [$source_path]"
@@ -533,6 +571,7 @@ echo "Strip binaries            $strip"
 echo "Bi-arch build             $biarch"
 echo "Build viewer              $build_viewer"
 echo "Build for Linux only      $linux_only"
+echo "Build standalone player   $build_player"
 echo "32-bit library dir name   $lib32"
 echo "64-bit library dir name   $lib64"
 echo "Source path               $source_path"
@@ -558,6 +597,8 @@ echo "GLIB_CFLAGS=$GLIB_CFLAGS" >> $config_mak
 echo "GLIB_LDFLAGS=$GLIB_LDFLAGS" >> $config_mak
 echo "GTK_CFLAGS=$GTK_CFLAGS" >> $config_mak
 echo "GTK_LDFLAGS=$GTK_LDFLAGS" >> $config_mak
+echo "CURL_CFLAGS=$CURL_CFLAGS" >> $config_mak
+echo "CURL_LDFLAGS=$CURL_LDFLAGS" >> $config_mak
 if test "$biarch" = "yes"; then
 echo "LDFLAGS_32=-m32" >> $config_mak
 echo "CFLAGS_32=$CFLAGS_32" >> $config_mak
@@ -626,6 +667,7 @@ fi
 
 echo "SRC_PATH=$source_path" >> $config_mak
 echo "build_viewer=$build_viewer" >> $config_mak
+echo "build_player=$build_player" >> $config_mak
 echo "biarch=$biarch" >> $config_mak
 echo "lib32=$lib32" >> $config_mak
 echo "lib64=$lib64" >> $config_mak

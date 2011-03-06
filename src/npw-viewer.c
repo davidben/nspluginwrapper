@@ -61,6 +61,9 @@
 // Define to use XEMBED
 #define USE_XEMBED 1
 
+// Define to allow windowless plugins
+#define ALLOW_WINDOWLESS_PLUGINS 1
+
 // XXX unimplemented functions
 #define UNIMPLEMENTED() npw_printf("WARNING: Unimplemented function %s at line %d\n", __func__, __LINE__)
 
@@ -73,9 +76,11 @@ typedef struct _PluginInstance {
   NPP instance;
   uint32_t instance_id;
   bool use_xembed;
+  bool is_windowless;
   NPWindow window;
   uint32_t width, height;
   void *toolkit_data;
+  GdkWindow *browser_toplevel;
 } PluginInstance;
 
 // Browser side data for an NPStream instance
@@ -97,6 +102,15 @@ typedef struct _GtkData {
   GtkWidget *container;
   GtkWidget *socket;
 } GtkData;
+
+#define PLUGIN_INSTANCE(INSTANCE) plugin_instance(INSTANCE)
+
+static inline PluginInstance *plugin_instance(NPP instance)
+{
+  PluginInstance *plugin = (PluginInstance *)instance->ndata;
+  assert(plugin->instance == instance);
+  return plugin;
+}
 
 
 /* ====================================================================== */
@@ -340,39 +354,26 @@ extern nsresult NS_GetServiceManager(nsIServiceManager **result);
 /* ====================================================================== */
 
 // Reconstruct window attributes
-static int create_window_attributes(NPWindow *window)
+static int create_window_attributes(NPSetWindowCallbackStruct *ws_info)
 {
-  if (window == NULL || window->window == NULL)
+  if (ws_info == NULL)
 	return -1;
-  if (window->ws_info == NULL) {
-	if ((window->ws_info = malloc(sizeof(NPSetWindowCallbackStruct))) == NULL) {
-	  npw_printf("ERROR: could not allocate window attributes for NPWindow %p\n", window->window);
-	  return -2;
-	}
+  GdkVisual *gdk_visual = gdkx_visual_get((uintptr_t)ws_info->visual);
+  if (gdk_visual == NULL) {
+	npw_printf("ERROR: could not reconstruct XVisual from visualID\n");
+	return -2;
   }
-  NPSetWindowCallbackStruct *ws_info = window->ws_info;
-  ws_info->type = 0; // should be NP_SETWINDOW but Mozilla sets it to 0
   ws_info->display = x_display;
-  XWindowAttributes win_attr;
-  if (!XGetWindowAttributes(ws_info->display, (Window)window->window, &win_attr)) {
-	npw_printf("ERROR: could not reconstruct window attributes from NPWindow\n");
-	return -3;
-  }
-  ws_info->visual = win_attr.visual;
-  ws_info->colormap = win_attr.colormap;
-  ws_info->depth = win_attr.depth;
+  ws_info->visual = gdk_x11_visual_get_xvisual(gdk_visual);
   return 0;
 }
 
 // Destroy window attributes struct
-static void destroy_window_attributes(NPWindow *window)
+static void destroy_window_attributes(NPSetWindowCallbackStruct *ws_info)
 {
-  if (window == NULL)
+  if (ws_info == NULL)
 	return;
-  if (window->ws_info) {
-	free(window->ws_info);
-	window->ws_info = NULL;
-  }
+  free(ws_info);
 }
 
 // Fix size hints in NPWindow (Flash Player doesn't like null width)
@@ -390,7 +391,7 @@ static void fixup_size_hints(PluginInstance *plugin)
   }
 
   // check actual window size and commit back to plugin data
-  if (window->width == 0 || window->height == 0) {
+  if (window->window && (window->width == 0 || window->height == 0)) {
 	XWindowAttributes win_attr;
 	if (XGetWindowAttributes(x_display, (Window)window->window, &win_attr)) {
 	  plugin->width = window->width = win_attr.width;
@@ -406,16 +407,25 @@ static void fixup_size_hints(PluginInstance *plugin)
 // Create a new window from NPWindow
 static int create_window(PluginInstance *plugin, NPWindow *window)
 {
-  // cache new window information
   // XXX destroy previous window here?
+  if (plugin->is_windowless)
+	destroy_window_attributes(plugin->window.ws_info);
+  else
+	assert(plugin->window.ws_info == NULL);
+
+  // cache new window information (and take ownership of window->ws_info)
   memcpy(&plugin->window, window, sizeof(*window));
   window = &plugin->window;
   fixup_size_hints(plugin);
 
   // reconstruct window attributes
-  if (create_window_attributes(window) < 0)
+  if (create_window_attributes(window->ws_info) < 0)
 	return -1;
   NPSetWindowCallbackStruct *ws_info = window->ws_info;
+
+  // that's all for windowless plugins
+  if (plugin->is_windowless)
+	return 0;
 
   // create the new window
   if (plugin->use_xembed) {
@@ -440,7 +450,7 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
 	return 0;
   }
 
-  XtData *toolkit = malloc(sizeof(*toolkit));
+  XtData *toolkit = calloc(1, sizeof(*toolkit));
   if (toolkit == NULL)
 	return -1;
 
@@ -484,6 +494,30 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
 // Update window information from NPWindow
 static int update_window(PluginInstance *plugin, NPWindow *window)
 {
+  // always synchronize window attributes (and take ownership of window->ws_info)
+  if (plugin->window.ws_info) {
+	destroy_window_attributes(plugin->window.ws_info);
+	plugin->window.ws_info = NULL;
+  }
+  if (window->ws_info) {
+	create_window_attributes(window->ws_info);
+	plugin->window.ws_info = window->ws_info;
+  }
+  else {
+	npw_printf("ERROR: no window attributes for window %p\n", window->window);
+	return -1;
+  }
+
+  // synchronize cliprect
+  memcpy(&plugin->window.clipRect, &window->clipRect, sizeof(window->clipRect));;
+
+  // synchronize window position, if it changed
+  if (plugin->window.x != window->x || plugin->window.y != window->y) {
+	plugin->window.x = window->x;
+	plugin->window.y = window->y;
+  }
+
+  // synchronize window size, if it changed
   if (plugin->window.width != window->width || plugin->window.height != window->height) {
 	plugin->window.width = window->width;
 	plugin->window.height = window->height;
@@ -509,8 +543,10 @@ static void destroy_window(PluginInstance *plugin)
   if (plugin->toolkit_data) {
 	if (plugin->use_xembed) {
 	  GtkData *toolkit = (GtkData *)plugin->toolkit_data;
-	  if (toolkit->container)
+	  if (toolkit->container) {
 		gtk_widget_destroy(toolkit->container);
+		toolkit->container = NULL;
+	  }
 	}
 	else {
 	  XtData *toolkit = (XtData *)plugin->toolkit_data;
@@ -525,7 +561,10 @@ static void destroy_window(PluginInstance *plugin)
 	plugin->toolkit_data = NULL;
   }
 
-  destroy_window_attributes(&plugin->window);
+  if (plugin->window.ws_info) {
+	destroy_window_attributes(plugin->window.ws_info);
+	plugin->window.ws_info = NULL;
+  }
 }
 
 
@@ -646,6 +685,18 @@ invoke_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 
   int32_t ret;
   switch (rpc_type_of_NPNVariable(variable)) {
+  case RPC_TYPE_UINT32:
+	{
+	  uint32_t n = 0;
+	  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_INT32, &ret, RPC_TYPE_UINT32, &n, RPC_TYPE_INVALID);
+	  if (error != RPC_ERROR_NO_ERROR) {
+		npw_perror("NPN_GetValue() wait for reply", error);
+		ret = NPERR_GENERIC_ERROR;
+	  }
+	  D(bug(" value: %u\n", n));
+	  *((unsigned int *)value) = n;
+	  break;
+	}
   case RPC_TYPE_BOOLEAN:
 	{
 	  uint32_t b = 0;
@@ -675,6 +726,16 @@ invoke_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
   return ret;
 }
 
+static Window
+get_real_netscape_window(NPP instance)
+{
+  GdkNativeWindow window;
+  int ret = invoke_NPN_GetValue(instance, NPNVnetscapeWindow, &window);
+  if (ret == NPERR_NO_ERROR)
+	return window;
+  return None;
+}
+
 static NPError
 g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 {
@@ -700,6 +761,22 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 	break;
   }
 #endif
+  case NPNVnetscapeWindow: {
+	PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+	if (plugin->browser_toplevel == NULL) {
+	  GdkNativeWindow netscape_xid = get_real_netscape_window(instance);
+	  if (netscape_xid == None)
+		return NPERR_GENERIC_ERROR;
+	  plugin->browser_toplevel = gdk_window_foreign_new(netscape_xid);
+	  if (plugin->browser_toplevel == NULL)
+		return NPERR_GENERIC_ERROR;
+	}
+	*((GdkNativeWindow *)value) = GDK_WINDOW_XWINDOW(plugin->browser_toplevel);
+	break;
+  }
+#if ALLOW_WINDOWLESS_PLUGINS
+  case NPNVSupportsWindowless:
+#endif
 #if USE_XEMBED
   case NPNVSupportsXEmbedBool:
 #endif
@@ -720,11 +797,36 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 
 // Invalidates specified drawing area prior to repainting or refreshing a windowless plug-in
 static void
+invoke_NPN_InvalidateRect(NPP instance, NPRect *invalidRect)
+{
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_INVALIDATE_RECT,
+								RPC_TYPE_NPP, instance,
+								RPC_TYPE_NP_RECT, invalidRect,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_InvalidateRect() invoke", error);
+	return;
+  }
+
+  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_InvalidateRect() wait for reply", error);
+	return;
+  }
+}
+
+static void
 g_NPN_InvalidateRect(NPP instance, NPRect *invalidRect)
 {
-  D(bug("NPN_InvalidateRect instance=%p\n", instance));
+  if (instance == NULL || invalidRect == NULL)
+	return;
 
-  UNIMPLEMENTED();
+  D(bug("NPN_InvalidateRect instance=%p\n", instance));
+  invoke_NPN_InvalidateRect(instance, invalidRect);
+  D(bug(" done\n"));
 }
 
 // Invalidates specified region prior to repainting or refreshing a windowless plug-in
@@ -913,13 +1015,51 @@ g_NPN_RequestRead(NPStream *stream, NPByteRange *rangeList)
 
 // Sets various modes of plug-in operation
 static NPError
+invoke_NPN_SetValue(PluginInstance *plugin, NPPVariable variable, void *value)
+{
+  switch (rpc_type_of_NPPVariable(variable)) {
+  case RPC_TYPE_BOOLEAN:
+	break;
+  default:
+	npw_printf("WARNING: unhandled variable %d in NPN_SetValue()\n", variable);
+	return NPERR_INVALID_PARAM;
+  }
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_SET_VALUE,
+								RPC_TYPE_NPP, plugin->instance,
+								RPC_TYPE_UINT32, variable,
+								RPC_TYPE_BOOLEAN, (uint32_t)(uintptr_t)value,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_SetValue() invoke", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  int32_t ret;
+  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_INT32, &ret, RPC_TYPE_INVALID);
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_SetValue() wait for reply", error);
+	return NPERR_GENERIC_ERROR;
+  }
+  return ret;
+}
+
+static NPError
 g_NPN_SetValue(NPP instance, NPPVariable variable, void *value)
 {
-  D(bug("NPN_SetValue instance=%p\n", instance));
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
 
-  UNIMPLEMENTED();
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
 
-  return NPERR_GENERIC_ERROR;
+  D(bug("NPN_SetValue instance=%p, variable=%d\n", instance, variable));
+  NPError ret = invoke_NPN_SetValue(plugin, variable, value);
+  D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
+  return ret;
 }
 
 // Displays a message on the status line of the browser window
@@ -1240,6 +1380,62 @@ g_NPN_PopPopupsEnabledState(NPP instance)
 /* === NPRuntime glue                                                 === */
 /* ====================================================================== */
 
+// make sure to deallocate with g_free() since it comes from a GString
+static gchar *
+string_of_NPVariant(const NPVariant *arg)
+{
+#if DEBUG
+  GString *str = g_string_new(NULL);
+  switch (arg->type)
+	{
+	case NPVariantType_Void:
+	  g_string_append_printf(str, "void");
+	  break;
+	case NPVariantType_Null:
+	  g_string_append_printf(str, "null");
+	  break;
+	case NPVariantType_Bool:
+	  g_string_append(str, arg->value.boolValue ? "true" : "false");
+	  break;
+	case NPVariantType_Int32:
+	  g_string_append_printf(str, "%d", arg->value.intValue);
+	  break;
+	case NPVariantType_Double:
+	  g_string_append_printf(str, "%f", arg->value.doubleValue);
+	  break;
+	case NPVariantType_String:
+	  g_string_append_printf(str, "'%s'",
+							  arg->value.stringValue.utf8characters);
+	  break;
+	case NPVariantType_Object:
+	  g_string_append_printf(str, "<object %p>", arg->value.objectValue);
+	  break;
+	default:
+	  g_string_append_printf(str, "<invalid type %d>", arg->type);
+	  break;
+	}
+  return g_string_free(str, FALSE);
+#endif
+  return NULL;
+}
+
+static void
+print_npvariant_args(const NPVariant *args, uint32_t nargs)
+{
+#if DEBUG
+  GString *str = g_string_new(NULL);
+  for (int i = 0; i < nargs; i++) {
+	if (i > 0)
+	  g_string_append(str, ", ");
+	gchar *argstr = string_of_NPVariant(&args[i]);
+	g_string_append(str, argstr);
+	g_free(argstr);
+  }
+  D(bug(" %u args (%s)\n", nargs, str->str));
+  g_string_free(str, TRUE);
+#endif
+}
+
 // Allocates a new NPObject
 static uint32_t
 invoke_NPN_CreateObject(NPP instance)
@@ -1398,9 +1594,12 @@ g_NPN_Invoke(NPP instance, NPObject *npobj, NPIdentifier methodName,
   if (!instance || !npobj || !npobj->_class || !npobj->_class->invoke)
 	return false;
 
-  D(bug("NPN_Invoke instance=%p, npobj=%p\n", instance, npobj));
+  D(bug("NPN_Invoke instance=%p, npobj=%p, methodName=%p\n", instance, npobj, methodName));
+  print_npvariant_args(args, argCount);
   bool ret = invoke_NPN_Invoke(instance, npobj, methodName, args, argCount, result);
-  D(bug(" return: %d\n", ret));
+  gchar *result_str = string_of_NPVariant(result);
+  D(bug(" return: %d (%s)\n", ret, result_str));
+  g_free(result_str);
   return ret;
 }
 
@@ -1443,8 +1642,11 @@ g_NPN_InvokeDefault(NPP instance, NPObject *npobj,
 	return false;
 
   D(bug("NPN_InvokeDefault instance=%p, npobj=%p\n", instance, npobj));
+  print_npvariant_args(args, argCount);
   bool ret = invoke_NPN_InvokeDefault(instance, npobj, args, argCount, result);
-  D(bug(" return: %d\n", ret));
+  gchar *result_str = string_of_NPVariant(result);
+  D(bug(" return: %d (%s)\n", ret, result_str));
+  g_free(result_str);
   return ret;
 }
 
@@ -1489,7 +1691,9 @@ g_NPN_Evaluate(NPP instance, NPObject *npobj, NPString *script, NPVariant *resul
 
   D(bug("NPN_Evaluate instance=%p, npobj=%p\n", instance, npobj));
   bool ret = invoke_NPN_Evaluate(instance, npobj, script, result);
-  D(bug(" return: %d\n", ret));
+  gchar *result_str = string_of_NPVariant(result);
+  D(bug(" return: %d (%s)\n", ret, result_str));
+  g_free(result_str);
   return ret;
 }
 
@@ -1531,9 +1735,11 @@ g_NPN_GetProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName,
   if (!instance || !npobj || !npobj->_class || !npobj->_class->getProperty)
 	return false;
 
-  D(bug("NPN_GetProperty instance=%p, npobj=%p\n", instance, npobj));
+  D(bug("NPN_GetProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
   bool ret = invoke_NPN_GetProperty(instance, npobj, propertyName, result);
-  D(bug(" return: %d\n", ret));
+  gchar *result_str = string_of_NPVariant(result);
+  D(bug(" return: %d (%s)\n", ret, result_str));
+  g_free(result_str);
   return ret;
 }
 
@@ -1575,7 +1781,7 @@ g_NPN_SetProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName,
   if (!instance || !npobj || !npobj->_class || !npobj->_class->setProperty)
 	return false;
 
-  D(bug("NPN_SetProperty instance=%p, npobj=%p\n", instance, npobj));
+  D(bug("NPN_SetProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
   bool ret = invoke_NPN_SetProperty(instance, npobj, propertyName, value);
   D(bug(" return: %d\n", ret));
   return ret;
@@ -1616,7 +1822,7 @@ g_NPN_RemoveProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName)
   if (!instance || !npobj || !npobj->_class || !npobj->_class->removeProperty)
 	return false;
 
-  D(bug("NPN_RemoveProperty instance=%p, npobj=%p\n", instance, npobj));
+  D(bug("NPN_RemoveProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
   bool ret = invoke_NPN_RemoveProperty(instance, npobj, propertyName);
   D(bug(" return: %d\n", ret));
   return ret;
@@ -1657,7 +1863,7 @@ g_NPN_HasProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName)
   if (!instance || !npobj || !npobj->_class || !npobj->_class->hasProperty)
 	return false;
 
-  D(bug("NPN_HasProperty instance=%p, npobj=%p\n", instance, npobj));
+  D(bug("NPN_HasProperty instance=%p, npobj=%p, propertyName=%p\n", instance, npobj, propertyName));
   bool ret = invoke_NPN_HasProperty(instance, npobj, propertyName);
   D(bug(" return: %d\n", ret));
   return ret;
@@ -1698,7 +1904,7 @@ g_NPN_HasMethod(NPP instance, NPObject *npobj, NPIdentifier methodName)
   if (!instance || !npobj || !npobj->_class || !npobj->_class->hasMethod)
 	return false;
 
-  D(bug("NPN_HasMethod instance=%p, npobj=%p\n", instance, npobj));
+  D(bug("NPN_HasMethod instance=%p, npobj=%p, methodName=%p\n", instance, npobj, methodName));
   bool ret = invoke_NPN_HasMethod(instance, npobj, methodName);
   D(bug(" return: %d\n", ret));
   return ret;
@@ -2268,6 +2474,8 @@ static int handle_NPP_New(rpc_connection_t *connection)
 {
   D(bug("handle_NPP_New\n"));
 
+  rpc_connection_ref(connection);
+
   uint32_t instance_id;
   NPMIMEType plugin_type;
   int32_t mode;
@@ -2322,6 +2530,10 @@ static NPError g_NPP_Destroy(NPP instance, NPSavedData **sdata)
 
   PluginInstance *plugin = instance->ndata;
   if (plugin) {
+	if (plugin->browser_toplevel) {
+	  g_object_unref(plugin->browser_toplevel);
+	  plugin->browser_toplevel = NULL;
+	}
 	destroy_window(plugin);
 	id_remove(plugin->instance_id);
 	free(plugin);
@@ -2344,7 +2556,10 @@ static int handle_NPP_Destroy(rpc_connection_t *connection)
 
   NPSavedData *save_area;
   NPError ret = g_NPP_Destroy(instance, &save_area);
-  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_NP_SAVED_DATA, save_area, RPC_TYPE_INVALID);
+
+  error = rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_NP_SAVED_DATA, save_area, RPC_TYPE_INVALID);
+  rpc_connection_unref(connection);
+  return error;
 }
 
 // NPP_SetWindow
@@ -2361,8 +2576,10 @@ g_NPP_SetWindow(NPP instance, NPWindow *np_window)
   if (plugin == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
+  plugin->is_windowless = np_window && np_window->type == NPWindowTypeDrawable;
+
   NPWindow *window = np_window;
-  if (window && window->window) {
+  if (window && (window->window || plugin->is_windowless)) {
 	if (plugin->toolkit_data) {
 	  if (update_window(plugin, window) < 0)
 		return NPERR_GENERIC_ERROR;
@@ -2378,7 +2595,7 @@ g_NPP_SetWindow(NPP instance, NPWindow *np_window)
   NPError ret = plugin_funcs.setwindow(instance, window);
   D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
 
-  if (np_window == NULL || np_window->window == NULL)
+  if (np_window == NULL || (np_window->window == NULL && !plugin->is_windowless))
 	destroy_window(plugin);
 
   return ret;
@@ -2527,8 +2744,8 @@ g_NPP_NewStream(NPP instance, NPMIMEType type, NPStream *stream, NPBool seekable
   if (plugin_funcs.newstream == NULL)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
 
-  D(bug("NPP_NewStream instance=%p, stream=%p, type='%s', seekable=%d, stype=%s\n",
-		instance, stream, type, seekable, string_of_NPStreamType(*stype)));
+  D(bug("NPP_NewStream instance=%p, stream=%p, url='%s', type='%s', seekable=%d, stype=%s, notifyData=%p\n",
+		instance, stream, stream->url, type, seekable, string_of_NPStreamType(*stype), stream->notifyData));
   NPError ret = plugin_funcs.newstream(instance, type, stream, seekable, stype);
   D(bug(" return: %d [%s], stype=%s\n", ret, string_of_NPError(ret), string_of_NPStreamType(*stype)));
   return ret;
@@ -2833,7 +3050,7 @@ static int handle_NPP_Print(rpc_connection_t *connection)
 	printInfo.print.embedPrint.platformPrint = &printer;
 	// XXX the window ID is unlikely to work here as is. The NPWindow
 	// is probably only used as a bounding box?
-	create_window_attributes(&printInfo.print.embedPrint.window);
+	create_window_attributes(printInfo.print.embedPrint.window.ws_info);
 	break;
   }
 
@@ -2864,13 +3081,62 @@ static int handle_NPP_Print(rpc_connection_t *connection)
 	fclose(printer.fp);
   }
 
-  if (printInfo.mode == NP_EMBED)
-	destroy_window_attributes(&printInfo.print.embedPrint.window);
+  if (printInfo.mode == NP_EMBED) {
+	NPWindow *window = &printInfo.print.embedPrint.window;
+	if (window->ws_info) {
+	  destroy_window_attributes(window->ws_info);
+	  window->ws_info = NULL;
+	}
+  }
 
   uint32_t plugin_printed = FALSE;
   if (printInfo.mode == NP_FULL)
 	plugin_printed = printInfo.print.fullPrint.pluginPrinted;
   return rpc_method_send_reply(connection, RPC_TYPE_BOOLEAN, plugin_printed, RPC_TYPE_INVALID);
+}
+
+// Delivers a platform-specific window event to the instance
+static int16
+g_NPP_HandleEvent(NPP instance, NPEvent *event)
+{
+  if (instance == NULL)
+	return false;
+
+  if (plugin_funcs.event == NULL)
+	return false;
+
+  if (event == NULL)
+	return false;
+
+  D(bug("NPP_HandleEvent instance=%p, event=%p\n", instance, event));
+  int16 ret = plugin_funcs.event(instance, event);
+  D(bug(" return: %d\n", ret));
+
+  /* XXX: let's have a chance to commit the pixmap before it's gone */
+  if (event->type == GraphicsExpose)
+	gdk_flush();
+
+  return ret;
+}
+
+static int handle_NPP_HandleEvent(rpc_connection_t *connection)
+{
+  NPP instance;
+  NPEvent event;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPP, &instance,
+								  RPC_TYPE_NP_EVENT, &event,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_HandleEvent() get args", error);
+	return error;
+  }
+
+  event.xany.display = x_display;
+  int16 ret = g_NPP_HandleEvent(instance, &event);
+
+  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
 
@@ -2995,12 +3261,12 @@ static int do_main(int argc, char **argv, const char *connection_path)
   gtk_init(&argc, &argv);
 
   // Initialize RPC communication channel
-  if (rpc_add_np_marshalers() < 0) {
-	npw_printf("ERROR: failed to initialize plugin-side marshalers\n");
-	return 1;
-  }
   if ((g_rpc_connection = rpc_init_server(connection_path)) == NULL) {
 	npw_printf("ERROR: failed to initialize plugin-side RPC server connection\n");
+	return 1;
+  }
+  if (rpc_add_np_marshalers(g_rpc_connection) < 0) {
+	npw_printf("ERROR: failed to initialize plugin-side marshalers\n");
 	return 1;
   }
   static const rpc_method_descriptor_t vtable[] = {
@@ -3019,6 +3285,7 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	{ RPC_METHOD_NPP_WRITE,						handle_NPP_Write },
 	{ RPC_METHOD_NPP_STREAM_AS_FILE,			handle_NPP_StreamAsFile },
 	{ RPC_METHOD_NPP_PRINT,						handle_NPP_Print },
+	{ RPC_METHOD_NPP_HANDLE_EVENT,				handle_NPP_HandleEvent },
 	{ RPC_METHOD_NPCLASS_INVALIDATE,			npclass_handle_Invalidate },
 	{ RPC_METHOD_NPCLASS_HAS_METHOD,			npclass_handle_HasMethod },
 	{ RPC_METHOD_NPCLASS_INVOKE,				npclass_handle_Invoke },
@@ -3028,7 +3295,7 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	{ RPC_METHOD_NPCLASS_SET_PROPERTY,			npclass_handle_SetProperty },
 	{ RPC_METHOD_NPCLASS_REMOVE_PROPERTY,		npclass_handle_RemoveProperty },
   };
-  if (rpc_method_add_callbacks(g_rpc_connection, vtable, sizeof(vtable) / sizeof(vtable[0])) < 0) {
+  if (rpc_connection_add_method_descriptors(g_rpc_connection, vtable, sizeof(vtable) / sizeof(vtable[0])) < 0) {
 	npw_printf("ERROR: failed to setup NPP method callbacks\n");
 	return 1;
   }
@@ -3077,7 +3344,7 @@ static int do_main(int argc, char **argv, const char *connection_path)
   if (g_user_agent)
 	free(g_user_agent);
   if (g_rpc_connection)
-	rpc_exit(g_rpc_connection);
+	rpc_connection_unref(g_rpc_connection);
 
   id_kill();
   return 0;

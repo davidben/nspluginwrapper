@@ -23,6 +23,10 @@
 
 #include <stdarg.h>
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 extern void npw_dprintf(const char *format, ...) attribute_hidden;
 
 extern void npw_printf(const char *format, ...) attribute_hidden;
@@ -33,6 +37,10 @@ extern void npw_vprintf(const char *format, va_list args) attribute_hidden;
 #define D(x) x
 #else
 #define D(x) ;
+#endif
+
+#ifdef __cplusplus
+}
 #endif
 
 #endif /* DEBUG_H */

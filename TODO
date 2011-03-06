@@ -18,3 +18,11 @@
   * Import minimal GLib functions (hashes, etc.)
   * Split toolkit specific code (npviewer-{x11,gtk,win}.c)
   * Use winelib + override win32 socket to support AF_UNIX (Linux "native")
+- RPC
+  * Need a way to differenciate array of pointers or array of values
+    => RPC_TYPE_DYNAMIC (allocate space), RPC_TYPE_STATIC (assumes data alloc'ed?)
+    => Rearrange RPC message type descriptors
+- Viewer:
+  * Allow run-time (de)activation of windowless plugins
+  * Allow run-time (de)activation of XEMBED
+  * 0.19 API for Java Plugin2 (NPAPI based)

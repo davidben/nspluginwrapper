@@ -21,6 +21,10 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Hashes
 extern bool id_init(void) attribute_hidden;
 extern void id_kill(void) attribute_hidden;
@@ -38,5 +42,9 @@ extern const char *string_of_NPStreamType(int stype) attribute_hidden;
 // Misc utility functions
 extern void npw_perror(const char *prefix, int error) attribute_hidden;
 extern const char *npw_strerror(int error) attribute_hidden;
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* UTILS_H */

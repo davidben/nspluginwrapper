@@ -1,7 +1,7 @@
 %define name	nspluginwrapper
-%define version	1.0.0
+%define version	1.1.0
 %define release	1
-#define svndate 20080629
+#define svndate 20080706
 
 # define 32-bit arch of multiarch platforms
 %define arch_32 %{nil}
@@ -45,6 +45,11 @@
 %{expand: %{?_with_generic:	%%global build_generic 1}}
 %{expand: %{?_without_generic:	%%global build_generic 0}}
 
+# define to build the standalone NPAPI plugins player
+%define build_player		1
+%{expand: %{?_with_player:	%%global build_player 1}}
+%{expand: %{?_without_player:	%%global build_player 0}}
+
 Summary:	A compatibility layer for Netscape 4 plugins
 Name:		%{name}
 Version:	%{version}
@@ -87,6 +92,18 @@ This package consists in:
 This package provides the npviewer program for %{target_arch}.
 %endif
 
+%if %{build_player}
+%package -n nspluginplayer
+Summary:	A viewer for %{target_arch} compiled Netscape 4 plugins
+Group:		Networking/WWW
+BuildRequires:	curl-devel
+# XXX: the Gtk version can work with non-wrapped plugins so this ought to be a Suggests: tag
+#Requires:	%{name} = %{version}-%{release}
+
+%description -n nspluginplayer
+nspluginplayer is a standalone player for NPAPI plugins.
+%endif
+
 %prep
 %setup -q
 
@@ -98,10 +115,17 @@ enable_biarch="--disable-biarch"
 %endif
 %if %{build_generic}
 enable_generic="--enable-generic"
+%else
+enable_generic="--disable-generic"
+%endif
+%if %{build_player}
+enable_player="--enable-player"
+%else
+enable_player="--disable-player"
 %endif
 mkdir objs
 pushd objs
-../configure --prefix=%{_prefix} $enable_biarch $enable_generic
+../configure --prefix=%{_prefix} $enable_biarch $enable_generic $enable_player
 make
 popd
 
@@ -144,6 +168,7 @@ fi
 %{pkglibdir}/%{_arch}/%{_os}/npviewer
 %{pkglibdir}/%{_arch}/%{_os}/npviewer.bin
 %{pkglibdir}/%{_arch}/%{_os}/libxpcom.so
+%{pkglibdir}/%{_arch}/%{_os}/libnoxshm.so
 %endif
 %{pkglibdir}/%{_arch}/%{_os}/npwrapper.so
 
@@ -155,9 +180,23 @@ fi
 %{pkglibdir}/%{target_arch}/%{target_os}/npviewer
 %{pkglibdir}/%{target_arch}/%{target_os}/npviewer.bin
 %{pkglibdir}/%{target_arch}/%{target_os}/libxpcom.so
+%{pkglibdir}/%{target_arch}/%{target_os}/libnoxshm.so
+%endif
+
+%if %{build_player}
+%files -n nspluginplayer
+%defattr(-,root,root)
+%doc README COPYING NEWS
+%{_bindir}/nspluginplayer
+%{pkglibdir}/%{_arch}/%{_os}/npplayer
 %endif
 
 %changelog
+* Sun Jul  6 2008 Gwenole Beauchesne <gb.public@free.fr> 1.1.0-1
+- add support for windowless plugins (Flash Player 10 beta 2)
+- add standalone plugins player (nspluginplayer)
+- restart plugins viewer on error (Martin Stransky)
+
 * Sun Jun 29 2008 Gwenole Beauchesne <gb.public@free.fr> 1.0.0-1
 - don't wrap root plugins to system locations, keep them private
 - fix support for Acrobat Reader 8 (focus problems)

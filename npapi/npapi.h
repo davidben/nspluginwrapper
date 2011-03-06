@@ -126,7 +126,7 @@
 /*----------------------------------------------------------------------*/
 
 #define NP_VERSION_MAJOR 0
-#define NP_VERSION_MINOR 17
+#define NP_VERSION_MINOR 19
 
 
 /* The OS/2 version of Netscape uses RC_DATA to define the
@@ -437,7 +437,10 @@ typedef enum {
   NPNVWindowNPObject = 15,
 
   /* Get the NPObject wrapper for the plugins DOM element. */
-  NPNVPluginElementNPObject = 16
+  NPNVPluginElementNPObject = 16,
+
+  NPNVSupportsWindowless = 17
+
 } NPNVariable;
 
 /*
@@ -636,6 +639,8 @@ enum NPEventType {
 #define NPVERS_HAS_FORM_VALUES            15
 #define NPVERS_HAS_POPUPS_ENABLED_STATE   16
 #define NPVERS_HAS_RESPONSE_HEADERS       17
+#define NPVERS_HAS_NPOBJECT_ENUM            18
+#define NPVERS_HAS_PLUGIN_THREAD_ASYNC_CALL 19
 
 /*----------------------------------------------------------------------*/
 /*                        Function Prototypes                           */
@@ -728,6 +733,9 @@ void    NP_LOADDS NPN_InvalidateRegion(NPP instance, NPRegion invalidRegion);
 void    NP_LOADDS NPN_ForceRedraw(NPP instance);
 void    NP_LOADDS NPN_PushPopupsEnabledState(NPP instance, NPBool enabled);
 void    NP_LOADDS NPN_PopPopupsEnabledState(NPP instance);
+void    NP_LOADDS NPN_PluginThreadAsyncCall(NPP instance,
+                                            void (*func) (void *),
+                                            void *userData);
 
 #ifdef __cplusplus
 }  /* end extern "C" */

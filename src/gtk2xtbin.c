@@ -42,16 +42,22 @@
  * inside a GTK application.  
  */
 
-#include "sysdeps.h"
-
+#include "xembed.h"
+#include "gtk2xtbin.h"
+#ifdef BUILD_VIEWER
+#include <gtk/gtk.h>
+#else
+#include <gtk/gtkmain.h>
+#include <gtk/gtkprivate.h>
+#endif
+#include <gdk/gdkx.h>
+#include <glib.h>
 #include <assert.h>
+#include <sys/time.h>
+#include <sys/types.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-
-#include <gdk/gdkx.h>
-#include "xembed.h"
-#include "gtk2xtbin.h"
 
 /* Xlib/Xt stuff */
 #include <X11/Xlib.h>
@@ -62,7 +68,9 @@
 
 /* uncomment this if you want debugging information about widget
    creation and destruction */
-#define DEBUG_XTBIN 1
+#undef DEBUG_XTBIN
+
+#define XTBIN_MAX_EVENTS 30
 
 static void            gtk_xtbin_class_init (GtkXtBinClass *klass);
 static void            gtk_xtbin_init       (GtkXtBin      *xtbin);
@@ -73,7 +81,6 @@ static void            gtk_xtbin_shutdown   (GtkObject      *object);
 
 /* Xt aware XEmbed */
 static void       xt_client_init      (XtClient * xtclient, 
-                                       Display *xtdisplay, 
                                        Visual *xtvisual, 
                                        Colormap xtcolormap, 
                                        int xtdepth);
@@ -107,11 +114,106 @@ static int        error_handler       (Display *display,
                                        XErrorEvent *error);
 /* For error trap of XEmbed */
 static void       trap_errors(void);
-static int        untrap_errors(void);
+static int        untrap_error(void);
 static int        (*old_error_handler) (Display *, XErrorEvent *);
 static int        trapped_error_code = 0;
 
 static GtkWidgetClass *parent_class = NULL;
+
+static Display         *xtdisplay = NULL;
+static String          *fallback = NULL;
+static gboolean         xt_is_initialized = FALSE;
+static gint             num_widgets = 0;
+
+static GPollFD          xt_event_poll_fd;
+static gint             xt_polling_timer_id = 0;
+static guint            tag = 0;
+
+static gboolean
+xt_event_prepare (GSource*  source_data,
+                   gint     *timeout)
+{   
+  int mask;
+
+  GDK_THREADS_ENTER();
+  mask = XPending(xtdisplay);
+  GDK_THREADS_LEAVE();
+
+  return (gboolean)mask;
+}
+
+static gboolean
+xt_event_check (GSource*  source_data)
+{
+  GDK_THREADS_ENTER ();
+
+  if (xt_event_poll_fd.revents & G_IO_IN) {
+    int mask;
+    mask = XPending(xtdisplay);
+    GDK_THREADS_LEAVE ();
+    return (gboolean)mask;
+  }
+
+  GDK_THREADS_LEAVE ();
+  return FALSE;
+}   
+
+static gboolean
+xt_event_dispatch (GSource*  source_data,
+                    GSourceFunc call_back,
+                    gpointer  user_data)
+{
+  XEvent event;
+  XtAppContext ac;
+  int i = 0;
+
+  ac = XtDisplayToApplicationContext(xtdisplay);
+
+  GDK_THREADS_ENTER ();
+
+  /* Process only real X traffic here.  We only look for data on the
+   * pipe, limit it to XTBIN_MAX_EVENTS and only call
+   * XtAppProcessEvent so that it will look for X events.  There's no
+   * timer processing here since we already have a timer callback that
+   * does it.  */
+  for (i=0; i < XTBIN_MAX_EVENTS && XPending(xtdisplay); i++) {
+    XtAppProcessEvent(ac, XtIMXEvent);
+  }
+
+  GDK_THREADS_LEAVE ();
+
+  return TRUE;  
+}
+
+static GSourceFuncs xt_event_funcs = {
+  xt_event_prepare,
+  xt_event_check,
+  xt_event_dispatch,
+  g_free,
+  (GSourceFunc)NULL,
+  (GSourceDummyMarshal)NULL
+};
+
+static gboolean
+xt_event_polling_timer_callback(gpointer user_data)
+{
+  Display * display;
+  XtAppContext ac;
+  int eventsToProcess = 20;
+
+  display = (Display *)user_data;
+  ac = XtDisplayToApplicationContext(display);
+
+  /* We need to process many Xt events here. If we just process
+     one event we might starve one or more Xt consumers. On the other hand
+     this could hang the whole app if Xt events come pouring in. So process
+     up to 20 Xt events right now and save the rest for later. This is a hack,
+     but it oughta work. We *really* should have out of process plugins.
+  */
+  while (eventsToProcess-- && XtAppPending(ac))
+    XtAppProcessEvent(ac, XtIMAll);
+  return TRUE;
+}
 
 GtkType
 gtk_xtbin_get_type (void)
@@ -208,11 +310,7 @@ gtk_xtbin_realize (GtkWidget *widget)
 
 
 GtkWidget*
-gtk_xtbin_new (GdkWindow *parent_window,
-               Display   *xtdisplay,
-               Visual    *xtvisual,
-               Colormap   xtcolormap,
-               int        xtdepth)
+gtk_xtbin_new (GdkWindow *parent_window, String * f)
 {
   GtkXtBin *xtbin;
   gpointer user_data;
@@ -223,13 +321,68 @@ gtk_xtbin_new (GdkWindow *parent_window,
   if (!xtbin)
     return (GtkWidget*)NULL;
 
+  if (f)
+    fallback = f;
+
   /* Initialize the Xt toolkit */
   xtbin->parent_window = parent_window;
 
-  xt_client_init(&(xtbin->xtclient), xtdisplay, xtvisual, xtcolormap, xtdepth);
+  xt_client_init(&(xtbin->xtclient), 
+      GDK_VISUAL_XVISUAL(gdk_window_get_visual(parent_window )),
+      GDK_COLORMAP_XCOLORMAP(gdk_window_get_colormap(parent_window)),
+      gdk_window_get_visual(parent_window )->depth);
+
+  if (!xtbin->xtclient.xtdisplay) {
+    /* If XtOpenDisplay failed, we can't go any further.
+     *  Bail out.
+     */
+#ifdef DEBUG_XTBIN
+    printf("gtk_xtbin_init: XtOpenDisplay() returned NULL.\n");
+#endif
+    g_free (xtbin);
+    return (GtkWidget *)NULL;
+  }
+
+  /* If this is the first running widget, hook this display into the
+     mainloop */
+  if (0 == num_widgets) {
+    int           cnumber;
+    /*
+     * hook Xt event loop into the glib event loop.
+     */
+
+    /* the assumption is that gtk_init has already been called */
+    GSource* gs = g_source_new(&xt_event_funcs, sizeof(GSource));
+      if (!gs) {
+       return NULL;
+      }
+    
+    g_source_set_priority(gs, GDK_PRIORITY_EVENTS);
+    g_source_set_can_recurse(gs, TRUE);
+    tag = g_source_attach(gs, (GMainContext*)NULL);
+#ifdef VMS
+    cnumber = XConnectionNumber(xtdisplay);
+#else
+    cnumber = ConnectionNumber(xtdisplay);
+#endif
+    xt_event_poll_fd.fd = cnumber;
+    xt_event_poll_fd.events = G_IO_IN; 
+    xt_event_poll_fd.revents = 0;    /* hmm... is this correct? */
+
+    g_main_context_add_poll ((GMainContext*)NULL, 
+                             &xt_event_poll_fd, 
+                             G_PRIORITY_LOW);
+    /* add a timer so that we can poll and process Xt timers */
+    xt_polling_timer_id =
+      gtk_timeout_add(25,
+                      (GtkFunction)xt_event_polling_timer_callback,
+                      xtdisplay);
+  }
+
+  /* Bump up our usage count */
+  num_widgets++;
 
   /* Build the hierachy */
-  assert(xtbin->xtclient.xtdisplay != NULL);
   xtbin->xtdisplay = xtbin->xtclient.xtdisplay;
   gtk_widget_set_parent_window(GTK_WIDGET(xtbin), parent_window);
   gdk_window_get_user_data(xtbin->parent_window, &user_data);
@@ -321,6 +474,21 @@ gtk_xtbin_destroy (GtkObject *object)
     /* remove the event handler */
     xt_client_destroy(&(xtbin->xtclient));
     xtbin->xtwindow = 0;
+
+    num_widgets--; /* reduce our usage count */
+
+    /* If this is the last running widget, remove the Xt display
+       connection from the mainloop */
+    if (0 == num_widgets) {
+#ifdef DEBUG_XTBIN
+      printf("removing the Xt connection from the main loop\n");
+#endif
+      g_main_context_remove_poll((GMainContext*)NULL, &xt_event_poll_fd);
+      g_source_remove(tag);
+
+      gtk_timeout_remove(xt_polling_timer_id);
+      xt_polling_timer_id = 0;
+    }
   }
 
   GTK_OBJECT_CLASS(parent_class)->destroy(object);
@@ -333,13 +501,38 @@ gtk_xtbin_destroy (GtkObject *object)
 /* Initial Xt plugin */
 static void
 xt_client_init( XtClient * xtclient, 
-                Display *xtdisplay,
                 Visual *xtvisual, 
                 Colormap xtcolormap,
                 int xtdepth)
 {
+  XtAppContext  app_context;
+  char         *mArgv[1];
+  int           mArgc = 0;
+
+  /*
+   * Initialize Xt stuff
+   */
   xtclient->top_widget = NULL;
   xtclient->child_widget = NULL;
+  xtclient->xtdisplay  = NULL;
+  xtclient->xtvisual   = NULL;
+  xtclient->xtcolormap = 0;
+  xtclient->xtdepth = 0;
+
+  if (!xt_is_initialized) {
+#ifdef DEBUG_XTBIN
+    printf("starting up Xt stuff\n");
+#endif
+    XtToolkitInitialize();
+    app_context = XtCreateApplicationContext();
+    if (fallback)
+      XtAppSetFallbackResources(app_context, fallback);
+
+    xtdisplay = XtOpenDisplay(app_context, gdk_get_display(), NULL, 
+                            "Wrapper", NULL, 0, &mArgc, mArgv);
+    if (xtdisplay)
+      xt_is_initialized = TRUE;
+  }
   xtclient->xtdisplay  = xtdisplay;
   xtclient->xtvisual   = xtvisual;
   xtclient->xtcolormap = xtcolormap;
@@ -362,9 +555,7 @@ xt_client_create ( XtClient* xtclient ,
 #ifdef DEBUG_XTBIN
   printf("xt_client_create() \n");
 #endif
-  String app_name, app_class;
-  XtGetApplicationNameAndClass(xtclient->xtdisplay, &app_name, &app_class);
-  top_widget = XtAppCreateShell("drawingArea", app_class, 
+  top_widget = XtAppCreateShell("drawingArea", "Wrapper", 
                                 applicationShellWidgetClass, 
                                 xtclient->xtdisplay, 
                                 NULL, 0);
@@ -414,7 +605,6 @@ xt_client_create ( XtClient* xtclient ,
   xtclient->child_widget = child_widget;
 
   /* set the event handler */
-#if 0
   XtAddEventHandler(child_widget,
                     0x0FFFFF & ~ResizeRedirectMask,
                     TRUE, 
@@ -424,12 +614,6 @@ xt_client_create ( XtClient* xtclient ,
                     TRUE, 
                     (XtEventHandler)xt_client_focus_listener, 
                     xtclient);
-#else
-  XtAddEventHandler(child_widget,
-                    (SubstructureNotifyMask | ButtonReleaseMask),
-                    TRUE, 
-                    (XtEventHandler)xt_client_event_handler, xtclient);
-#endif
   XSync(xtclient->xtdisplay, FALSE);
 }
 
@@ -607,7 +791,7 @@ send_xembed_message (XtClient  *xtclient,
   XSendEvent (dpy, w, False, NoEventMask, &xevent);
   XSync (dpy,False);
 
-  if((errorcode = untrap_errors())) {
+  if((errorcode = untrap_error())) {
 #ifdef DEBUG_XTBIN
     printf("send_xembed_message error(%d)!!!\n",errorcode);
 #endif
@@ -629,7 +813,7 @@ trap_errors(void)
 }
 
 static int         
-untrap_errors(void)
+untrap_error(void)
 {
   XSetErrorHandler(old_error_handler);
   if(trapped_error_code) {
@@ -705,7 +889,7 @@ xt_add_focus_listener( Widget w, XtPointer user_data)
                     TRUE, 
                     (XtEventHandler)xt_client_focus_listener, 
                     xtclient);
-  untrap_errors();
+  untrap_error();
 }
 
 static void
@@ -717,7 +901,7 @@ xt_remove_focus_listener(Widget w, XtPointer user_data)
   XtRemoveEventHandler(w, SubstructureNotifyMask | ButtonReleaseMask, TRUE, 
                       (XtEventHandler)xt_client_focus_listener, user_data);
 
-  untrap_errors();
+  untrap_error();
 }
 
 static void
@@ -734,11 +918,11 @@ xt_add_focus_listener_tree ( Widget treeroot, XtPointer user_data)
   xt_add_focus_listener( treeroot, user_data);
   trap_errors();
   if(!XQueryTree(dpy, win, &root, &parent, &children, &nchildren)) {
-    untrap_errors();
+    untrap_error();
     return;
   }
 
-  if(untrap_errors()) 
+  if(untrap_error()) 
     return;
 
   for(i=0; i<nchildren; ++i) {
@@ -750,4 +934,3 @@ xt_add_focus_listener_tree ( Widget treeroot, XtPointer user_data)
 
   return;
 }
-

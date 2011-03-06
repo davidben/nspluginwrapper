@@ -21,8 +21,10 @@
 #ifndef SYSDEPS_H
 #define SYSDEPS_H
 
+#ifndef __cplusplus
 #if !defined(__STDC__) || (__STDC_VERSION__ < 199901L)
 #error "Your compiler is not ISO. Get a real one."
+#endif
 #endif
 
 #include "config.h"
@@ -61,6 +63,8 @@ typedef struct __attribute__((packed)) {
 #define NPW_COMPONENT_NAME "Wrapper"
 #elif defined(BUILD_VIEWER)
 #define NPW_COMPONENT_NAME "Viewer "
+#elif defined(BUILD_PLAYER)
+#define NPW_COMPONENT_NAME "Player "
 #endif
 
 // Boolean types
