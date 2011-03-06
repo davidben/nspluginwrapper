@@ -28,11 +28,15 @@ enum {
   RPC_ERROR_ERRNO_SET					= -1001,
   RPC_ERROR_NO_MEMORY					= -1002,
   RPC_ERROR_CONNECTION_NULL				= -1003,
-  RPC_ERROR_CONNECTION_TYPE_MISMATCH	= -1004,
-  RPC_ERROR_MESSAGE_TRUNCATED			= -1005,
-  RPC_ERROR_MESSAGE_ARGUMENT_MISMATCH	= -1006,
-  RPC_ERROR_MESSAGE_ARGUMENT_UNKNOWN	= -1007,
-  RPC_ERROR_MESSAGE_ARGUMENT_INVALID	= -1008,
+  RPC_ERROR_CONNECTION_CLOSED			= -1004,
+  RPC_ERROR_CONNECTION_TYPE_MISMATCH	= -1005,
+  RPC_ERROR_MESSAGE_TIMEOUT				= -1006,
+  RPC_ERROR_MESSAGE_TRUNCATED			= -1007,
+  RPC_ERROR_MESSAGE_TYPE_INVALID		= -1008,
+  RPC_ERROR_MESSAGE_HANDLER_INVALID		= -1009,
+  RPC_ERROR_MESSAGE_ARGUMENT_MISMATCH	= -1010,
+  RPC_ERROR_MESSAGE_ARGUMENT_UNKNOWN	= -1011,
+  RPC_ERROR_MESSAGE_ARGUMENT_INVALID	= -1012,
 };
 extern const char *rpc_strerror(int error) attribute_hidden;
 
@@ -45,7 +49,6 @@ extern int rpc_listen_socket(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_listen(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_dispatch(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_wait_dispatch(rpc_connection_t *connection, int timeout) attribute_hidden;
-extern int rpc_connection_busy(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_socket(rpc_connection_t *connection) attribute_hidden;
 
 // Message Passing
@@ -96,7 +99,6 @@ extern int rpc_method_remove_callbacks(rpc_connection_t *connection, const rpc_m
 
 // Remote Procedure Call (method invocation)
 extern int rpc_method_invoke(rpc_connection_t *connection, int method, ...) attribute_hidden;
-extern int rpc_method_invoke_delayed(rpc_connection_t *connection, int method, ...) attribute_hidden;
 extern int rpc_method_wait_for_reply(rpc_connection_t *connection, ...) attribute_hidden;
 extern int rpc_method_get_args(rpc_connection_t *connection, ...) attribute_hidden;
 extern int rpc_method_send_reply(rpc_connection_t *connection, ...) attribute_hidden;

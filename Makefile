@@ -234,7 +234,7 @@ do.install.libxpcom: $(libxpcom_LIBRARY)
 install.config: $(npconfig_PROGRAM)
 	install -m 755 $(STRIP_OPT) $(npconfig_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM)
 	mkdir -p $(DESTDIR)$(bindir)
-	ln -s $(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM) $(DESTDIR)$(bindir)/nspluginwrapper
+	ln -sf $(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM) $(DESTDIR)$(bindir)/nspluginwrapper
 install.loader: $(nploader_PROGRAM)
 	install -m 755 $(nploader_PROGRAM) $(DESTDIR)$(pkglibdir)/noarch/$(nploader_PROGRAM)
 install.mkruntime: $(SRC_PATH)/utils/mkruntime.sh
@@ -314,7 +314,7 @@ $(LSB_OBJ_DIR)/libc.so: $(LSB_OBJ_DIR)/libc_main.so $(LSB_OBJ_DIR)/libc_nonshare
 	@echo "GROUP ( $(LSB_OBJ_DIR)/libc_main.so $(LSB_OBJ_DIR)/libc_nonshared.a )" >> $@
 
 $(LSB_OBJ_DIR)/libgcc_s_32.so: $(LSB_OBJ_DIR)/libgcc_s.so
-	ln -s libgcc_s.so $@
+	ln -sf libgcc_s.so $@
 
 $(LSB_OBJ_DIR)/%.so: $(LSB_OBJ_DIR)/%.o
 	$(CC) $(LDFLAGS_32) -nostdlib -shared $< -o $@ \

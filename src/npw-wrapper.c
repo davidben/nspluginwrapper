@@ -129,10 +129,9 @@ static gboolean rpc_event_check(GSource *source)
   return rpc_wait_dispatch(g_rpc_connection, 0) > 0;
 }
 
-static gboolean rpc_event_dispatch(GSource *source, GSourceFunc callback, gpointer user_data)
+static gboolean rpc_event_dispatch(GSource *source, GSourceFunc callback, gpointer connection)
 {
-  callback(user_data);
-  return TRUE;
+  return rpc_dispatch(connection) != RPC_ERROR_CONNECTION_CLOSED;
 }
 
 
@@ -1747,7 +1746,7 @@ static void do_plugin_init(int is_NP_Initialize)
   sprintf(connection_path, "%s/%s/%d-%d", NPW_CONNECTION_PATH, plugin_file_name, getpid(), init_count);
 
   // Cache MIME info and plugin name/description
-  if (!is_NP_Initialize && g_plugin.name == NULL && g_plugin.description == NULL && g_plugin.formats == NULL) {
+  if (g_plugin.name == NULL && g_plugin.description == NULL && g_plugin.formats == NULL) {
 	char command[1024];
 	if (snprintf(command, sizeof(command), "%s --info --plugin %s", viewer_path, plugin_path) >= sizeof(command))
 	  return;
@@ -1776,8 +1775,10 @@ static void do_plugin_init(int is_NP_Initialize)
 	pclose(viewer_fp);
 	if (error == 0)
 	  g_plugin.initialized = 1;
-	return;
   }
+
+  if (!is_NP_Initialize)
+	return;
 
   // Start plug-in viewer
   if ((g_plugin.viewer_pid = fork()) == 0) {
@@ -1925,7 +1926,6 @@ static void do_plugin_exit(void)
   }
 
   if (g_rpc_source) {
-	g_source_remove_poll(g_rpc_source, &g_rpc_poll_fd);
 	g_source_destroy(g_rpc_source);
 	g_rpc_source = NULL;
   }

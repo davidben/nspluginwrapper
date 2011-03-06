@@ -1,5 +1,9 @@
-nspluginwrapper NEWS -- history of user-visible changes.  2006-12-26
+nspluginwrapper NEWS -- history of user-visible changes.  2006-12-29
 Copyright (C) 2006 Gwenole Beauchesne
+
+Version 0.9.91.2 (BETA) - 29.Dec.2006
+* Fix some rare RPC synchronisation issues (flashearth.com)
+* Fix hangs when the plugin exits unexpectedly (e.g. a crash)
 
 Version 0.9.91.1 (BETA) - 26.Dec.2006
 * Fix NPRuntime bridge (VLC plugin)

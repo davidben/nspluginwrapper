@@ -1,7 +1,7 @@
 %define name	nspluginwrapper
-%define version	0.9.91.1
+%define version	0.9.91.2
 %define release	1
-#define svndate 20061227
+#define svndate 20061229
 
 # define 32-bit arch of multiarch platforms
 %define arch_32 %{nil}
@@ -143,6 +143,10 @@ fi
 %endif
 
 %changelog
+* Fri Dec 29 2006 Gwenole Beauchesne <gb.public@free.fr> 0.9.91.2-1
+- fix some rare RPC synchronisation issues (flashearth.com)
+- fix hangs when the plugin exits unexpectedly (e.g. a crash)
+
 * Tue Dec 26 2006 Gwenole Beauchesne <gb.public@free.fr> 0.9.91.1-1
 - fix NPRuntime bridge (VLC plugin)
 - fix Mozilla plugins dir creation on NetBSD and FreeBSD hosts

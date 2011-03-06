@@ -449,12 +449,12 @@ g_NPN_ForceRedraw(NPP instance)
 static NPError
 invoke_NPN_GetURL(NPP instance, const char *url, const char *target)
 {
-  int error = rpc_method_invoke_delayed(g_rpc_connection,
-										RPC_METHOD_NPN_GET_URL,
-										RPC_TYPE_NPP, instance,
-										RPC_TYPE_STRING, url,
-										RPC_TYPE_STRING, target,
-										RPC_TYPE_INVALID);
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_GET_URL,
+								RPC_TYPE_NPP, instance,
+								RPC_TYPE_STRING, url,
+								RPC_TYPE_STRING, target,
+								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPN_GetURL() invoke", error);
@@ -488,13 +488,13 @@ g_NPN_GetURL(NPP instance, const char *url, const char *target)
 static NPError
 invoke_NPN_GetURLNotify(NPP instance, const char *url, const char *target, void *notifyData)
 {
-  int error = rpc_method_invoke_delayed(g_rpc_connection,
-										RPC_METHOD_NPN_GET_URL_NOTIFY,
-										RPC_TYPE_NPP, instance,
-										RPC_TYPE_STRING, url,
-										RPC_TYPE_STRING, target,
-										RPC_TYPE_NP_NOTIFY_DATA, notifyData,
-										RPC_TYPE_INVALID);
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_GET_URL_NOTIFY,
+								RPC_TYPE_NPP, instance,
+								RPC_TYPE_STRING, url,
+								RPC_TYPE_STRING, target,
+								RPC_TYPE_NP_NOTIFY_DATA, notifyData,
+								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPN_GetURLNotify() invoke", error);
@@ -673,14 +673,14 @@ g_NPN_NewStream(NPP instance, NPMIMEType type, const char *target, NPStream **st
 static NPError
 invoke_NPN_PostURL(NPP instance, const char *url, const char *target, uint32 len, const char *buf, NPBool file)
 {
-  int error = rpc_method_invoke_delayed(g_rpc_connection,
-										RPC_METHOD_NPN_POST_URL,
-										RPC_TYPE_NPP, instance,
-										RPC_TYPE_STRING, url,
-										RPC_TYPE_STRING, target,
-										RPC_TYPE_ARRAY, RPC_TYPE_CHAR, len, buf,
-										RPC_TYPE_BOOLEAN, file,
-										RPC_TYPE_INVALID);
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_POST_URL,
+								RPC_TYPE_NPP, instance,
+								RPC_TYPE_STRING, url,
+								RPC_TYPE_STRING, target,
+								RPC_TYPE_ARRAY, RPC_TYPE_CHAR, len, buf,
+								RPC_TYPE_BOOLEAN, file,
+								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPN_PostURL() invoke", error);
@@ -714,15 +714,15 @@ g_NPN_PostURL(NPP instance, const char *url, const char *target, uint32 len, con
 static NPError
 invoke_NPN_PostURLNotify(NPP instance, const char *url, const char *target, uint32 len, const char *buf, NPBool file, void *notifyData)
 {
-  int error = rpc_method_invoke_delayed(g_rpc_connection,
-										RPC_METHOD_NPN_POST_URL_NOTIFY,
-										RPC_TYPE_NPP, instance,
-										RPC_TYPE_STRING, url,
-										RPC_TYPE_STRING, target,
-										RPC_TYPE_ARRAY, RPC_TYPE_CHAR, len, buf,
-										RPC_TYPE_BOOLEAN, file,
-										RPC_TYPE_NP_NOTIFY_DATA, notifyData,
-										RPC_TYPE_INVALID);
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_POST_URL_NOTIFY,
+								RPC_TYPE_NPP, instance,
+								RPC_TYPE_STRING, url,
+								RPC_TYPE_STRING, target,
+								RPC_TYPE_ARRAY, RPC_TYPE_CHAR, len, buf,
+								RPC_TYPE_BOOLEAN, file,
+								RPC_TYPE_NP_NOTIFY_DATA, notifyData,
+								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPN_PostURLNotify() invoke", error);
@@ -832,11 +832,11 @@ g_NPN_SetValue(NPP instance, NPPVariable variable, void *value)
 static void
 invoke_NPN_Status(NPP instance, const char *message)
 {
-  int error = rpc_method_invoke_delayed(g_rpc_connection,
-										RPC_METHOD_NPN_STATUS,
-										RPC_TYPE_NPP, instance,
-										RPC_TYPE_STRING, message,
-										RPC_TYPE_INVALID);
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_STATUS,
+								RPC_TYPE_NPP, instance,
+								RPC_TYPE_STRING, message,
+								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPN_Status() invoke", error);
@@ -2550,10 +2550,9 @@ static gboolean rpc_event_check(GSource *source)
   return rpc_wait_dispatch(g_rpc_connection, 0) > 0;
 }
 
-static gboolean rpc_event_dispatch(GSource *source, GSourceFunc callback, gpointer user_data)
+static gboolean rpc_event_dispatch(GSource *source, GSourceFunc callback, gpointer connection)
 {
-  callback(user_data);
-  return TRUE;
+  return rpc_dispatch(connection) != RPC_ERROR_CONNECTION_CLOSED;
 }
 
 static GSourceFuncs rpc_event_funcs = {
@@ -2638,7 +2637,7 @@ static int do_main(int argc, char **argv, const char *connection_path)
   }
   g_source_set_priority(xt_source, GDK_PRIORITY_EVENTS);
   g_source_set_can_recurse(xt_source, TRUE);
-  gint xt_tag = g_source_attach(xt_source, NULL);
+  g_source_attach(xt_source, NULL);
   xt_event_poll_fd.fd = ConnectionNumber(x_display);
   xt_event_poll_fd.events = G_IO_IN;
   xt_event_poll_fd.revents = 0;
@@ -2655,7 +2654,7 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	return 1;
   }
   g_source_set_priority(rpc_source, GDK_PRIORITY_EVENTS);
-  gint rpc_tag = g_source_attach(rpc_source, NULL);
+  g_source_attach(rpc_source, NULL);
   rpc_event_poll_fd.fd = rpc_listen_socket(g_rpc_connection);
   rpc_event_poll_fd.events = G_IO_IN;
   rpc_event_poll_fd.revents = 0;
@@ -2666,10 +2665,8 @@ static int do_main(int argc, char **argv, const char *connection_path)
   D(bug("--- EXIT ---\n"));
 
   g_source_remove(xt_polling_timer_id);
-  g_source_remove_poll(rpc_source, &rpc_event_poll_fd);
-  g_source_remove(rpc_tag);
-  g_source_remove_poll(xt_source, &xt_event_poll_fd);
-  g_source_remove(xt_tag);
+  g_source_destroy(rpc_source);
+  g_source_destroy(xt_source);
 
   if (g_user_agent)
 	free(g_user_agent);

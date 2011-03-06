@@ -255,26 +255,28 @@ fi
 rm -f $TMPC $TMPE
 
 # check for GTK+ 2.0 compile CFLAGS
-if $pkgconfig --exists gtk+-2.0; then
-    GTK_CFLAGS=`$pkgconfig --cflags gtk+-2.0`
-    GTK_LDFLAGS=`$pkgconfig --libs gtk+-2.0`
-else
-    echo "GTK+ 2.0 environment not found"
-    exit 1
-fi
-cat > $TMPC << EOF
+if test "$build_viewer" = "yes"; then
+    if $pkgconfig --exists gtk+-2.0; then
+	GTK_CFLAGS=`$pkgconfig --cflags gtk+-2.0`
+	GTK_LDFLAGS=`$pkgconfig --libs gtk+-2.0`
+    else
+	echo "GTK+ 2.0 environment not found"
+	exit 1
+    fi
+    cat > $TMPC << EOF
 #include <gtk/gtk.h>
 int main(void) {
     gtk_main_quit();
     return 0;
 }
 EOF
-if ! $cc $CFLAGS $GTK_CFLAGS $GTK_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
-    echo "GTK+ 2.0 environment not usable"
-    rm -f $TMPC
-    exit 1
+    if ! $cc $CFLAGS $GTK_CFLAGS $GTK_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
+	echo "GTK+ 2.0 environment not usable"
+	rm -f $TMPC
+	exit 1
+    fi
+    rm -f $TMPC $TMPE
 fi
-rm -f $TMPC $TMPE
 
 # check for X11 base dir
 x_base_dirs='
