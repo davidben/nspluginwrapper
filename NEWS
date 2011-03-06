@@ -1,5 +1,16 @@
-nspluginwrapper NEWS -- history of user-visible changes.  2007-08-26
-Copyright (C) 2005-2007 Gwenole Beauchesne
+nspluginwrapper NEWS -- history of user-visible changes.  2008-06-29
+Copyright (C) 2005-2008 Gwenole Beauchesne
+
+Version 1.0.0 - 29.Jun.2008
+* Don't wrap root plugins to system locations, keep them private
+* Fix support for Acrobat Reader 8 (focus problems)
+* Fix support for mozplugger (in full-debug mode)
+* Fix support for WebKit
+* Fix crashes with Flash Player 9 Update 3 (9.0.115)
+* Fix build with Intel compiler
+* Add support for IBM XLC compiler
+* Improve error handling during RPC initialization (memory leaks)
+* Improve error handling in NPP_WriteReady() and NPP_Write()
 
 Version 0.9.91.5 (BETA) - 26.Aug.2007
 * Fix a memory leak in NPP_Destroy()

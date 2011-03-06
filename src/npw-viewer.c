@@ -1,7 +1,7 @@
 /*
  *  npw-viewer.c - Target plugin loader and viewer
  *
- *  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2008 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,9 +13,9 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #define _GNU_SOURCE 1 /* RTLD_NEXT */
@@ -2362,7 +2362,7 @@ g_NPP_SetWindow(NPP instance, NPWindow *np_window)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
   NPWindow *window = np_window;
-  if (window) {
+  if (window && window->window) {
 	if (plugin->toolkit_data) {
 	  if (update_window(plugin, window) < 0)
 		return NPERR_GENERIC_ERROR;
@@ -2378,7 +2378,7 @@ g_NPP_SetWindow(NPP instance, NPWindow *np_window)
   NPError ret = plugin_funcs.setwindow(instance, window);
   D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
 
-  if (np_window == NULL)
+  if (np_window == NULL || np_window->window == NULL)
 	destroy_window(plugin);
 
   return ret;
@@ -2417,16 +2417,6 @@ g_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
 
   if (plugin_funcs.getvalue == NULL)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
-
-  switch (variable) {
-#if USE_XEMBED
-  case NPPVpluginNeedsXEmbed:
-	*((PRBool *)value) = PR_TRUE;
-	return NPERR_NO_ERROR;
-#endif
-  default:
-	break;
-  }
 
   D(bug("NPP_GetValue instance=%p, variable=%d\n", instance, variable));
   NPError ret = plugin_funcs.getvalue(instance, variable, value);
@@ -2654,13 +2644,13 @@ static int32
 g_NPP_WriteReady(NPP instance, NPStream *stream)
 {
   if (instance == NULL)
-	return NPERR_INVALID_INSTANCE_ERROR;
+	return 0;
 
   if (plugin_funcs.writeready == NULL)
-	return NPERR_INVALID_FUNCTABLE_ERROR;
+	return 0;
 
   if (stream == NULL)
-	return NPERR_INVALID_PARAM;
+	return 0;
 
   D(bug("NPP_WriteReady instance=%p, stream=%p\n", instance, stream));
   int32 ret = plugin_funcs.writeready(instance, stream);
@@ -3001,6 +2991,7 @@ static int do_main(int argc, char **argv, const char *connection_path)
   XtToolkitInitialize();
   x_app_context = XtCreateApplicationContext();
   x_display = XtOpenDisplay(x_app_context, NULL, "npw-viewer", "npw-viewer", NULL, 0, &argc, argv);
+  g_thread_init(NULL);
   gtk_init(&argc, &argv);
 
   // Initialize RPC communication channel

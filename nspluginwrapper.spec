@@ -1,7 +1,7 @@
 %define name	nspluginwrapper
-%define version	0.9.91.5
+%define version	1.0.0
 %define release	1
-#define svndate 20070826
+#define svndate 20080629
 
 # define 32-bit arch of multiarch platforms
 %define arch_32 %{nil}
@@ -92,16 +92,16 @@ This package provides the npviewer program for %{target_arch}.
 
 %build
 %if %{build_biarch}
-biarch="--with-biarch"
+enable_biarch="--enable-biarch"
 %else
-biarch="--without-biarch"
+enable_biarch="--disable-biarch"
 %endif
 %if %{build_generic}
-generic_build="--generic-build"
+enable_generic="--enable-generic"
 %endif
 mkdir objs
 pushd objs
-../configure --prefix=%{_prefix} $biarch $generic_build
+../configure --prefix=%{_prefix} $enable_biarch $enable_generic
 make
 popd
 
@@ -158,6 +158,16 @@ fi
 %endif
 
 %changelog
+* Sun Jun 29 2008 Gwenole Beauchesne <gb.public@free.fr> 1.0.0-1
+- don't wrap root plugins to system locations, keep them private
+- fix support for Acrobat Reader 8 (focus problems)
+- fix support for mozplugger (in full debug mode)
+- fix NPP_SetWindow() with a NULL NPWindow::window (WebKit)
+- fix crashes with newer Flash plugin (9.0.115)
+- fix build with Intel compiler and IBM XLC
+- improve error handling during RPC initialization (memleaks)
+- improve error handling in NPP_WriteReady() and NPP_Write()
+
 * Sun Aug 26 2007 Gwenole Beauchesne <gb.public@free.fr> 0.9.91.5-1
 - fix a memory leak in NPP_Destroy()
 - fix DiamondX XEmbed example plugin

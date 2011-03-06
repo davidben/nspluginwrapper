@@ -1,7 +1,7 @@
 /*
  *  rpc.c - Remote Procedure Calls
  *
- *  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2008 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,9 +13,9 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 /*
@@ -370,7 +370,7 @@ rpc_connection_t *rpc_init_server(const char *ident)
   if (ident == NULL)
 	return NULL;
 
-  connection = (rpc_connection_t *)malloc(sizeof(*connection));
+  connection = (rpc_connection_t *)calloc(1, sizeof(*connection));
   if (connection == NULL)
 	return NULL;
   connection->type = RPC_CONNECTION_SERVER;
@@ -381,7 +381,7 @@ rpc_connection_t *rpc_init_server(const char *ident)
 
   if ((connection->server_socket = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
 	perror("server socket");
-	free(connection);
+	rpc_exit(connection);
 	return NULL;
   }
 
@@ -394,13 +394,13 @@ rpc_connection_t *rpc_init_server(const char *ident)
 
   if (bind(connection->server_socket, (struct sockaddr *)&addr, addr_len) < 0) {
 	perror("server bind");
-	free(connection);
+	rpc_exit(connection);
 	return NULL;
   }
 
   if (listen(connection->server_socket, 1) < 0) {
 	perror("server listen");
-	free(connection);
+	rpc_exit(connection);
 	return NULL;
   }
 
@@ -419,7 +419,7 @@ rpc_connection_t *rpc_init_client(const char *ident)
   if (ident == NULL)
 	return NULL;
 
-  connection = (rpc_connection_t *)malloc(sizeof(*connection));
+  connection = (rpc_connection_t *)calloc(1, sizeof(*connection));
   if (connection == NULL)
 	return NULL;
   connection->type = RPC_CONNECTION_CLIENT;
@@ -429,13 +429,13 @@ rpc_connection_t *rpc_init_client(const char *ident)
 
   if ((connection->socket = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
 	perror("client socket");
-	free(connection);
+	rpc_exit(connection);
 	return NULL;
   }
 
   if (rpc_set_non_blocking_io(connection->socket) < 0) {
 	perror("client socket set non-blocking");
-	free(connection);
+	rpc_exit(connection);
 	return NULL;
   }
 
@@ -456,14 +456,14 @@ rpc_connection_t *rpc_init_client(const char *ident)
 	  break;
 	if (n_connect_attempts > 1 && errno != ECONNREFUSED && errno != ENOENT) {
 	  perror("client_connect");
-	  free(connection);
+	  rpc_exit(connection);
 	  return NULL;
 	}
 	n_connect_attempts--;
 	rpc_delay(N_CONNECT_WAIT_DELAY * 1000);
   }
   if (n_connect_attempts == 0) {
-	free(connection);
+	rpc_exit(connection);
 	return NULL;
   }
 
@@ -482,27 +482,37 @@ int rpc_exit(rpc_connection_t *connection)
 	if (connection->socket_path[0])
 	  unlink(connection->socket_path);
 	free(connection->socket_path);
+	connection->socket_path = NULL;
   }
 
   if (connection->type == RPC_CONNECTION_SERVER) {
 	if (connection->server_thread_active) {
 	  pthread_cancel(connection->server_thread);
 	  pthread_join(connection->server_thread, NULL);
+	  connection->server_thread = 0;
 	}
-	if (connection->socket != -1)
+	if (connection->socket != -1) {
 	  close(connection->socket);
-	if (connection->server_socket != -1)
+	  connection->socket = -1;
+	}
+	if (connection->server_socket != -1) {
 	  close(connection->server_socket);
+	  connection->server_socket = -1;
+	}
   }
   else {
-	if (connection->socket != -1)
+	if (connection->socket != -1) {
 	  close(connection->socket);
+	  connection->socket = -1;
+	}
   }
 
-  if (connection->callbacks)
+  if (connection->callbacks) {
 	free(connection->callbacks);
-  free(connection);
+	connection->callbacks = NULL;
+  }
 
+  free(connection);
   return RPC_ERROR_NO_ERROR;
 }
 

@@ -1,7 +1,7 @@
 /*
  *  npw-wrapper.c - Host Mozilla plugin (loads the actual viewer)
  *
- *  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2008 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,9 +13,9 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #define _GNU_SOURCE 1 /* RTLD_DEFAULT */
@@ -101,6 +101,10 @@ typedef struct _StreamInstance {
 // Prototypes
 static void plugin_init(int is_NP_Initialize);
 static void plugin_exit(void);
+
+// Consume as many bytes as possible when we are not NPP_WriteReady()
+// XXX: move to a common place to Wrapper and Viewer
+#define NPERR_STREAM_BUFSIZ 65536
 
 // Helpers
 #ifndef min
@@ -1654,7 +1658,7 @@ invoke_NPP_WriteReady(NPP instance, NPStream *stream)
 
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPP_WriteReady() invoke", error);
-	return 0;
+	return NPERR_STREAM_BUFSIZ;
   }
 
   int32_t ret;
@@ -1664,7 +1668,7 @@ invoke_NPP_WriteReady(NPP instance, NPStream *stream)
 
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPP_WriteReady() wait for reply", error);
-	return 0;
+	return NPERR_STREAM_BUFSIZ;
   }
 
   return ret;
@@ -1674,7 +1678,7 @@ static int32
 g_NPP_WriteReady(NPP instance, NPStream *stream)
 {
   if (instance == NULL)
-	return -1;
+	return 0;
 
   D(bug("NPP_WriteReady instance=%p\n", instance));
   int32 ret = invoke_NPP_WriteReady(instance, stream);
@@ -1837,7 +1841,7 @@ NP_GetValue(void *future, NPPVariable variable, void *value)
 	  str =
 		"<a href=\"http://gwenole.beauchesne.info/projects/nspluginwrapper/\">nspluginwrapper</a> "
 		" is a cross-platform NPAPI plugin viewer, in particular for linux/i386 plugins.<br>"
-		"This is <b>beta</b> software available under the terms of the GNU General Public License.<br>"
+		"This software is available under the terms of the GNU General Public License.<br>"
 		;
 	  ret = NPERR_NO_ERROR;
 	}
@@ -2206,10 +2210,10 @@ static int64
 g_LONG64_NPP_WriteReady(NPP instance, void *stream)
 {
   if (instance == NULL)
-	return -1L;
+	return 0;
 
   if (stream == NULL)
-	return -1L;
+	return 0;
 
   return (int64)(int32)g_NPP_WriteReady(instance, NP_STREAM32(stream));
 }
@@ -2485,6 +2489,15 @@ static void plugin_init(int is_NP_Initialize)
 	  int len = strlen(line);
 	  if (len == 0)
 		continue;
+	  if (line[len - 1] != '\n') {
+		// Consume the whole line, we can't see our tags here
+		while (fgets(line, sizeof(line), viewer_fp)) {
+		  len = strlen(line);
+		  if (line > 0 && line[len - 1] == '\n')
+			break;
+		}
+		continue;
+	  }
 	  line[len - 1] = '\0';
 
 	  // Parse line
@@ -2492,12 +2505,15 @@ static void plugin_init(int is_NP_Initialize)
 	  if (sscanf(line, "%s %d", tag, &len) == 2) {
 		char *str = malloc(++len);
 		if (str && fgets(str, len, viewer_fp)) {
+		  char **ptag = NULL;
 		  if (strcmp(tag, "PLUGIN_NAME") == 0)
-			g_plugin.name = str;
+			ptag = &g_plugin.name;
 		  else if (strcmp(tag, "PLUGIN_DESC") == 0)
-			g_plugin.description = str;
+			ptag = &g_plugin.description;
 		  else if (strcmp(tag, "PLUGIN_MIME") == 0)
-			g_plugin.formats = str;
+			ptag = &g_plugin.formats;
+		  if (ptag)
+			*ptag = str;
 		}
 	  }
 	}

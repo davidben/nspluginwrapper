@@ -2,7 +2,7 @@
 #
 #  repackage.sh - repackage script for nspluginwrapper-ARCH
 #
-#  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
+#  nspluginwrapper (C) 2005-2008 Gwenole Beauchesne
 #
 
 TMPDIR=${TMPDIR:-/tmp}

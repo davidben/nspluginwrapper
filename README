@@ -2,7 +2,7 @@
   nspluginwrapper
   A cross-platform NPAPI plugin viewer
 
-  Copyright (C) 2005-2007 Gwenole Beauchesne
+  Copyright (C) 2005-2008 Gwenole Beauchesne
 
 
 License
@@ -37,7 +37,7 @@ $ rpm --rebuild nspluginwrapper.src.rpm
 
 NOTE: if you are building the Linux viewer to use on a non-Linux
 system (e.g. NetBSD, FreeBSD), you will have to configure the Linux
-build with the --generic-build option. That way, named sockets will be
+build with the --enable-generic option. That way, named sockets will be
 used and work under the Linux emulation on those operating systems.
 
 
@@ -74,9 +74,11 @@ Please bear in mind this is *BETA* software.
 The following plugins work reasonnably well:
 - Acrobat Reader      5.0.9
 - Acrobat Reader      7.0.1
+- Acrobat Reader      8.1.2
 - DejaVu Libre	      3.5.14
 - Flash Player	      7.0
-- Flash Player        9.0b2
+- Flash Player        9.0.124
+- Flash Player        10.0.1.218 (beta)
 - Linux J2K           0.0.2
 - Mplayerplug-in      2.80
 - Mplayerplug-in      3.25

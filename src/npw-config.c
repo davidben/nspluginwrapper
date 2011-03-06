@@ -1,7 +1,7 @@
 /*
  *  npw-config.c - nspluginwrapper configuration tool
  *
- *  nspluginwrapper (C) 2005-2007 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2008 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -13,9 +13,9 @@
  *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
  *  GNU General Public License for more details.
  *
- *  You should have received a copy of the GNU General Public License
- *  along with this program; if not, write to the Free Software
- *  Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+ *  You should have received a copy of the GNU General Public License along
+ *  with this program; if not, write to the Free Software Foundation, Inc.,
+ *  51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
 #include "sysdeps.h"
@@ -618,7 +618,7 @@ static bool is_wrapper_plugin_0(const char *plugin_path)
 	&& strcmp(plugin_info.path, NPW_OLD_DEFAULT_PLUGIN_PATH) != 0;		// exclude ARCH npwrapper.so
 }
 
-static bool is_system_wide_wrapper_plugin(const char *plugin_path)
+static bool has_system_wide_wrapper_plugin(const char *plugin_path, bool check_ident)
 {
   char *plugin_base = strrchr(plugin_path, '/');
   if (plugin_base == NULL)
@@ -637,8 +637,39 @@ static bool is_system_wide_wrapper_plugin(const char *plugin_path)
   NPW_PluginInfo plugin_info;
   return (is_wrapper_plugin(s_plugin_path, &plugin_info)
 		  && strcmp(plugin_info.path, plugin_path) == 0
-		  && strcmp(plugin_info.ident, NPW_PLUGIN_IDENT) == 0
+		  && (check_ident ?
+			  strcmp(plugin_info.ident, NPW_PLUGIN_IDENT) == 0 :
+			  true)
 		  && plugin_info.mtime == st.st_mtime);
+}
+
+static bool match_path_prefix(const char *path, const char *prefix)
+{
+  if (path == NULL || prefix == NULL)
+	return false;
+  int prefix_len = strlen(prefix);
+  return strncmp(path, prefix, prefix_len) == 0 && path[prefix_len] == '/';
+}
+
+static bool is_user_home_path(const char *path)
+{
+  const char *homedir;
+  if ((homedir = get_user_home_dir()) == NULL)
+	return false;
+  return match_path_prefix(path, homedir);
+}
+
+static bool is_root_path(const char *path)
+{
+  struct passwd *pwent = getpwuid(0);
+  return pwent && match_path_prefix(path, pwent->pw_dir);
+}
+
+static bool is_root_only_accessible_plugin(const char *plugin_path)
+{
+  /* XXX: this is very primitive and doesn't account for non ~root/
+	 directories that actually are not accessible by non root users */
+  return plugin_path && is_root_path(plugin_path);
 }
 
 typedef bool (*is_plugin_cb)(const char *plugin_path, NPW_PluginInfo *plugin_info);
@@ -689,10 +720,6 @@ static int do_install_plugin(const char *plugin_path, const char *plugin_dir, NP
   int n = snprintf(d_plugin_path, sizeof(d_plugin_path), "%s/%s.%s", plugin_dir, NPW_WRAPPER_BASE, plugin_base);
   if (n < 0 || n >= sizeof(d_plugin_path))
 	return 3;
-
-  int mode = 0700;
-  if (geteuid() == 0 && strcmp(plugin_dir, "/root") != 0)
-	mode = 0755;
 
   NPW_PluginInfo w_plugin_info;
   if (!is_wrapper_plugin(NPW_DEFAULT_PLUGIN_PATH, &w_plugin_info))
@@ -750,6 +777,11 @@ static int do_install_plugin(const char *plugin_path, const char *plugin_dir, NP
   strcpy(pi->target_arch, plugin_info->target_arch);
   strcpy(pi->target_os, plugin_info->target_os);
 
+  int mode = 0700;
+  if (!is_user_home_path(d_plugin_path) &&
+	  !is_root_only_accessible_plugin(plugin_dir))
+	mode = 0755;
+
   int d_fd = open(d_plugin_path, O_CREAT | O_WRONLY, mode);
   if (d_fd < 0)
 	return 4;
@@ -772,12 +804,15 @@ static int install_plugin(const char *plugin_path, NPW_PluginInfo *plugin_info)
   if (g_verbose)
 	printf("Install plugin %s\n", plugin_path);
 
-  ret = do_install_plugin(plugin_path, get_system_mozilla_plugin_dir(), plugin_info);
-  if (ret == 0)
-	return 0;
+  // don't install plugin system-wide if it is only accessible by root
+  if (!is_root_only_accessible_plugin(plugin_path)) {
+	ret = do_install_plugin(plugin_path, get_system_mozilla_plugin_dir(), plugin_info);
+	if (ret == 0)
+	  return 0;
+  }
 
   // don't install plugin in user home dir if already available system-wide
-  if (is_system_wide_wrapper_plugin(plugin_path)) {
+  if (has_system_wide_wrapper_plugin(plugin_path, true)) {
 	if (g_verbose)
 	  printf(" ... already installed system-wide, skipping\n");
 	return 0;
@@ -850,18 +885,31 @@ static int update_plugin(const char *plugin_path, ...)
 
   if (access(plugin_info.path, F_OK) < 0) {
 	if (g_verbose)
-	  printf("  NS4 plugin %s is no longer available, removing wrapper\n", plugin_info.path);
+	  printf("  NPAPI plugin %s is no longer available, removing wrapper\n", plugin_info.path);
 	ret = remove_plugin(plugin_path);
   }
-  else if (is_system_wide_wrapper_plugin(plugin_info.path)
+  else if (has_system_wide_wrapper_plugin(plugin_info.path, true)
 		   && !strstart(plugin_path, get_system_mozilla_plugin_dir(), NULL)) {
 	if (g_verbose)
-	  printf("  NS4 plugin %s is already installed system-wide, removing wrapper\n", plugin_info.path);
+	  printf("  NPAPI plugin %s is already installed system-wide, removing wrapper\n", plugin_info.path);
 	ret = remove_plugin(plugin_path);
+  }
+  else if (has_system_wide_wrapper_plugin(plugin_info.path, false)
+		   && is_root_only_accessible_plugin(plugin_info.path)) {
+	/* Don't check for an exact ident, we only need to know if there
+	   is a system-wide plugin to be removed. It will then be
+	   re-installed to the user (root) private mozilla plugins dir */
+	if (g_verbose)
+	  printf("  NPAPI plugin %s is accessible by root only, removing wrapper\n", plugin_info.path);
+	if ((ret = remove_plugin(plugin_path)) != 0)
+	  return ret;
+	if (g_verbose)
+	  printf ("  ... but re-installing it to root private mozilla plugins dir\n");
+	ret = install_plugin(plugin_info.path, &plugin_info);
   }
   else if (stat(plugin_info.path, &st) == 0 && st.st_mtime > plugin_info.mtime) {
 	if (g_verbose)
-	  printf("  NS4 plugin %s was modified, reinstalling plugin\n", plugin_info.path);
+	  printf("  NPAPI plugin %s was modified, reinstalling plugin\n", plugin_info.path);
 	ret = install_plugin(plugin_info.path, &plugin_info);
   }
   else if (strcmp(plugin_info.ident, NPW_PLUGIN_IDENT) != 0) {
