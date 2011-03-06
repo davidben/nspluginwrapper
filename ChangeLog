@@ -1,3 +1,232 @@
+2008-11-06 22:28  Gwenole Beauchesne <gb.public@free.fr>
+
+	* NEWS, README, nspluginwrapper.spec: Updates for 1.1.4.
+
+2008-11-06 22:06  Gwenole Beauchesne <gb.public@free.fr>
+
+	* configure: Build glib memory hooks only if system glib supports
+	  g_slice_alloc().
+
+2008-11-04 23:16  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c, src/npw-common.c, src/npw-rpc.c,
+	  src/npw-wrapper.c: Fix remaining memory leaks in npruntime
+	  bridge.
+	  
+	  The strategy with NPVariants assumes that NPObject methods will
+	  preserve the NPVariant value by copying it (e.g. a string) or
+	  increasing the refcount of the underlying NPObject. IOW, they
+	  don't assume the value is live beyond the call to that method
+	  without preserving it.
+	  
+	  Based on this assumption, we can write the following rules:
+	  - Any NPVariant value shall be released if it comes from an
+	  rpc_method_get_args(). That's an nspluginwrapper requirement
+	  - Any NPVariant result value shall be released when the plugin
+	  no longer needs it. That's an NPAPI requirement, implemented by
+	  the plugin.
+	  
+	  Thus, we deal with NPObjects as follows:
+	  - Prior to sending an NPObject (in an NPVariant), the browser
+	  ref()'s it
+	  - After having received an NPObject, the browser ref()'s it i.e.
+	  since this is a browser-side object, it's browser side
+	  responsibility to ref()' the object.
+	  
+	  The plugin will unref() the NPObject "naturally" when (i) the
+	  NPVariant got from rpc_method_get_args() is released, or (ii)
+	  the NPVariant is explicitly unref()'ed per NPAPI specs for
+	  NPVariant result values.
+
+2008-11-04 21:21  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-malloc.c: Fix copy-paste error.
+
+2008-11-03 23:04  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Don't try to NPP_Write() erroneous buffers of
+	  supposedly negative length.
+	  
+	  Actually, we can get to that case if NPP_WriteReady() returned
+	  -1 or another negative value, in general. Some browsers
+	  (Konqueror, Google Chrome) send data through NPP_Write() anyway.
+	  Others (Firefox, WebKit) actually suspend the stream temporarily.
+	  
+	  Note that returning -1 here will destroy the stream. This is
+	  compatible with the expected behaviour. e.g. the DiamondX test
+	  plugin wants that. Is there any other "real" plugin in that case
+	  too?
+
+2008-11-03 22:29  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Use the XEMBED hack (GTK_WINDOW_POPUP toplevel
+	  widget instead of GtkPlug) only with Gtk2-based browsers. IOW,
+	  this restores the older behaviour for Konqueror as this causes
+	  problems there.
+
+2008-11-03 22:20  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-rpc.c: Fix NPN_GetValue() with NPNVToolkit.
+	  
+	  Actually, it was not a problem before because we used to always
+	  return NPNVGtk2. However, we now want to detect what toolkit the
+	  parent browser is using.
+
+2008-11-02 15:42  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Fix XEMBED support. Actually, workaround Gtk
+	  and Firefox bugs. i.e. don't let them kill the plugin window by
+	  killing the old page window without calling either NPP_Destroy()
+	  or SetWindow(instance, NULL) first.
+
+2008-11-02 15:04  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-common.h: Fix npw_get_plugin_instance() for CrossOver
+	  Plugin. They make a local copy of the original instance in stack
+	  while preserving the same plugin private data (our
+	  PluginInstance, fortunately!).
+
+2008-10-29 05:40  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c, src/npw-common.h, src/npw-wrapper.c: Don't
+	  claim we support interfaces we currently don't, i.e. NPAPI >=
+	  0.18 is not fully implemented yet.
+
+2008-10-29 05:26  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Fix NPP_URLNotify() (thanks to Bennet Yee).
+
+2008-10-29 05:18  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-common.c, src/npw-common.h: Add an NPW_Identifier type
+	  useful for implementing local NPIdentifier cache. It's silly to
+	  do an RPC round trip simply to retrieve an integer or string
+	  value. The NPRuntime caching strategy is not fully settled yet
+	  though.
+
+2008-10-29 05:14  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-rpc.c, src/npw-rpc.h, src/npw-viewer.c,
+	  src/npw-wrapper.c: Create a specific NPUTF8 string marshaler.
+	  The difference with normal RPC_TYPE_STRING is the recv()
+	  allocates the string with NPN memory allocators.
+	  
+	  Besides, it's technically possible to pass a NULL argument to
+	  the recv() handler and means "I don't care of the data you
+	  received. Drop it, thanks". In practise, this is not useful but
+	  all marshalers should be safe to NULL arguments and still work
+	  afterwards (i.e. do receive data) in that case.
+
+2008-10-29 04:05  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-malloc.c: Revert to libc free() if we don't have the
+	  'Glib' magic in memblock.
+
+2008-10-27 23:22  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Use new memory allocators.
+
+2008-10-27 23:14  Gwenole Beauchesne <gb.public@free.fr>
+
+	* Makefile, configure, src/npw-common.c, src/npw-malloc.c,
+	  src/npw-malloc.h: Add memory allocation wrappers over standard
+	  libc or glib.
+
+2008-10-27 21:50  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-common.c: Remove checks, those functions shall be used
+	  only if they are known to be usable in the first place.
+
+2008-10-26 23:07  Gwenole Beauchesne <gb.public@free.fr>
+
+	* TODO: Updates.
+
+2008-10-26 23:01  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c, src/npw-rpc.c: Use NPN memory allocation
+	  routines for NPVariant (NPString).
+
+2008-10-26 22:31  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-rpc.c: Use common instance stuff.
+
+2008-10-26 22:26  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-common.h, src/npw-viewer.c, src/npw-wrapper.c: Add
+	  common PluginInstance|StreamInstance code.
+
+2008-10-26 22:23  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-common.c: Add memory allocation wrappers.
+
+2008-10-26 21:36  Gwenole Beauchesne <gb.public@free.fr>
+
+	* Makefile, src/npruntime.c, src/npw-common.c, src/npw-common.h,
+	  src/npw-viewer.c, src/npw-wrapper.c, src/sysdeps.h: Clean up
+	  common code.
+
+2008-10-26 20:51  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/debug.h: Add very verbose debug mode with filename:line
+	  additional specification. Disabled by default, for developers
+	  that want to debug things. Note this uses a GNU C extension.
+
+2008-10-26 17:01  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c: Cosmetics. Also fix some memory leaks.
+
+2008-10-26 16:26  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Print returned pointer in NPN_MemAlloc() for
+	  debugging.
+
+2008-10-26 16:23  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime-impl.h, src/npruntime.c, src/npw-viewer.c,
+	  src/npw-wrapper.c: Move NPVariant helpers to npruntime.c. Fix
+	  string_of_NPVariant() for NPString. Define
+	  NPN_ReleaseVariantValue() and NPN_ReleaseObject() appropriately
+	  in both the wrapper and the viewer.
+
+2008-10-26 15:38  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-rpc.c: Allocate an empty string ('') for
+	  NPString::utf8length == 0. This is what Firefox does.
+
+2008-10-26 07:55  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Avoid double object destruction with the Flash
+	  Player plugin.
+
+2008-10-25 17:42  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c, src/utils.c, src/utils.h: Add
+	  string_of_NPEvent_type() for debug.
+
+2008-10-25 17:36  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Fix typo for debug.
+
+2008-10-25 17:31  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/gtk2xtbin.c, src/gtk2xtbin.h: Sync with firefox3 sources.
+
+2008-10-21 21:45  Gwenole Beauchesne <gb.public@free.fr>
+
+	* configure: Check for the X Toolkit correctly (fully).
+
+2008-10-13 19:56  Gwenole Beauchesne <gb.public@free.fr>
+
+	* nspluginwrapper.spec: Bump version for development.
+
+2008-10-12 16:10  Gwenole Beauchesne <gb.public@free.fr>
+
+	* Makefile: Fix make tarball.
+
+2008-10-12 16:07  Gwenole Beauchesne <gb.public@free.fr>
+
+	* ChangeLog: Generated by svn2cl.
+
 2008-10-12 16:01  Gwenole Beauchesne <gb.public@free.fr>
 
 	* README: Mention the standalone plugins player.

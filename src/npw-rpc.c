@@ -21,15 +21,8 @@
 #include "sysdeps.h"
 #include <assert.h>
 
-#include "rpc.h"
-#include "npw-rpc.h"
 #include "utils.h"
-
-#define XP_UNIX 1
-#define MOZ_X11 1
-#include <npapi.h>
-#include <npruntime.h>
-#include "npruntime-impl.h"
+#include "npw-common.h"
 
 #define DEBUG 1
 #include "debug.h"
@@ -50,6 +43,7 @@ int rpc_type_of_NPNVariable(int variable)
   case NPNVSupportsWindowless:
 	type = RPC_TYPE_BOOLEAN;
 	break;
+  case NPNVToolkit:
   case NPNVnetscapeWindow:
 	type = RPC_TYPE_UINT32;
 	break;
@@ -99,24 +93,12 @@ int rpc_type_of_NPPVariable(int variable)
  *  Process NPP objects
  */
 
-typedef struct {
-  NPP instance;
-  uint32_t instance_id;
-} PluginInstance;
-
-#ifdef  BUILD_WRAPPER
-#define PLUGIN_INSTANCE(instance) ((instance)->pdata)
-#endif
-#ifdef  BUILD_VIEWER
-#define PLUGIN_INSTANCE(instance) ((instance)->ndata)
-#endif
-
 static int do_send_NPP(rpc_message_t *message, void *p_value)
 {
   uint32_t instance_id = 0;
   NPP instance = (NPP)p_value;
   if (instance) {
-	PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+	NPW_PluginInstance *plugin = NPW_PLUGIN_INSTANCE(instance);
 	if (plugin)
 	  instance_id = plugin->instance_id;
   }
@@ -131,7 +113,7 @@ static int do_recv_NPP(rpc_message_t *message, void *p_value)
   if ((error = rpc_message_recv_uint32(message, &instance_id)) < 0)
 	return error;
 
-  PluginInstance *plugin = id_lookup(instance_id);
+  NPW_PluginInstance *plugin = id_lookup(instance_id);
   if (instance_id && plugin == NULL)
 	npw_printf("ERROR: passing an unknown instance\n");
   if (plugin && plugin->instance == NULL)
@@ -145,24 +127,12 @@ static int do_recv_NPP(rpc_message_t *message, void *p_value)
  *  Process NPStream objects
  */
 
-typedef struct {
-  NPStream *stream;
-  uint32_t stream_id;
-} StreamInstance;
-
-#ifdef  BUILD_WRAPPER
-#define STREAM_INSTANCE(instance) ((instance)->pdata)
-#endif
-#ifdef  BUILD_VIEWER
-#define STREAM_INSTANCE(instance) ((instance)->ndata)
-#endif
-
 static int do_send_NPStream(rpc_message_t *message, void *p_value)
 {
   uint32_t stream_id = 0;
   NPStream *stream = (NPStream *)p_value;
   if (stream) {
-	StreamInstance *sip = STREAM_INSTANCE(stream);
+	NPW_StreamInstance *sip = NPW_STREAM_INSTANCE(stream);
 	if (sip)
 	  stream_id = sip->stream_id;
   }
@@ -177,7 +147,7 @@ static int do_recv_NPStream(rpc_message_t *message, void *p_value)
   if ((error = rpc_message_recv_uint32(message, &stream_id)) < 0)
 	return error;
 
-  StreamInstance *stream = id_lookup(stream_id);
+  NPW_StreamInstance *stream = id_lookup(stream_id);
   *((NPStream **)p_value) = stream ? stream->stream : NULL;
   return RPC_ERROR_NO_ERROR;
 }
@@ -1273,6 +1243,50 @@ static int do_recv_NPIdentifier(rpc_message_t *message, void *p_value)
 
 
 /*
+ *  Process NPUTF8 strings
+ */
+
+static int do_send_NPUTF8(rpc_message_t *message, void *p_value)
+{
+  NPUTF8 *string = (NPUTF8 *)p_value;
+  if (string == NULL)
+	return RPC_ERROR_MESSAGE_ARGUMENT_INVALID;
+
+  int len = strlen(string) + 1;
+  int error = rpc_message_send_uint32(message, len);
+  if (error < 0)
+	return error;
+  if (len > 0)
+	return rpc_message_send_bytes(message, (unsigned char *)string, len);
+
+  return RPC_ERROR_NO_ERROR;
+}
+
+static int do_recv_NPUTF8(rpc_message_t *message, void *p_value)
+{
+  NPUTF8 **string_p = (NPUTF8 **)p_value;
+  NPUTF8 *string = NULL;
+
+  uint32_t len;
+  int error = rpc_message_recv_uint32(message, &len);
+  if (error < 0)
+	return error;
+  if ((string = NPN_MemAlloc(len)) == NULL)
+	return RPC_ERROR_NO_MEMORY;
+  if (len > 0) {
+	if ((error = rpc_message_recv_bytes(message, (unsigned char *)string, len)) < 0)
+	  return error;
+  }
+
+  if (string_p)
+	*string_p = string;
+  else if (string)
+	NPN_MemFree(string);
+  return RPC_ERROR_NO_ERROR;
+}
+
+
+/*
  *  Process NPString objects
  */
 
@@ -1302,13 +1316,13 @@ static int do_recv_NPString(rpc_message_t *message, void *p_value)
   if (error < 0)
 	return error;
 
+  if ((string->utf8characters = NPN_MemAlloc(string->utf8length + 1)) == NULL)
+	return RPC_ERROR_NO_MEMORY;
   if (string->utf8length > 0) {
-	// calloc() will make the string nul-terminated, even if utf8characters is a const NPUTF8 *
-	if ((string->utf8characters = calloc(1, string->utf8length + 1)) == NULL)
-	  return RPC_ERROR_NO_MEMORY;
 	if ((error = rpc_message_recv_bytes(message, (unsigned char *)string->utf8characters, string->utf8length)) < 0)
 	  return error;
   }
+  ((char *)string->utf8characters)[string->utf8length] = '\0';
   
   return RPC_ERROR_NO_ERROR;
 }
@@ -1350,6 +1364,13 @@ static int do_send_NPVariant(rpc_message_t *message, void *p_value)
 	  return error;
 	break;
   case NPVariantType_Object:
+	if (NPW_IS_BROWSER) {
+	  /* Note: when we pass an NPObject to the plugin, it's supposed
+		 to be released once it's done with processing the RPC args.
+		 i.e. NPN_ReleaseVariantValue() is called for any NPVariant we
+		 received through rpc_method_get_args(). */
+	  NPN_RetainObject(variant->value.objectValue);
+	}
 	if ((error = do_send_NPObject(message, variant->value.objectValue)) < 0)
 	  return error;
 	break;
@@ -1400,6 +1421,13 @@ static int do_recv_NPVariant(rpc_message_t *message, void *p_value)
   case NPVariantType_Object:
 	if ((error = do_recv_NPObject(message, &result.value.objectValue)) < 0)
 	  return error;
+	if (NPW_IS_BROWSER) {
+	  /* Note: it's not necessary to propagate the refcount back to
+		 the plugin-side since the object will be unref'ed through
+		 NPN_ReleaseVariantValue() once we are done with processing
+		 the RPC args. */
+	  NPN_RetainObject(result.value.objectValue);
+	}
 	break;
   }
 
@@ -1500,6 +1528,12 @@ static const rpc_message_descriptor_t message_descs[] = {
 	sizeof(NPIdentifier),
 	do_send_NPIdentifier,
 	do_recv_NPIdentifier
+  },
+  {
+	RPC_TYPE_NP_UTF8,
+	sizeof(NPUTF8 *),
+	do_send_NPUTF8,
+	do_recv_NPUTF8
   },
   {
 	RPC_TYPE_NP_STRING,

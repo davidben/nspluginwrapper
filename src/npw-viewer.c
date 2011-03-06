@@ -40,16 +40,10 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 
-#include "rpc.h"
-#include "npw-rpc.h"
 #include "utils.h"
 #include "xembed.h"
-
-#define XP_UNIX 1
-#define MOZ_X11 1
-#include <npapi.h>
-#include <npupp.h>
-#include "npruntime-impl.h"
+#include "npw-common.h"
+#include "npw-malloc.h"
 
 #define DEBUG 1
 #include "debug.h"
@@ -58,14 +52,11 @@
 // [UNIMPLEMENTED] Define to use XPCOM emulation
 #define USE_XPCOM 0
 
-// Define to use XEMBED
-#define USE_XEMBED 1
+// Define to use XEMBED hack (GTK_WINDOW_POPUP toplevel instead of GtkPlug)
+#define USE_XEMBED_HACK 1
 
 // Define to allow windowless plugins
 #define ALLOW_WINDOWLESS_PLUGINS 1
-
-// XXX unimplemented functions
-#define UNIMPLEMENTED() npw_printf("WARNING: Unimplemented function %s at line %d\n", __func__, __LINE__)
 
 
 // RPC global connections
@@ -73,9 +64,9 @@ rpc_connection_t *g_rpc_connection attribute_hidden = NULL;
 
 // Instance state information about the plugin
 typedef struct _PluginInstance {
-  NPP instance;
-  uint32_t instance_id;
+  NPW_DECL_PLUGIN_INSTANCE;
   bool use_xembed;
+  bool use_xembed_hack;
   bool is_windowless;
   NPWindow window;
   uint32_t width, height;
@@ -83,11 +74,12 @@ typedef struct _PluginInstance {
   GdkWindow *browser_toplevel;
 } PluginInstance;
 
+#define PLUGIN_INSTANCE(instance) \
+  ((PluginInstance *)NPW_PLUGIN_INSTANCE(instance))
+
 // Browser side data for an NPStream instance
 typedef struct _StreamInstance {
-  NPStream *stream;
-  uint32_t stream_id;
-  int is_plugin_stream;
+  NPW_DECL_STREAM_INSTANCE;
 } StreamInstance;
 
 // Xt wrapper data
@@ -99,18 +91,10 @@ typedef struct _XtData {
 
 // Gtk wrapper data
 typedef struct _GtkData {
+  GdkWindow *browser_window;
   GtkWidget *container;
   GtkWidget *socket;
 } GtkData;
-
-#define PLUGIN_INSTANCE(INSTANCE) plugin_instance(INSTANCE)
-
-static inline PluginInstance *plugin_instance(NPP instance)
-{
-  PluginInstance *plugin = (PluginInstance *)instance->ndata;
-  assert(plugin->instance == instance);
-  return plugin;
-}
 
 
 /* ====================================================================== */
@@ -433,16 +417,23 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
 
   // create the new window
   if (plugin->use_xembed) {
-	// XXX it's my understanding that the following plug-forwarding
-	// machinery should not be necessary but it turns out it is for
-	// Flash Player 9 Update 3 beta
 	GtkData *toolkit = calloc(1, sizeof(*toolkit));
 	if (toolkit == NULL)
 	  return -1;
-	toolkit->container = gtk_plug_new((GdkNativeWindow)window->window);
+	if (plugin->use_xembed_hack)
+	  toolkit->container = gtk_window_new(GTK_WINDOW_POPUP);
+	else
+	  toolkit->container = gtk_plug_new((GdkNativeWindow)window->window);
 	if (toolkit->container == NULL)
 	  return -1;
+	gtk_widget_set_size_request(toolkit->container, window->width, window->height); 
 	gtk_widget_show(toolkit->container);
+	if (plugin->use_xembed_hack) {
+	  toolkit->browser_window = gdk_window_foreign_new((GdkNativeWindow)window->window);
+	  if (toolkit->browser_window == NULL)
+		return -1;
+	  gdk_window_reparent(toolkit->container->window, toolkit->browser_window, 0, 0);
+	}
 	toolkit->socket = gtk_socket_new();
 	if (toolkit->socket == NULL)
 	  return -1;
@@ -451,6 +442,9 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
 	gtk_widget_show_all(toolkit->container);
 	window->window = (void *)gtk_socket_get_id(GTK_SOCKET(toolkit->socket));
 	plugin->toolkit_data = toolkit;
+	// keep the socket as the plugin tries to destroy the widget itself
+	g_signal_connect(toolkit->socket, "plug_removed",
+					 G_CALLBACK(gtk_true), NULL);
 	return 0;
   }
 
@@ -590,7 +584,7 @@ g_NPN_ForceRedraw(NPP instance)
 {
   D(bug("NPN_ForceRedraw instance=%p\n", instance));
 
-  UNIMPLEMENTED();
+  NPW_UNIMPLEMENTED();
 }
 
 // Asks the browser to create a stream for the specified URL
@@ -730,14 +724,10 @@ invoke_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
   return ret;
 }
 
-static Window
-get_real_netscape_window(NPP instance)
+static NPError
+g_NPN_GetValue_real(NPP instance, NPNVariable variable, void *value)
 {
-  GdkNativeWindow window;
-  int ret = invoke_NPN_GetValue(instance, NPNVnetscapeWindow, &window);
-  if (ret == NPERR_NO_ERROR)
-	return window;
-  return None;
+  return invoke_NPN_GetValue(instance, variable, value);
 }
 
 static NPError
@@ -768,7 +758,10 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
   case NPNVnetscapeWindow: {
 	PluginInstance *plugin = PLUGIN_INSTANCE(instance);
 	if (plugin->browser_toplevel == NULL) {
-	  GdkNativeWindow netscape_xid = get_real_netscape_window(instance);
+	  GdkNativeWindow netscape_xid = None;
+	  NPError error = g_NPN_GetValue_real(instance, variable, &netscape_xid);
+	  if (error != NPERR_NO_ERROR)
+		return error;
 	  if (netscape_xid == None)
 		return NPERR_GENERIC_ERROR;
 	  plugin->browser_toplevel = gdk_window_foreign_new(netscape_xid);
@@ -781,16 +774,10 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 #if ALLOW_WINDOWLESS_PLUGINS
   case NPNVSupportsWindowless:
 #endif
-#if USE_XEMBED
   case NPNVSupportsXEmbedBool:
-#endif
   case NPNVWindowNPObject:
-  case NPNVPluginElementNPObject: {
-	int ret = invoke_NPN_GetValue(instance, variable, value);
-	if (ret == NPERR_NO_ERROR)
-	  return ret;
-	// fall-through
-  }
+  case NPNVPluginElementNPObject:
+	return g_NPN_GetValue_real(instance, variable, value);
   default:
 	npw_printf("WARNING: unhandled variable %d in NPN_GetValue()\n", variable);
 	return NPERR_INVALID_PARAM;
@@ -839,7 +826,7 @@ g_NPN_InvalidateRegion(NPP instance, NPRegion invalidRegion)
 {
   D(bug("NPN_InvalidateRegion instance=%p\n", instance));
 
-  UNIMPLEMENTED();
+  NPW_UNIMPLEMENTED();
 }
 
 // Allocates memory from the browser's memory space
@@ -848,7 +835,9 @@ g_NPN_MemAlloc(uint32 size)
 {
   D(bug("NPN_MemAlloc size=%d\n", size));
 
-  return malloc(size);
+  void *ptr = NPW_MemAlloc(size);
+  D(bug(" return: %p\n", ptr));
+  return ptr;
 }
 
 // Requests that the browser free a specified amount of memory
@@ -866,7 +855,7 @@ g_NPN_MemFree(void *ptr)
 {
   D(bug("NPN_MemFree ptr=%p\n", ptr));
 
-  free(ptr);
+  NPW_MemFree(ptr);
 }
 
 // Posts data to a URL
@@ -958,7 +947,7 @@ g_NPN_ReloadPlugins(NPBool reloadPages)
 {
   D(bug("NPN_ReloadPlugins reloadPages=%d\n", reloadPages));
 
-  UNIMPLEMENTED();
+  NPW_UNIMPLEMENTED();
 }
 
 // Returns the Java execution environment
@@ -1383,62 +1372,6 @@ g_NPN_PopPopupsEnabledState(NPP instance)
 /* ====================================================================== */
 /* === NPRuntime glue                                                 === */
 /* ====================================================================== */
-
-// make sure to deallocate with g_free() since it comes from a GString
-static gchar *
-string_of_NPVariant(const NPVariant *arg)
-{
-#if DEBUG
-  GString *str = g_string_new(NULL);
-  switch (arg->type)
-	{
-	case NPVariantType_Void:
-	  g_string_append_printf(str, "void");
-	  break;
-	case NPVariantType_Null:
-	  g_string_append_printf(str, "null");
-	  break;
-	case NPVariantType_Bool:
-	  g_string_append(str, arg->value.boolValue ? "true" : "false");
-	  break;
-	case NPVariantType_Int32:
-	  g_string_append_printf(str, "%d", arg->value.intValue);
-	  break;
-	case NPVariantType_Double:
-	  g_string_append_printf(str, "%f", arg->value.doubleValue);
-	  break;
-	case NPVariantType_String:
-	  g_string_append_printf(str, "'%s'",
-							  arg->value.stringValue.utf8characters);
-	  break;
-	case NPVariantType_Object:
-	  g_string_append_printf(str, "<object %p>", arg->value.objectValue);
-	  break;
-	default:
-	  g_string_append_printf(str, "<invalid type %d>", arg->type);
-	  break;
-	}
-  return g_string_free(str, FALSE);
-#endif
-  return NULL;
-}
-
-static void
-print_npvariant_args(const NPVariant *args, uint32_t nargs)
-{
-#if DEBUG
-  GString *str = g_string_new(NULL);
-  for (int i = 0; i < nargs; i++) {
-	if (i > 0)
-	  g_string_append(str, ", ");
-	gchar *argstr = string_of_NPVariant(&args[i]);
-	g_string_append(str, argstr);
-	g_free(argstr);
-  }
-  D(bug(" %u args (%s)\n", nargs, str->str));
-  g_string_free(str, TRUE);
-#endif
-}
 
 // Allocates a new NPObject
 static uint32_t
@@ -1950,24 +1883,7 @@ static void
 g_NPN_ReleaseVariantValue(NPVariant *variant)
 {
   D(bug("NPN_ReleaseVariantValue\n"));
-
-  switch (variant->type) {
-  case NPVariantType_String:
-	{
-	  NPString *s = &NPVARIANT_TO_STRING(*variant);
-	  if (s->utf8characters)
-		free((void *)s->utf8characters);
-	  break;
-	}
-  case NPVariantType_Object:
-	{
-	  NPObject *npobj = NPVARIANT_TO_OBJECT(*variant);
-	  if (npobj)
-		g_NPN_ReleaseObject(npobj);
-	  break;
-	}
-  }
-
+  npvariant_clear(variant);
   D(bug(" done\n"));
 }
 
@@ -2147,9 +2063,9 @@ invoke_NPN_UTF8FromIdentifier(NPIdentifier identifier)
 	return NULL;
   }
 
-  char *str;
+  NPUTF8 *str;
   error = rpc_method_wait_for_reply(g_rpc_connection,
-									RPC_TYPE_STRING, &str,
+									RPC_TYPE_NP_UTF8, &str,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -2377,6 +2293,10 @@ g_NP_Initialize(uint32_t version)
 	  return NPERR_OUT_OF_MEMORY_ERROR;
   }
 
+  // Initialize function tables
+  // XXX: remove the local copies from this file
+  NPW_InitializeFuncs(&mozilla_funcs, &plugin_funcs);
+
   D(bug("NP_Initialize\n"));
   NPError ret = g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
   D(bug(" return: %d\n", ret));
@@ -2482,6 +2402,16 @@ static NPError g_NPP_New(NPMIMEType plugin_type, uint32_t instance_id,
 		plugin->use_xembed = supports_XEmbed && needs_XEmbed;
 	}
   }
+
+#if USE_XEMBED_HACK
+  // check if XEMBED hack is to be used
+  if (plugin->use_xembed && plugin_funcs.getvalue) {
+	NPNToolkitType toolkit = 0;
+	NPError error = g_NPN_GetValue_real(NULL, NPNVToolkit, (void *)&toolkit);
+	if (error == NPERR_NO_ERROR && toolkit == NPNVGtk2)
+	  plugin->use_xembed_hack = true;
+  }
+#endif
 
   return ret;
 }
@@ -2643,6 +2573,20 @@ static int handle_NPP_SetWindow(rpc_connection_t *connection)
 
 // NPP_GetValue
 static NPError
+g_NPP_GetValue_fixes(NPP instance, NPPVariable variable, void *value)
+{
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  switch (variable) {
+  case NPPVpluginNeedsXEmbed:
+	// claim we don't support XEMBED though we actually do
+	if (plugin->use_xembed_hack)
+	  *((PRBool *)value) = PR_FALSE;
+	break;
+  }
+  return NPERR_NO_ERROR;
+}
+
+static NPError
 g_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
 {
   if (instance == NULL)
@@ -2653,6 +2597,8 @@ g_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
 
   D(bug("NPP_GetValue instance=%p, variable=%d\n", instance, variable));
   NPError ret = plugin_funcs.getvalue(instance, variable, value);
+  if (ret == NPERR_NO_ERROR)
+	ret = g_NPP_GetValue_fixes(instance, variable, value);
   D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));
   return ret;
 }
@@ -2710,7 +2656,7 @@ static int handle_NPP_GetValue(rpc_connection_t *connection)
 static void
 g_NPP_URLNotify(NPP instance, const char *url, NPReason reason, void *notifyData)
 {
-  if (instance)
+  if (instance == NULL)
 	return;
 
   if (plugin_funcs.urlnotify == NULL)
@@ -3125,7 +3071,7 @@ g_NPP_HandleEvent(NPP instance, NPEvent *event)
   if (event == NULL)
 	return false;
 
-  D(bug("NPP_HandleEvent instance=%p, event=%p\n", instance, event));
+  D(bug("NPP_HandleEvent instance=%p, event=%p [%s]\n", instance, event, string_of_NPEvent_type(event->type)));
   int16 ret = plugin_funcs.event(instance, event);
   D(bug(" return: %d\n", ret));
 

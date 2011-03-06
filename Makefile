@@ -103,7 +103,7 @@ endif
 MOZILLA_CFLAGS = -I$(SRC_PATH)/npapi -I$(SRC_PATH)/npapi/nspr
 
 npwrapper_LIBRARY = npwrapper.so
-npwrapper_RAWSRCS = npw-wrapper.c npw-rpc.c rpc.c debug.c utils.c npruntime.c
+npwrapper_RAWSRCS = npw-wrapper.c npw-common.c npw-malloc.c npw-rpc.c rpc.c debug.c utils.c npruntime.c
 npwrapper_SOURCES = $(npwrapper_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 npwrapper_OBJECTS = $(npwrapper_RAWSRCS:%.c=npwrapper-%.os)
 npwrapper_CFLAGS  = $(CFLAGS) $(X_CFLAGS) $(MOZILLA_CFLAGS) $(GLIB_CFLAGS)
@@ -111,7 +111,7 @@ npwrapper_LDFLAGS = $(X_LDFLAGS) $(libpthread_LDFLAGS) $(libsocket_LDFLAGS)
 npwrapper_LDFLAGS += $(GLIB_LDFLAGS)
 
 npviewer_PROGRAM = npviewer.bin
-npviewer_RAWSRCS = npw-viewer.c npw-rpc.c rpc.c debug.c utils.c npruntime.c
+npviewer_RAWSRCS = npw-viewer.c npw-common.c npw-malloc.c npw-rpc.c rpc.c debug.c utils.c npruntime.c
 npviewer_SOURCES = $(npviewer_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 npviewer_OBJECTS = $(npviewer_RAWSRCS:%.c=npviewer-%.o)
 ifeq ($(biarch),yes)

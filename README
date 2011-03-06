@@ -83,7 +83,7 @@ The following plugins work reasonnably well:
 - DejaVu Libre        3.5.14
 - Flash Player        7.0
 - Flash Player        9.0.124
-- Flash Player        10.0 (beta 2, rc)
+- Flash Player        10.0.12.36
 - Linux J2K           0.0.2
 - Mplayerplug-in      2.80
 - Mplayerplug-in      3.25
@@ -92,6 +92,7 @@ The following plugins work reasonnably well:
 - Tcl plugin          3.1
 - Squeak VM plugin    3.7
 - Citrix ICA Client   10.0
+- 3DMLW               1.0.3
 
 Broken or partially working:
 - Real Player         8.0

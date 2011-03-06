@@ -42,22 +42,12 @@
 #include <X11/Shell.h>
 #include <X11/StringDefs.h>
 
-#include "rpc.h"
-#include "npw-rpc.h"
 #include "utils.h"
-
-#define XP_UNIX 1
-#define MOZ_X11 1
-#include <npapi.h>
-#include <npupp.h>
-#include "npruntime-impl.h"
+#include "npw-common.h"
 
 #define DEBUG 1
 #include "debug.h"
 
-
-// XXX unimplemented functions
-#define UNIMPLEMENTED() npw_printf("WARNING: Unimplemented function %s at line %d\n", __func__, __LINE__)
 
 // Globally exported plugin ident, used by the "npconfig" tool
 const NPW_PluginInfo NPW_Plugin = {
@@ -91,16 +81,16 @@ static Plugin g_plugin = { 0, -1, 0, NULL, NULL, NULL };
 
 // Instance state information about the plugin
 typedef struct _PluginInstance {
-  NPP instance;
-  uint32_t instance_id;
+  NPW_DECL_PLUGIN_INSTANCE;
   rpc_connection_t *connection;
 } PluginInstance;
 
+#define PLUGIN_INSTANCE(instance) \
+  ((PluginInstance *)NPW_PLUGIN_INSTANCE(instance))
+
 // Plugin side data for an NPStream instance
 typedef struct _StreamInstance {
-  NPStream *stream;
-  uint32_t stream_id;
-  int is_plugin_stream;
+  NPW_DECL_STREAM_INSTANCE;
 } StreamInstance;
 
 // Prototypes
@@ -137,23 +127,6 @@ static NPError plugin_restart_if_needed(void);
 // Consume as many bytes as possible when we are not NPP_WriteReady()
 // XXX: move to a common place to Wrapper and Viewer
 #define NPERR_STREAM_BUFSIZ 65536
-
-// Helpers
-#ifndef min
-#define min(x, y) ((x) < (y) ? (x) : (y))
-#endif
-#ifndef max
-#define max(x, y) ((x) > (y) ? (x) : (y))
-#endif
-
-#define PLUGIN_INSTANCE(INSTANCE) plugin_instance(INSTANCE)
-
-static inline PluginInstance *plugin_instance(NPP instance)
-{
-  PluginInstance *plugin = (PluginInstance *)instance->pdata;
-  assert(plugin->instance == instance);
-  return plugin;
-}
 
 // Flush the X output buffer
 static void toolkit_flush(void)
@@ -870,6 +843,11 @@ static int handle_NPN_PopPopupsEnabledState(rpc_connection_t *connection)
   return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
 }
 
+
+/* ====================================================================== */
+/* === NPRuntime glue                                                 === */
+/* ====================================================================== */
+
 // NPN_CreateObject
 static int handle_NPN_CreateObject(rpc_connection_t *connection)
 {
@@ -934,7 +912,7 @@ static int handle_NPN_ReleaseObject(rpc_connection_t *connection)
   if (npobj == NULL) // this shall not happen, let it crash
 	npw_printf("ERROR: NPN_ReleaseObject got a null NPObject\n");
 
-  mozilla_funcs.releaseobject(npobj);
+  NPN_ReleaseObject(npobj);
 
   return rpc_method_send_reply(connection, RPC_TYPE_UINT32, npobj->referenceCount, RPC_TYPE_INVALID);
 }
@@ -963,13 +941,19 @@ static int handle_NPN_Invoke(rpc_connection_t *connection)
   VOID_TO_NPVARIANT(result);
   bool ret = mozilla_funcs.invoke(instance, npobj, methodName, args, argCount, &result);
 
-  if (args)
+  if (args) {
+	for (int i = 0; i < argCount; i++)
+	  NPN_ReleaseVariantValue(&args[i]);
 	free(args);
+  }
 
-  return rpc_method_send_reply(connection,
-							   RPC_TYPE_UINT32, ret,
-							   RPC_TYPE_NP_VARIANT, &result,
-							   RPC_TYPE_INVALID);
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
+
+  NPN_ReleaseVariantValue(&result);
+  return rpc_ret;
 }
 
 // NPN_InvokeDefault
@@ -994,13 +978,19 @@ static int handle_NPN_InvokeDefault(rpc_connection_t *connection)
   VOID_TO_NPVARIANT(result);
   bool ret = mozilla_funcs.invokeDefault(instance, npobj, args, argCount, &result);
 
-  if (args)
+  if (args) {
+	for (int i = 0; i < argCount; i++)
+	  NPN_ReleaseVariantValue(&args[i]);
 	free(args);
+  }
 
-  return rpc_method_send_reply(connection,
-							   RPC_TYPE_UINT32, ret,
-							   RPC_TYPE_NP_VARIANT, &result,
-							   RPC_TYPE_INVALID);
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
+
+  NPN_ReleaseVariantValue(&result);
+  return rpc_ret;
 }
 
 // NPN_Evaluate
@@ -1027,10 +1017,13 @@ static int handle_NPN_Evaluate(rpc_connection_t *connection)
   if (script.utf8characters)
 	free((void *)script.utf8characters);
 
-  return rpc_method_send_reply(connection,
-							   RPC_TYPE_UINT32, ret,
-							   RPC_TYPE_NP_VARIANT, &result,
-							   RPC_TYPE_INVALID);
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
+
+  NPN_ReleaseVariantValue(&result);
+  return rpc_ret;
 }
 
 // NPN_GetProperty
@@ -1054,10 +1047,13 @@ static int handle_NPN_GetProperty(rpc_connection_t *connection)
   VOID_TO_NPVARIANT(result);
   bool ret = mozilla_funcs.getproperty(instance, npobj, propertyName, &result);
 
-  return rpc_method_send_reply(connection,
-							   RPC_TYPE_UINT32, ret,
-							   RPC_TYPE_NP_VARIANT, &result,
-							   RPC_TYPE_INVALID);
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
+
+  NPN_ReleaseVariantValue(&result);
+  return rpc_ret;
 }
 
 // NPN_SetProperty
@@ -1080,6 +1076,8 @@ static int handle_NPN_SetProperty(rpc_connection_t *connection)
   }
 
   bool ret = mozilla_funcs.setproperty(instance, npobj, propertyName, &value);
+
+  NPN_ReleaseVariantValue(&value);
 
   return rpc_method_send_reply(connection,
 							   RPC_TYPE_UINT32, ret,
@@ -1288,11 +1286,11 @@ static int handle_NPN_UTF8FromIdentifier(rpc_connection_t *connection)
   NPUTF8 *str = mozilla_funcs.utf8fromidentifier(ident);
 
   error = rpc_method_send_reply(connection,
-								RPC_TYPE_STRING, str,
+								RPC_TYPE_NP_UTF8, str,
 								RPC_TYPE_INVALID);
 
   // the caller is responsible for deallocating the memory used by the string
-  mozilla_funcs.memfree(str);
+  NPN_MemFree(str);
 
   return error;
 }
@@ -1611,7 +1609,7 @@ g_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
 static NPError
 invoke_NPP_SetValue(PluginInstance *plugin, NPPVariable variable, void *value)
 {
-  UNIMPLEMENTED();
+  NPW_UNIMPLEMENTED();
 
   return NPERR_GENERIC_ERROR;
 }
@@ -1902,6 +1900,21 @@ g_NPP_Write(NPP instance, NPStream *stream, int32 offset, int32 len, void *buf)
   if (plugin == NULL)
 	return -1;
 
+  /* Don't try to propagate erroneous buffers.
+   *
+   * Actually, we can get to that case if NPP_WriteReady() returned -1
+   * or another negative value, in general. Some browsers (Konqueror,
+   * Google Chrome) send data through NPP_Write() anyway. Others
+   * (Firefox, WebKit) actually suspend the stream temporarily.
+   *
+   * Note that returning -1 here will destroy the stream. This is
+   * compatible with the expected behaviour. e.g. the DiamondX test
+   * plugin wants that. Is there any other "real" plugin in that case
+   * too?
+   */
+  if (len < 0)
+	return -1;
+
   D(bug("NPP_Write instance=%p\n", instance));
   int32 ret = invoke_NPP_Write(plugin, stream, offset, len, buf);
   D(bug(" return: %d\n", ret));
@@ -2019,7 +2032,7 @@ static int16 g_NPP_HandleEvent(NPP instance, void *event)
 
   D(bug("NPP_HandleEvent instance=%p\n", instance));
   int16 ret = invoke_NPP_HandleEvent(plugin, event);
-  D(bug(" return: ret\n", ret));
+  D(bug(" return: %d\n", ret));
   return ret;
 }
 
@@ -2568,11 +2581,11 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
 	return NPERR_NO_ERROR;
 
   // copy mozilla_funcs table here as plugin_init() will need it
-  memcpy(&mozilla_funcs, moz_funcs, min(moz_funcs->size, sizeof(mozilla_funcs)));
+  memcpy(&mozilla_funcs, moz_funcs, MIN(moz_funcs->size, sizeof(mozilla_funcs)));
 
   memset(plugin_funcs, 0, sizeof(*plugin_funcs));
   plugin_funcs->size = sizeof(NPPluginFuncs);
-  plugin_funcs->version = (NP_VERSION_MAJOR << 8) + NP_VERSION_MINOR;
+  plugin_funcs->version = NPW_NPAPI_VERSION;
   plugin_funcs->newp = NewNPP_NewProc(g_NPP_New);
   plugin_funcs->destroy = NewNPP_DestroyProc(g_NPP_Destroy);
   plugin_funcs->setwindow = NewNPP_SetWindowProc(g_NPP_SetWindow);
@@ -2603,6 +2616,10 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
 	plugin_funcs->destroy = NewNPP_DestroyProc(g_LONG64_NPP_Destroy);
   }
 
+  // Initialize function tables
+  // XXX: remove the local copies from this file
+  NPW_InitializeFuncs(moz_funcs, plugin_funcs);
+
   if (g_plugin.initialized == 0 || g_plugin.initialized == 1)
 	plugin_init(1);
   if (g_plugin.initialized <= 0)
@@ -2613,7 +2630,7 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
 
   // pass down common NPAPI version supported by both the underlying
   // browser and the thunking capabilities of nspluginwrapper
-  npapi_version = min(moz_funcs->version, plugin_funcs->version);
+  npapi_version = MIN(moz_funcs->version, plugin_funcs->version);
 
   NPError ret = invoke_NP_Initialize(npapi_version);
   D(bug(" return: %d [%s]\n", ret, string_of_NPError(ret)));

@@ -38,6 +38,7 @@ extern int id_lookup_value(void *ptr) attribute_hidden;
 extern const char *string_of_NPError(int error) attribute_hidden;
 extern const char *string_of_NPReason(int reason) attribute_hidden;
 extern const char *string_of_NPStreamType(int stype) attribute_hidden;
+extern const char *string_of_NPEvent_type(int type) attribute_hidden;
 
 // Misc utility functions
 extern void npw_perror(const char *prefix, int error) attribute_hidden;

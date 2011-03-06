@@ -1,7 +1,7 @@
 %define name	nspluginwrapper
-%define version	1.1.2
+%define version	1.1.4
 %define release	1
-#define svndate 20081012
+#define svndate 20081106
 
 # define 32-bit arch of multiarch platforms
 %define arch_32 %{nil}
@@ -192,6 +192,13 @@ fi
 %endif
 
 %changelog
+* Thu Nov  6 2008 Gwenole Beauchesne <gb.public@free.fr> 1.1.4-1
+- fix memory leaks in NPRuntime bridge
+- fix XEMBED support (workaround Gtk2 and Firefox bugs)
+- fix DiamondX plugin with Konqueror4
+- fix NPP_URLNotify() (Bennet Yee)
+- fix NPAPI version that is exposed to the plugin
+
 * Sun Oct 12 2008 Gwenole Beauchesne <gb.public@free.fr> 1.1.2-1
 - add support for Open Solaris hosts
 - add support for ARM targets (Geraint North)

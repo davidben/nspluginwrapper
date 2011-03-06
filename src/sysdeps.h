@@ -85,4 +85,10 @@ typedef struct __attribute__((packed)) {
 #endif
 #endif
 
+// Helper macros
+#undef  MIN
+#define MIN(a, b)  (((a) < (b)) ? (a) : (b))
+#undef  MAX
+#define MAX(a, b)  (((a) > (b)) ? (a) : (b))
+
 #endif /* SYSDEPS_H */

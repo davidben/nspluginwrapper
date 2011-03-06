@@ -23,15 +23,7 @@
 #include <assert.h>
 #include <glib.h> /* <glib/ghash.h> */
 #include "utils.h"
-#include "rpc.h"
-#include "npw-rpc.h"
-
-#define XP_UNIX 1
-#define MOZ_X11 1
-#include <npapi.h>
-#include <npupp.h>
-#include <npruntime.h>
-#include "npruntime-impl.h"
+#include "npw-common.h"
 
 #define DEBUG 1
 #include "debug.h"
@@ -46,7 +38,7 @@ extern rpc_connection_t *g_rpc_connection attribute_hidden;
 /* ====================================================================== */
 
 NPClass npclass_bridge = {
-  NP_CLASS_STRUCT_VERSION,
+  NPW_NP_CLASS_STRUCT_VERSION,
   NULL,
   NULL,
   npclass_invoke_Invalidate,
@@ -78,7 +70,7 @@ int npclass_handle_Invalidate(rpc_connection_t *connection)
 	D(bug(" done\n"));
   }
 
-  return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
+  return rpc_method_send_reply(connection, RPC_TYPE_INVALID);
 }
 
 void npclass_invoke_Invalidate(NPObject *npobj)
@@ -116,14 +108,16 @@ int npclass_handle_HasMethod(rpc_connection_t *connection)
 	return error;
   }
 
-  uint32_t ret = 0;
+  uint32_t ret = false;
   if (npobj && npobj->_class && npobj->_class->hasMethod) {
 	D(bug("NPClass::HasMethod(npobj %p, name id %p)\n", npobj, name));
 	ret = npobj->_class->hasMethod(npobj, name);
 	D(bug(" return: %d\n", ret));
   }
 
-  return rpc_method_send_reply(connection, RPC_TYPE_UINT32, ret, RPC_TYPE_INVALID);
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_INVALID);
 }
 
 bool npclass_invoke_HasMethod(NPObject *npobj, NPIdentifier name)
@@ -168,21 +162,31 @@ int npclass_handle_Invoke(rpc_connection_t *connection)
 	return error;
   }
 
-  uint32_t ret = 0;
+  uint32_t ret = false;
   NPVariant result;
   VOID_TO_NPVARIANT(result);
   if (npobj && npobj->_class && npobj->_class->invoke) {
 	D(bug("NPClass::Invoke(npobj %p, name id %p)\n", npobj, name));
+	print_npvariant_args(args, argCount);
 	ret = npobj->_class->invoke(npobj, name, args, argCount, &result);
-	D(bug(" return: %d\n", ret));
+	gchar *result_str = string_of_NPVariant(&result);
+	D(bug(" return: %d (%s)\n", ret, result_str));
+	g_free(result_str);
   }
 
-  free(args);
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
 
-  return rpc_method_send_reply(connection,
-							   RPC_TYPE_UINT32, ret,
-							   RPC_TYPE_NP_VARIANT, &result,
-							   RPC_TYPE_INVALID);
+  if (args) {
+	for (int i = 0; i < argCount; i++)
+	  NPN_ReleaseVariantValue(&args[i]);
+	free(args);
+  }
+
+  NPN_ReleaseVariantValue(&result);
+  return rpc_ret;
 }
 
 bool npclass_invoke_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *args, uint32_t argCount,
@@ -234,21 +238,31 @@ int npclass_handle_InvokeDefault(rpc_connection_t *connection)
 	return error;
   }
 
-  uint32_t ret = 0;
+  uint32_t ret = false;
   NPVariant result;
   VOID_TO_NPVARIANT(result);
   if (npobj && npobj->_class && npobj->_class->invokeDefault) {
 	D(bug("NPClass::InvokeDefault(npobj %p)\n", npobj));
+	print_npvariant_args(args, argCount);
 	ret = npobj->_class->invokeDefault(npobj, args, argCount, &result);
-	D(bug(" return: %d\n", ret));
+	gchar *result_str = string_of_NPVariant(&result);
+	D(bug(" return: %d (%s)\n", ret, result_str));
+	g_free(result_str);
   }
 
-  free(args);
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
 
-  return rpc_method_send_reply(connection,
-							   RPC_TYPE_UINT32, ret,
-							   RPC_TYPE_NP_VARIANT, &result,
-							   RPC_TYPE_INVALID);
+  if (args) {
+	for (int i = 0; i < argCount; i++)
+	  NPN_ReleaseVariantValue(&args[i]);
+	free(args);
+  }
+
+  NPN_ReleaseVariantValue(&result);
+  return rpc_ret;
 }
 
 bool npclass_invoke_InvokeDefault(NPObject *npobj, const NPVariant *args, uint32_t argCount,
@@ -298,14 +312,16 @@ int npclass_handle_HasProperty(rpc_connection_t *connection)
 	return error;
   }
 
-  uint32_t ret = 0;
+  uint32_t ret = false;
   if (npobj && npobj->_class && npobj->_class->hasProperty) {
 	D(bug("NPClass::HasProperty(npobj %p, name id %p)\n", npobj, name));
 	ret = npobj->_class->hasProperty(npobj, name);
 	D(bug(" return: %d\n", ret));
   }
 
-  return rpc_method_send_reply(connection, RPC_TYPE_UINT32, ret, RPC_TYPE_INVALID);
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_INVALID);
 }
 
 bool npclass_invoke_HasProperty(NPObject *npobj, NPIdentifier name)
@@ -347,19 +363,24 @@ int npclass_handle_GetProperty(rpc_connection_t *connection)
 	return error;
   }
 
-  uint32_t ret = 0;
+  uint32_t ret = false;
   NPVariant result;
   VOID_TO_NPVARIANT(result);
   if (npobj && npobj->_class && npobj->_class->getProperty) {
 	D(bug("NPClass::GetProperty(npobj %p, name id %p)\n", npobj, name));
 	ret = npobj->_class->getProperty(npobj, name, &result);
-	D(bug(" return: %d\n", ret));
+	gchar *result_str = string_of_NPVariant(&result);
+	D(bug(" return: %d (%s)\n", ret, result_str));
+	g_free(result_str);
   }
 
-  return rpc_method_send_reply(connection,
-							   RPC_TYPE_UINT32, ret,
-							   RPC_TYPE_NP_VARIANT, &result,
-							   RPC_TYPE_INVALID);
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
+
+  NPN_ReleaseVariantValue(&result);
+  return rpc_ret;
 }
 
 bool npclass_invoke_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *result)
@@ -410,16 +431,19 @@ int npclass_handle_SetProperty(rpc_connection_t *connection)
 	return error;
   }
 
-  uint32_t ret = 0;
+  uint32_t ret = false;
   if (npobj && npobj->_class && npobj->_class->setProperty) {
 	D(bug("NPClass::SetProperty(npobj %p, name id %p)\n", npobj, name));
 	ret = npobj->_class->setProperty(npobj, name, &value);
 	D(bug(" return: %d\n", ret));
   }
 
-  return rpc_method_send_reply(connection,
-							   RPC_TYPE_UINT32, ret,
-							   RPC_TYPE_INVALID);
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_INVALID);
+
+  NPN_ReleaseVariantValue(&value);
+  return rpc_ret;
 }
 
 bool npclass_invoke_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *value)
@@ -467,14 +491,16 @@ int npclass_handle_RemoveProperty(rpc_connection_t *connection)
 	return error;
   }
 
-  uint32_t ret = 0;
+  uint32_t ret = false;
   if (npobj && npobj->_class && npobj->_class->removeProperty) {
 	D(bug("NPClass::RemoveProperty(npobj %p, name id %p)\n", npobj, name));
 	ret = npobj->_class->removeProperty(npobj, name);
 	D(bug(" return: %d\n", ret));
   }
 
-  return rpc_method_send_reply(connection, RPC_TYPE_UINT32, ret, RPC_TYPE_INVALID);
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_INVALID);
 }
 
 bool npclass_invoke_RemoveProperty(NPObject *npobj, NPIdentifier name)
@@ -637,4 +663,96 @@ NPObjectInfo *npobject_info_lookup(NPObject *npobj)
 NPObject *npobject_lookup(uint32_t npobj_id)
 {
   return g_hash_table_lookup(g_npobject_ids, (void *)(uintptr_t)npobj_id);
+}
+
+
+/* ====================================================================== */
+/* === NPVariant helpers                                              === */
+/* ====================================================================== */
+
+void
+npvariant_clear(NPVariant *variant)
+{
+  switch (variant->type) {
+  case NPVariantType_Void:
+  case NPVariantType_Null:
+  case NPVariantType_Bool:
+  case NPVariantType_Int32:
+  case NPVariantType_Double:
+	break;
+  case NPVariantType_String:
+	{
+	  NPString *s = &NPVARIANT_TO_STRING(*variant);
+	  if (s->utf8characters)
+		NPN_MemFree((void *)s->utf8characters);
+	  break;
+	}
+  case NPVariantType_Object:
+	{
+	  NPObject *npobj = NPVARIANT_TO_OBJECT(*variant);
+	  if (npobj)
+		NPN_ReleaseObject(npobj);
+	  break;
+	}
+  }
+  VOID_TO_NPVARIANT(*variant);
+}
+
+// Make sure to deallocate with g_free() since it comes from a GString
+gchar *
+string_of_NPVariant(const NPVariant *arg)
+{
+#if DEBUG
+  GString *str = g_string_new(NULL);
+  switch (arg->type)
+	{
+	case NPVariantType_Void:
+	  g_string_append_printf(str, "void");
+	  break;
+	case NPVariantType_Null:
+	  g_string_append_printf(str, "null");
+	  break;
+	case NPVariantType_Bool:
+	  g_string_append(str, arg->value.boolValue ? "true" : "false");
+	  break;
+	case NPVariantType_Int32:
+	  g_string_append_printf(str, "%d", arg->value.intValue);
+	  break;
+	case NPVariantType_Double:
+	  g_string_append_printf(str, "%f", arg->value.doubleValue);
+	  break;
+	case NPVariantType_String:
+	  g_string_append_c(str, '\'');
+	  g_string_append_len(str,
+						  arg->value.stringValue.utf8characters,
+						  arg->value.stringValue.utf8length);
+	  g_string_append_c(str, '\'');
+	  break;
+	case NPVariantType_Object:
+	  g_string_append_printf(str, "<object %p>", arg->value.objectValue);
+	  break;
+	default:
+	  g_string_append_printf(str, "<invalid type %d>", arg->type);
+	  break;
+	}
+  return g_string_free(str, FALSE);
+#endif
+  return NULL;
+}
+
+void
+print_npvariant_args(const NPVariant *args, uint32_t nargs)
+{
+#if DEBUG
+  GString *str = g_string_new(NULL);
+  for (int i = 0; i < nargs; i++) {
+	if (i > 0)
+	  g_string_append(str, ", ");
+	gchar *argstr = string_of_NPVariant(&args[i]);
+	g_string_append(str, argstr);
+	g_free(argstr);
+  }
+  D(bug(" %u args (%s)\n", nargs, str->str));
+  g_string_free(str, TRUE);
+#endif
 }

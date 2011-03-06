@@ -1,5 +1,12 @@
-nspluginwrapper NEWS -- history of user-visible changes.  2008-10-12
+nspluginwrapper NEWS -- history of user-visible changes.  2008-11-07
 Copyright (C) 2005-2008 Gwenole Beauchesne
+
+Version 1.1.4 (BETA) - 07.Nov.2008
+* Fix memory leaks in NPRuntime bridge
+* Fix XEMBED support (workaround Gtk2 and Firefox bugs)
+* Fix DiamondX plugin with Konqueror4
+* Fix NPP_URLNotify() (Bennet Yee)
+* Fix NPAPI version that is exposed to the plugin
 
 Version 1.1.2 (BETA) - 12.Oct.2008
 * Add support for Open Solaris hosts
