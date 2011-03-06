@@ -2,9 +2,8 @@
 #
 #  nsplugin viewer wrapper script (C) 2005-2006 Gwenole Beauchesne
 #
-OS="`uname -s`"
+OS="`uname -s | tr '[A-Z]' '[a-z]'`"
 ARCH="`uname -m`"
-NPW_LIBDIR="%NPW_LIBDIR%"
 
 if test -z "$TARGET_OS"; then
     echo "*** NSPlugin Viewer *** error, TARGET_OS not initialized"
@@ -16,7 +15,54 @@ if test -z "$TARGET_ARCH"; then
     exit 1
 fi
 
-NPW_VIEWER_DIR=$NPW_LIBDIR/$TARGET_ARCH/$TARGET_OS
+normalize_cpu() {
+local cpu="$1"
+case "$cpu" in
+arm*)
+    cpu="arm"
+    ;;
+i[3456]86|k[678]|i86pc|BePC)
+    cpu="i386"
+    ;;
+ia64)
+    cpu="ia64"
+    ;;
+"Power Macintosh"|ppc)
+    cpu="ppc"
+    ;;
+ppc64)
+    cpu="ppc64"
+    ;;
+sparc)
+    cpu="sparc"
+    ;;
+sparc64)
+    cpu="sparc64"
+    ;;
+x86_64|amd64)
+    cpu="x86_64"
+    ;;
+esac
+echo "$cpu"
+}
+
+normalize_os() {
+local os="$1"
+case "$os" in
+sunos*)
+    os="solaris"
+    ;;
+esac
+echo "$os"
+}
+
+ARCH=`normalize_cpu "$ARCH"`
+OS=`normalize_os "$OS"`
+TARGET_ARCH=`normalize_cpu "$TARGET_ARCH"`
+TARGET_OS=`normalize_os "$TARGET_OS"`
+
+# Define where npviewer.bin is located
+NPW_VIEWER_DIR="%NPW_VIEWER_DIR%"
 
 # Set a new LD_LIBRARY_PATH that is TARGET specific
 export LD_LIBRARY_PATH=$NPW_VIEWER_DIR
@@ -31,24 +77,15 @@ NPW_USE_XSHM=${NPW_USE_XSHM:-yes}
 NPW_USE_VALGRIND=${NPW_USE_VALGRIND:-no}
 can_use_valgrind="no"
 
-case $ARCH in
-i?86|i86pc)
-    ARCH=i386
-    ;;
-amd64)
-    ARCH=x86_64
-    ;;
-esac
-
 if test "$ARCH" != "$TARGET_ARCH"; then
     case $TARGET_ARCH in
     i386)
 	if test "$ARCH" = "x86_64"; then
 	    case "$OS" in
-	    Linux)
+	    linux)
 		LOADER=`which linux32`
 		;;
-	    FreeBSD | NetBSD)
+	    freebsd | netbsd)
 		# XXX check that COMPAT_LINUX is enabled or fail otherwise
 		LOADER="none"
 	        ;;
@@ -66,7 +103,7 @@ if test "$ARCH" != "$TARGET_ARCH"; then
     ppc)
 	if test "$ARCH" = "ppc64"; then
 	    case "$OS" in
-	    Linux)
+	    linux)
 		LOADER=`which linux32`
 	        ;;
 	    esac
@@ -98,7 +135,7 @@ if test "$NPW_USE_XSHM" != "yes"; then
 fi
 
 # Expand PATH for RealPlayer package on NetBSD (realplay)
-if test "$OS" = "NetBSD"; then
+if test "$OS" = "netbsd"; then
     REALPLAYER_HOME="/usr/pkg/lib/RealPlayer"
     if test -x "$REALPLAYER_HOME/realplay"; then
 	export PATH=$PATH:$REALPLAYER_HOME
@@ -114,7 +151,7 @@ case " $@ " in
     # XXX: detect QEMU target soundwrapper differently
     case "$LOADER" in
     *linux32)
-	if test "$OS" = "Linux"; then
+	if test "$OS" = "linux"; then
 	    soundwrapper=`which soundwrapper 2>/dev/null`
 	    if test -x "$soundwrapper"; then
 		LOADER="$LOADER $soundwrapper"

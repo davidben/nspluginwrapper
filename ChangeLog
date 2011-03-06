@@ -1,8 +1,58 @@
-2009-01-01 07:36  Gwenole Beauchesne <gb.public@free.fr>
+2009-01-02 08:50  Gwenole Beauchesne <gb.public@free.fr>
 
-	* NEWS, nspluginwrapper.spec: Updates for 1.2.2.
+	* NEWS, nspluginwrapper.spec: Fix spelling.
 
-2009-01-01 07:34  Gwenole Beauchesne <gb.public@free.fr>
+2009-01-01 20:51  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/rpc.c: Factor our socket creation.
+
+2009-01-01 20:26  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime-impl.h, src/npruntime.c, src/npw-viewer.c: Make it
+	  possible to disable NPIdentifier cache with
+	  NPW_NPRUNTIME_CACHE=no too.
+
+2009-01-01 17:58  Gwenole Beauchesne <gb.public@free.fr>
+
+	* NEWS, nspluginwrapper.spec: Updates for 1.3.0.
+
+2009-01-01 17:56  Gwenole Beauchesne <gb.public@free.fr>
+
+	* configure, lsb-build/headers/glib-2.0/glib.h,
+	  lsb-build/stub_libs/libglib-2.0.c: Add g_hash_table_find() and
+	  g_hash_table_remove_all() thunks. Besides, for bi-arch builds,
+	  it's assumed that 32-/64-bit glib versions are the same and
+	  exports the same functions.
+
+2009-01-01 17:46  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Add NPIdentifier cache.
+
+2009-01-01 15:13  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime-impl.h, src/npruntime.c: Add NPClass::HasMethod
+	  cache so that to lower RPC round-trip.
+
+2009-01-01 13:54  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Forcibly destroy the Xt source on exit.
+
+2009-01-01 11:02  Gwenole Beauchesne <gb.public@free.fr>
+
+	* NEWS: Updates.
+
+2009-01-01 10:58  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Don't create Xt polling sources if we know the
+	  plug-in uses Gtk (XEMBED).
+
+2009-01-01 10:33  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Get rid of the extra 25ms timer. The Xt timers
+	  & input sources are now
+	  checked in the X events source ::prepare() function.
+
+2009-01-01 07:31  Gwenole Beauchesne <gb.public@free.fr>
 
 	* Makefile, NEWS, README, configure, src/cxxabi-compat.cpp,
 	  src/debug.c, src/debug.h, src/libxpcom.c, src/npruntime-impl.h,
@@ -17,85 +67,186 @@
 	  utils/getdeps.sh, utils/mkruntime.sh, utils/repackage.sh: Update
 	  copyright notices.
 
-2008-12-28 11:36  Gwenole Beauchesne <gb.public@free.fr>
+2008-12-29 15:14  Gwenole Beauchesne <gb.public@free.fr>
 
-	* NEWS, src/npw-malloc.c, src/npw-malloc.h, src/npw-viewer.c:
-	  Backport from trunk:
+	* src/npw-config.c: Fix upgrades from previous versions.
+
+2008-12-29 14:53  Gwenole Beauchesne <gb.public@free.fr>
+
+	* Makefile, nspluginwrapper.spec: Rename loader script to
+	  npviewer.sh.
+
+2008-12-29 14:52  Gwenole Beauchesne <gb.public@free.fr>
+
+	* Makefile, configure, src/npw-config.c, src/npw-wrapper.c,
+	  src/sysdeps.h: Make it possible to use alternate viewer paths
+	  with --viewer-paths configure option. By default,
+	  pkglibdir/%ARCH%/%OS% is used. If no viewer path includes an
+	  ARCH/OS expansion, then nspluginwrapper files are installed in a
+	  "flat" hierarchy. NPW_PluginInfo format is now extended to
+	  include the viewer_path[] too.
+
+2008-12-29 10:48  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.sh: Move down NPW_VIEWER_DIR, after
+	  TARGET_ARCH/TARGET_OS were normalised. Also fix uses of
+	  normalized ARCH/OS variables.
+
+2008-12-29 09:47  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.sh: Normalize ARCH/OS variables here too.
+
+2008-12-28 18:16  Gwenole Beauchesne <gb.public@free.fr>
+
+	* Makefile, src/npw-viewer.sh: Factor out install paths.
+
+2008-12-28 17:18  Gwenole Beauchesne <gb.public@free.fr>
+
+	* configure: Improve biarch-build check.
+
+2008-12-28 17:03  Gwenole Beauchesne <gb.public@free.fr>
+
+	* Makefile, configure, src/rpc.c: Normalize CPU and OS values for
+	  both hosts and targets. Cleanup a few internal configure option
+	  names. Rephrase --enable-generic.
+
+2008-12-28 11:25  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Make sure NPWindow::ws_info points to a unique
+	  location for the lifetime of the window. This fixes support for
+	  the VLC plugin that makes a local copy of NPWindow but doesn't
+	  bother about making an NPWindow::ws_info copy.
+
+2008-12-28 11:21  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-malloc.c, src/npw-malloc.h: Add NPW_MemAllocCopy() and
+	  NPW_MemClone() functions.
+
+2008-12-27 15:19  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Minor clean-ups.
+
+2008-12-27 14:56  Gwenole Beauchesne <gb.public@free.fr>
+
+	* configure: Enable main-thread checks by default for all builds
+	  from snapshots.
+
+2008-12-27 14:54  Gwenole Beauchesne <gb.public@free.fr>
+
+	* configure, src/npruntime.c, src/npw-viewer.c: Rework configure
+	  option. Use NPW_THREAD_CHECK=yes (or "1") at run-time.
+
+2008-12-27 14:45  Gwenole Beauchesne <gb.public@free.fr>
+
+	* configure, src/npruntime.c, src/npw-viewer.c: Convert the PID
+	  check to a main-thread check.
+
+2008-12-27 12:19  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-malloc.c: Simplify memory allocation code further.
+
+2008-12-27 12:07  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-malloc.c: Allow malloc-checks for the libc memory
+	  allocation hooks too. This also simplifies/clarifies the
+	  different memory allocation backends.
+
+2008-12-27 11:45  Gwenole Beauchesne <gb.public@free.fr>
+
+	* Makefile, configure, src/npw-malloc.c: Enable malloc-checks by
+	  default for all builds from snapshots.
+
+2008-12-27 11:16  Gwenole Beauchesne <gb.public@free.fr>
+
+	* configure, src/npw-malloc.c, src/npw-malloc.h: Add basic malloc
+	  check routines to detect possible buffer overflows or
+	  underflows. This is enabled at run-time with
+	  NPW_MALLOC_CHECK=yes (or "1").
+
+2008-12-26 23:31  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Fix NPN_GetStringIdentifiers() to free
+	  identifiers with NPW_MemFree().
+
+2008-12-26 23:24  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-player.c: Fix stream_new() to return NULL if an error
+	  occurred.
+
+2008-12-26 21:34  Gwenole Beauchesne <gb.public@free.fr>
+
+	* NEWS, nspluginwrapper.spec: Merge documentation updates from
+	  1.2-branch.
+
+2008-12-26 21:26  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npruntime.c: Use NPW_MemAlloc() instead of NPW_MemAlloc0()
+	  since all struct members are initialized manually.
+
+2008-12-26 21:24  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-malloc.c: Report an error instead of a debug-warning for
+	  NPW_MemFree()'ing a pointer that was not allocated with
+	  NPW_MemAlloc().
+
+2008-12-25 21:23  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/debug.h: Merge from 1.2-branch:
 	  
-	  Make sure NPWindow::ws_info points to a unique location for the
-	  lifetime of the window. This fixes support for the VLC plugin
-	  that makes a local copy of NPWindow but doesn't bother about
-	  making an NPWindow::ws_info copy.
+	  Fix npw_return_if_fail() definition in !DEBUG mode.
 
-2008-12-26 23:37  Gwenole Beauchesne <gb.public@free.fr>
+2008-12-25 21:22  Gwenole Beauchesne <gb.public@free.fr>
 
-	* NEWS: Updates with "hot" fixes.
-
-2008-12-26 23:33  Gwenole Beauchesne <gb.public@free.fr>
-
-	* src/npw-wrapper.c: Backport from trunk:
+	* src/npw-viewer.c: Merge from 1.2-branch:
 	  
-	  Fix NPN_GetStringIdentifiers() to free identifiers with
-	  NPW_MemFree().
-	* src/npw-player.c: Backport from trunk:
+	  Destroy the plugin window in NPP_Destroy(). NPAPI docs mention
+	  plugin shall not use graphics operations beyond that call. So,
+	  don't bother with broken plugins, we already have our own bugs
+	  to bother with...
+
+2008-12-25 21:21  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-rpc.h, src/npw-viewer.c, src/npw-wrapper.c: Revert RPC
+	  sync and silent X errors commits. They didn't fix anything in a
+	  useful way. IOW, don't bother fixing bugs that are not
+	  nspluginwrapper related and that could actually degrade its
+	  stability.
+
+2008-12-21 12:19  Gwenole Beauchesne <gb.public@free.fr>
+
+	* nspluginwrapper.spec, src/npw-wrapper.c: Bump release for
+	  development.
+
+2008-12-21 09:32  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-rpc.h, src/npw-viewer.c, src/npw-wrapper.c: Try to
+	  improve the RPC flush mechanism. Flash doesn't like "cancelled"
+	  NPN_GetURLNotify() with an NPERR_INVALID_INSTANCE_ERROR return.
+	  So, we try our best to honour that call prior to sending
+	  NPP_Destroy().
+
+2008-12-21 08:19  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-wrapper.c: Purge all incoming RPC prior to calling
+	  NPP_Destroy().
+
+2008-12-21 08:16  Gwenole Beauchesne <gb.public@free.fr>
+
+	* src/npw-viewer.c: Don't kill the application on X errors. That
+	  is, we ignore all X errors that could arise between the
+	  completion of NPP_Destroy() and plugin_instance_finalize(). This
+	  is not fully correct as other plugins can be created and then
+	  destroyed in the while.
 	  
-	  Fix stream_new() to return NULL if an error occurred.
-
-2008-12-26 13:42  Gwenole Beauchesne <gb.public@free.fr>
-
-	* nspluginwrapper.spec: Bump release for development.
-
-2008-12-25 21:43  Gwenole Beauchesne <gb.public@free.fr>
-
-	* nspluginwrapper.spec: Fix day-of-week.
-
-2008-12-25 21:40  Gwenole Beauchesne <gb.public@free.fr>
-
-	* NEWS, nspluginwrapper.spec: Updates for real 1.2.0 release.
-
-2008-12-25 21:37  Gwenole Beauchesne <gb.public@free.fr>
-
-	* ChangeLog, Makefile: Fix ChangeLog generation for the branch.
-
-2008-12-25 21:29  Gwenole Beauchesne <gb.public@free.fr>
-
-	* ChangeLog: Generated by svn2cl.
-
-2008-12-25 21:29  Gwenole Beauchesne <gb.public@free.fr>
-
-	* ChangeLog: Generated by svn2cl.
-
-2008-12-21 21:43  Gwenole Beauchesne <gb.public@free.fr>
-
-	* src/debug.h: Fix npw_return_if_fail() definition in !DEBUG mode.
-
-2008-12-21 14:02  Gwenole Beauchesne <gb.public@free.fr>
-
-	* src/npw-viewer.c: Destroy the plugin window in NPP_Destroy().
-	  NPAPI docs mention plugin shall not use graphics operations
-	  beyond that call. So, don't bother with broken plugins, we
-	  already have our own bugs to bother with...
-
-2008-12-21 12:14  Gwenole Beauchesne <gb.public@free.fr>
-
-	* .: Create nspluginwrapper-1.2-branch from rev 837.
+	  XXX: this is a hack to debug later because in the presence of
+	  Firefox 3.0 (i.e. neither 3.1b2 nor 2.x are affected, it seems),
+	  the toplevel window receives an "unexpected GDK_DESTROY from the
+	  outside". Native plugins often get that without nspluginwrapper
+	  too but the application is not killed either.
 
 2008-12-20 22:24  Gwenole Beauchesne <gb.public@free.fr>
 
-	* gwenole/projects/nspluginwrapper/trunk/ChangeLog: Generated by
-	  svn2cl.
-
-2008-12-20 22:22  Gwenole Beauchesne <gb.public@free.fr>
-
-	* gwenole/projects/nspluginwrapper/trunk/NEWS,
-	  gwenole/projects/nspluginwrapper/trunk/nspluginwrapper.spec:
-	  1.2.0.
-
-2008-12-20 21:32  Gwenole Beauchesne <gb.public@free.fr>
-
-	* gwenole/projects/nspluginwrapper/trunk/src/npw-config.c:
-	  Suppress error messages in non-verbose mode when exec()'ing
-	  npviewer.bin (Stanislav Brabec).
+	* ChangeLog: Generated by svn2cl.
 
 2008-12-20 22:22  Gwenole Beauchesne <gb.public@free.fr>
 

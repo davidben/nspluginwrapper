@@ -28,6 +28,8 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <errno.h>
+#include <pthread.h>
+#include <fcntl.h>
 
 #include <X11/X.h>
 #include <X11/Xlib.h>
@@ -58,11 +60,15 @@
 // Define to allow windowless plugins
 #define ALLOW_WINDOWLESS_PLUGINS 1
 
+// Define to use NPIdentifier cache
+#define USE_NPIDENTIFIER_CACHE 1
+#define NPIDENTIFIER_CACHE_SIZE 256
+
 // RPC global connections
 rpc_connection_t *g_rpc_connection attribute_hidden = NULL;
 
-// Viewer orignal pid - check against incorrect plugins
-static pid_t g_viewer_pid = 0;
+// Viewer main thread - make sure we call into the browser from the main thread
+static pthread_t g_main_thread = 0;
 
 // Instance state information about the plugin
 typedef struct _PluginInstance {
@@ -101,6 +107,8 @@ typedef struct _GtkData {
 
 // Prototypes
 static void destroy_window(PluginInstance *plugin);
+static int xt_source_create(void);
+static void xt_source_destroy(void);
 
 
 /* ====================================================================== */
@@ -162,16 +170,38 @@ static void plugin_instance_invalidate(PluginInstance *plugin)
   }
 }
 
-// Pid support routines
-static void pid_init(void)
+// Thread support routines
+static void thread_check_init(void)
 {
-  g_viewer_pid = getpid();
+  g_main_thread = pthread_self();
 }
 
-bool pid_check(void)
+#ifdef ENABLE_THREAD_CHECK
+static bool is_thread_check_enabled_1(void)
 {
-#if USE_PID_CHECK
-  return (g_viewer_pid == getpid());
+  const char *thread_check_str;
+  if ((thread_check_str =  getenv("NPW_THREAD_CHECK")) != NULL)
+    return ((strcmp(thread_check_str, "yes") == 0) ||
+			(strcmp(thread_check_str, "1") == 0));
+
+  /* enable main-thread checks by default for all builds from snapshots */
+  return NPW_SNAPSHOT > 0;
+}
+
+static inline bool is_thread_check_enabled(void)
+{
+  static int thread_check = -1;
+  if (thread_check < 0)
+    thread_check = is_thread_check_enabled_1();
+  return thread_check;
+}
+#endif
+
+bool thread_check(void)
+{
+#ifdef ENABLE_THREAD_CHECK
+  if (is_thread_check_enabled())
+	return (g_main_thread == pthread_self());
 #endif
   return true;
 }
@@ -180,8 +210,7 @@ bool pid_check(void)
 // XXX: use a pipe, this should be faster (avoids GSource creation and
 // explicit memory allocation)
 enum {
-  RPC_DELAYED_NPN_RELEASE_OBJECT = 1,
-  RPC_DELAYED_NPN_INVALIDATE_RECT,
+  RPC_DELAYED_NPN_RELEASE_OBJECT = 1
 };
 
 typedef struct _DelayedCall {
@@ -251,6 +280,200 @@ static gboolean delayed_calls_process_cb(gpointer user_data)
   return delayed_calls_process(NULL, FALSE);
 }
 
+// NPIdentifier cache
+static inline bool use_npidentifier_cache(void)
+{
+  return USE_NPIDENTIFIER_CACHE && npruntime_use_cache();
+}
+
+#if USE_NPIDENTIFIER_CACHE
+/* XXX: NPIdentifierInfo could become the NPIdentifier, thus avoiding
+   the global hash table, if there is a garbage collector. Otherwise,
+   we will be leaking memory since there is no function that kills an
+   NPIdentifier. */
+typedef struct _NPIdentifierInfo {
+  guint string_len; /* >0 implies 1+strlen(string), =0 implies an integer */
+  union {
+	gchar *string;
+	int32_t value;
+  } u;
+} NPIdentifierInfo;
+
+static GHashTable *g_npidentifier_cache = NULL;
+
+
+static inline NPIdentifierInfo *npidentifier_info_new(void)
+{
+  return NPW_MemNew(NPIdentifierInfo, 1);
+}
+
+static inline void npidentifier_info_destroy(NPIdentifierInfo *npi)
+{
+  if (G_UNLIKELY(npi == NULL))
+	return;
+  if (npi->string_len > 0) {
+	NPW_MemFree(npi->u.string);
+	npi->u.string = NULL;
+  }
+  NPW_MemFree(npi);
+}
+
+static inline void npidentifier_cache_create(void)
+{
+  g_npidentifier_cache =
+	g_hash_table_new_full(NULL, NULL, NULL,
+						  (GDestroyNotify)npidentifier_info_destroy);
+}
+
+static inline void npidentifier_cache_destroy(void)
+{
+  if (g_npidentifier_cache) {
+	g_hash_table_destroy(g_npidentifier_cache);
+	g_npidentifier_cache = NULL;
+  }
+}
+
+static void npidentifier_cache_invalidate(void)
+{
+#if defined(HAVE_G_HASH_TABLE_REMOVE_ALL) && !defined(BUILD_GENERIC)
+  if (g_npidentifier_cache)
+	g_hash_table_remove_all(g_npidentifier_cache);
+#else
+  npidentifier_cache_destroy();
+  npidentifier_cache_create();
+#endif
+}
+
+static void npidentifier_cache_reserve(int n_entries)
+{
+  if (G_UNLIKELY(g_npidentifier_cache == NULL))
+	npidentifier_cache_create();
+  if (g_hash_table_size(g_npidentifier_cache) + n_entries > NPIDENTIFIER_CACHE_SIZE)
+	npidentifier_cache_invalidate();
+}
+
+static inline NPIdentifierInfo *npidentifier_cache_lookup(NPIdentifier ident)
+{
+  if (G_UNLIKELY(g_npidentifier_cache == NULL))
+	return NULL;
+  return g_hash_table_lookup(g_npidentifier_cache, ident);
+}
+
+static void npidentifier_cache_add_int(NPIdentifier ident, int32_t value)
+{
+  if (G_UNLIKELY(g_npidentifier_cache == NULL))
+	return;
+  NPIdentifierInfo *npi = npidentifier_info_new();
+  if (G_UNLIKELY(npi == NULL))
+	return;
+  npi->string_len = 0;
+  npi->u.value = value;
+  g_hash_table_insert(g_npidentifier_cache, ident, npi);
+}
+
+typedef struct _NPIdentifierFindArgs {
+  NPIdentifierInfo info; /* in */
+  NPIdentifier ident;    /* out */
+} NPIdentifierFindArgs;
+
+static gboolean npidentifier_cache_find_info(gpointer key, gpointer value, gpointer user_data)
+{
+  NPIdentifier *ident = (NPIdentifier)key;
+  NPIdentifierInfo *npi = (NPIdentifierInfo *)value;
+  NPIdentifierFindArgs *args = (NPIdentifierFindArgs *)user_data;
+#if !defined(HAVE_G_HASH_TABLE_FIND) || defined(BUILD_GENERIC)
+  if (args->ident)
+	return FALSE;
+#endif
+  if (npi->string_len != args->info.string_len)
+	return FALSE;
+  if (args->info.string_len > 0) {		/* a string */
+	if (memcmp(args->info.u.string, npi->u.string, args->info.string_len) == 0) {
+	  args->ident = ident;
+	  return TRUE;
+	}
+  }
+  else {								/* an integer */
+	if (args->info.u.value == npi->u.value) {
+	  args->ident = ident;
+	  return TRUE;
+	}
+  }
+  return FALSE;
+}
+
+static inline bool npidentifier_cache_find(NPIdentifierFindArgs *args, NPIdentifier *pident)
+{
+  args->ident = NULL;
+#if defined(HAVE_G_HASH_TABLE_FIND) && !defined(BUILD_GENERIC)
+  if (!g_hash_table_find(g_npidentifier_cache, npidentifier_cache_find_info, args))
+	return false;
+#else
+  g_hash_table_foreach(g_npidentifier_cache, (GHFunc)npidentifier_cache_find_info, args);
+  if (args->ident == NULL)
+	return false;
+#endif
+
+  if (pident)
+	*pident = args->ident;
+  return true;
+}
+
+static inline bool npidentifier_cache_has_int(int32_t value, NPIdentifier *pident)
+{
+  if (G_UNLIKELY(g_npidentifier_cache == NULL))
+	return false;
+
+  NPIdentifierFindArgs args;
+  args.info.string_len = 0;
+  args.info.u.value = value;
+  return npidentifier_cache_find(&args, pident);
+}
+
+static inline int32_t npidentifier_cache_get_int(NPIdentifier ident)
+{
+  NPIdentifierInfo *npi = npidentifier_cache_lookup(ident);
+  if (G_UNLIKELY(npi == NULL || npi->string_len > 0))
+	return 0;
+  return npi->u.value;
+}
+
+static void npidentifier_cache_add_string(NPIdentifier ident, const gchar *str)
+{
+  if (G_UNLIKELY(g_npidentifier_cache == NULL))
+	return;
+  NPIdentifierInfo *npi = npidentifier_info_new();
+  if (G_UNLIKELY(npi == NULL))
+	return;
+  npi->string_len = strlen(str) + 1;
+  if ((npi->u.string = NPW_MemAlloc(npi->string_len)) == NULL) {
+	npidentifier_info_destroy(npi);
+	return;
+  }
+  memcpy(npi->u.string, str, npi->string_len);
+  g_hash_table_insert(g_npidentifier_cache, ident, npi);
+}
+
+static inline bool npidentifier_cache_has_string(const gchar *str, NPIdentifier *pident)
+{
+  if (G_UNLIKELY(g_npidentifier_cache == NULL))
+	return false;
+
+  NPIdentifierFindArgs args;
+  args.info.string_len = strlen(str) + 1;
+  args.info.u.string = (gchar *)str;
+  return npidentifier_cache_find(&args, pident);
+}
+
+static inline NPUTF8 *npidentifier_cache_get_string_copy(NPIdentifier ident)
+{
+  NPIdentifierInfo *npi = npidentifier_cache_lookup(ident);
+  if (G_UNLIKELY(npi == NULL || npi->string_len == 0))
+	return NULL;
+  return NPW_MemAllocCopy(npi->string_len, npi->u.string);
+}
+#endif
+
 
 /* ====================================================================== */
 /* === X Toolkit glue                                                 === */
@@ -301,6 +524,57 @@ typedef struct _CorePart {
 typedef struct _WidgetRec {
     CorePart    core;
 } WidgetRec, CoreRec;
+
+typedef struct _TimerEventRec {
+    struct timeval        te_timer_value;
+    struct _TimerEventRec *te_next;
+    XtTimerCallbackProc   te_proc;
+    XtAppContext          app;
+    XtPointer             te_closure;
+} TimerEventRec;
+
+typedef struct _InputEvent {
+    XtInputCallbackProc   ie_proc;
+    XtPointer             ie_closure;
+    struct _InputEvent    *ie_next;
+    struct _InputEvent    *ie_oq;
+    XtAppContext          app;
+    int                   ie_source;
+    XtInputMask           ie_condition;
+} InputEvent;
+
+typedef struct _SignalEventRec {
+    XtSignalCallbackProc  se_proc;
+    XtPointer             se_closure;
+    struct _SignalEventRec *se_next;
+    XtAppContext          app;
+    Boolean               se_notice;
+} SignalEventRec;
+
+struct _XtAppStruct {
+    XtAppContext next;          /* link to next app in process context */
+    void *process;              /* back pointer to our process context */
+    void *destroy_callbacks;
+    Display **list;
+    TimerEventRec *timerQueue;
+    void *workQueue;
+    InputEvent **input_list;
+    InputEvent *outstandingQueue;
+    SignalEventRec *signalQueue;
+    XrmDatabase errorDB;
+    XtErrorMsgHandler errorMsgHandler, warningMsgHandler;
+    XtErrorHandler errorHandler, warningHandler;
+    struct _ActionListRec *action_table;
+    void *converterTable;
+    unsigned long selectionTimeout;
+    char  __maxed__nfds[3*sizeof(fd_set)+4];
+    short __maybe__count;       /* num of assigned entries in list */
+    short __maybe__max;         /* allocate size of list */
+    short __maybe__last;
+    short __maybe__input_count;
+    short __maybe__input_max;   /* elts input_list init'd with */
+    /* ... don't care about other members */
+};
 
 extern void XtResizeWidget(
     Widget              /* widget */,
@@ -780,8 +1054,8 @@ invoke_NPN_GetURL(PluginInstance *plugin, const char *url, const char *target)
 static NPError
 g_NPN_GetURL(NPP instance, const char *url, const char *target)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_GetURL called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_GetURL not called from the main thread\n");
 	return NPERR_INVALID_INSTANCE_ERROR;
   }
 
@@ -834,8 +1108,8 @@ invoke_NPN_GetURLNotify(PluginInstance *plugin, const char *url, const char *tar
 static NPError
 g_NPN_GetURLNotify(NPP instance, const char *url, const char *target, void *notifyData)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_GetURLNotify called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_GetURLNotify not called from the main thread\n");
 	return NPERR_INVALID_INSTANCE_ERROR;
   }
 	
@@ -933,8 +1207,8 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 {
   D(bug("NPN_GetValue instance=%p, variable=%d [%s]\n", instance, variable, string_of_NPNVariable(variable)));
 
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_GetValue called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_GetValue not called from the main thread\n");
 	return NPERR_INVALID_INSTANCE_ERROR;
   }
 
@@ -1038,8 +1312,8 @@ invoke_NPN_InvalidateRect(PluginInstance *plugin, NPRect *invalidRect)
 static void
 g_NPN_InvalidateRect(NPP instance, NPRect *invalidRect)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_InvalidateRect called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_InvalidateRect not called from the main thread\n");
 	return;
   }
 
@@ -1132,8 +1406,8 @@ invoke_NPN_PostURL(PluginInstance *plugin, const char *url, const char *target, 
 static NPError
 g_NPN_PostURL(NPP instance, const char *url, const char *target, uint32 len, const char *buf, NPBool file)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_PostURL called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_PostURL not called from the main thread\n");
 	return NPERR_INVALID_INSTANCE_ERROR;
   }
 
@@ -1188,8 +1462,8 @@ invoke_NPN_PostURLNotify(PluginInstance *plugin, const char *url, const char *ta
 static NPError
 g_NPN_PostURLNotify(NPP instance, const char *url, const char *target, uint32 len, const char *buf, NPBool file, void *notifyData)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_PostURLNotify called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_PostURLNotify not called from the main thread\n");
 	return NPERR_INVALID_INSTANCE_ERROR;
   }
 	
@@ -1267,8 +1541,8 @@ invoke_NPN_RequestRead(NPStream *stream, NPByteRange *rangeList)
 static NPError
 g_NPN_RequestRead(NPStream *stream, NPByteRange *rangeList)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_RequestRead called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_RequestRead not called from the main thread\n");
 	return NPERR_INVALID_INSTANCE_ERROR;
   }
 
@@ -1320,8 +1594,8 @@ invoke_NPN_SetValue(PluginInstance *plugin, NPPVariable variable, void *value)
 static NPError
 g_NPN_SetValue(NPP instance, NPPVariable variable, void *value)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_SetValue called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_SetValue not called from the main thread\n");
 	return NPERR_INVALID_INSTANCE_ERROR;
   }
 
@@ -1368,8 +1642,8 @@ invoke_NPN_Status(PluginInstance *plugin, const char *message)
 static void
 g_NPN_Status(NPP instance, const char *message)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_Status called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_Status not called from the main thread\n");
 	return;
   }
 
@@ -1415,8 +1689,8 @@ invoke_NPN_UserAgent(void)
 static const char *
 g_NPN_UserAgent(NPP instance)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_UserAgent called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_UserAgent not called from the main thread\n");
 	return NULL;
   }
 
@@ -1505,8 +1779,8 @@ invoke_NPN_NewStream(PluginInstance *plugin, NPMIMEType type, const char *target
 static NPError
 g_NPN_NewStream(NPP instance, NPMIMEType type, const char *target, NPStream **stream)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_NewStream called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_NewStream not called from the main thread\n");
 	return NPERR_INVALID_INSTANCE_ERROR;
   }
 
@@ -1564,8 +1838,8 @@ invoke_NPN_DestroyStream(PluginInstance *plugin, NPStream *stream, NPError reaso
 static NPError
 g_NPN_DestroyStream(NPP instance, NPStream *stream, NPError reason)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_DestroyStream called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_DestroyStream not called from the main thread\n");
 	return NPERR_INVALID_INSTANCE_ERROR;
   }
   
@@ -1634,8 +1908,8 @@ invoke_NPN_Write(PluginInstance *plugin, NPStream *stream, int32 len, void *buf)
 static int32
 g_NPN_Write(NPP instance, NPStream *stream, int32 len, void *buf)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_Write called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_Write not called from the main thread\n");
 	return -1;
   }
   
@@ -1683,8 +1957,8 @@ invoke_NPN_PushPopupsEnabledState(PluginInstance *plugin, NPBool enabled)
 static void
 g_NPN_PushPopupsEnabledState(NPP instance, NPBool enabled)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_PushPopupsEnabledState called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_PushPopupsEnabledState not called from the main thread\n");
 	return;
   }
 
@@ -1727,8 +2001,8 @@ invoke_NPN_PopPopupsEnabledState(PluginInstance *plugin)
 static void
 g_NPN_PopPopupsEnabledState(NPP instance)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_PophPopupsEnabledState called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_PophPopupsEnabledState not called from the main thread\n");
 	return;
   }
 
@@ -1783,8 +2057,8 @@ invoke_NPN_CreateObject(PluginInstance *plugin)
 static NPObject *
 g_NPN_CreateObject(NPP instance, NPClass *class)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_CreateObject called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_CreateObject not called from the main thread\n");
 	return NULL;
   }
   
@@ -1839,8 +2113,8 @@ invoke_NPN_RetainObject(NPObject *npobj)
 static NPObject *
 g_NPN_RetainObject(NPObject *npobj)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_RetainObject called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_RetainObject not called from the main thread\n");
 	return NULL;
   }
 	
@@ -1902,8 +2176,8 @@ g_NPN_ReleaseObject_Delayed(NPObject *npobj)
 static void
 g_NPN_ReleaseObject(NPObject *npobj)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_ReleaseObject called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_ReleaseObject not called from the main thread\n");
 	return;
   }
 	
@@ -1958,8 +2232,8 @@ static bool
 g_NPN_Invoke(NPP instance, NPObject *npobj, NPIdentifier methodName,
 			 const NPVariant *args, uint32_t argCount, NPVariant *result)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_Invoke called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_Invoke not called from the main thread\n");
 	return false;
   }
 
@@ -2021,8 +2295,8 @@ static bool
 g_NPN_InvokeDefault(NPP instance, NPObject *npobj,
 					const NPVariant *args, uint32_t argCount, NPVariant *result)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_InvokeDefault called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_InvokeDefault not called from the main thread\n");
 	return false;
   }
 
@@ -2082,8 +2356,8 @@ invoke_NPN_Evaluate(PluginInstance *plugin, NPObject *npobj, NPString *script, N
 static bool
 g_NPN_Evaluate(NPP instance, NPObject *npobj, NPString *script, NPVariant *result)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_Evaluate called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_Evaluate not called from the main thread\n");
 	return false;
   }
 
@@ -2147,8 +2421,8 @@ static bool
 g_NPN_GetProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName,
 				  NPVariant *result)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_GetProperty called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_GetProperty not called from the main thread\n");
 	return false;
   }
 
@@ -2209,8 +2483,8 @@ static bool
 g_NPN_SetProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName,
 				  const NPVariant *value)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_SetProperty called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_SetProperty not called from the main thread\n");
 	return false;
   }
 
@@ -2266,8 +2540,8 @@ invoke_NPN_RemoveProperty(PluginInstance *plugin, NPObject *npobj, NPIdentifier 
 static bool
 g_NPN_RemoveProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_RemoveProperty called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_RemoveProperty not called from the main thread\n");
 	return false;
   }
 
@@ -2323,8 +2597,8 @@ invoke_NPN_HasProperty(PluginInstance *plugin, NPObject *npobj, NPIdentifier pro
 static bool
 g_NPN_HasProperty(NPP instance, NPObject *npobj, NPIdentifier propertyName)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_HasProperty called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_HasProperty not called from the main thread\n");
 	return false;
   }
 
@@ -2380,8 +2654,8 @@ invoke_NPN_HasMethod(PluginInstance *plugin, NPObject *npobj, NPIdentifier metho
 static bool
 g_NPN_HasMethod(NPP instance, NPObject *npobj, NPIdentifier methodName)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_HasMethod called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_HasMethod not called from the main thread\n");
 	return false;
   }
 
@@ -2431,8 +2705,8 @@ invoke_NPN_SetException(NPObject *npobj, const NPUTF8 *message)
 static void
 g_NPN_SetException(NPObject *npobj, const NPUTF8 *message)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_SetException called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_SetException not called from the main thread\n");
 	return;
   }
 
@@ -2480,10 +2754,26 @@ invoke_NPN_GetStringIdentifier(const NPUTF8 *name)
 }
 
 static NPIdentifier
+cached_NPN_GetStringIdentifier(const NPUTF8 *name)
+{
+  NPIdentifier ident;
+  if (!use_npidentifier_cache())
+	ident = invoke_NPN_GetStringIdentifier(name);
+#if USE_NPIDENTIFIER_CACHE
+  else if (!npidentifier_cache_has_string(name, &ident)) {
+	ident = invoke_NPN_GetStringIdentifier(name);
+	npidentifier_cache_reserve(1);
+	npidentifier_cache_add_string(ident, name);
+  }
+#endif
+  return ident;
+}
+
+static NPIdentifier
 g_NPN_GetStringIdentifier(const NPUTF8 *name)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_GetStringIdentifier called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_GetStringIdentifier not called from the main thread\n");
 	return NULL;
   }
 
@@ -2491,7 +2781,7 @@ g_NPN_GetStringIdentifier(const NPUTF8 *name)
 	return NULL;
 
   D(bugiI("NPN_GetStringIdentifier name='%s'\n", name));
-  NPIdentifier ret = invoke_NPN_GetStringIdentifier(name);
+  NPIdentifier ret = cached_NPN_GetStringIdentifier(name);
   D(bugiD("NPN_GetStringIdentifier return: %p\n", ret));
   return ret;
 }
@@ -2536,10 +2826,29 @@ invoke_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIden
 }
 
 static void
+cached_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIdentifier *identifiers)
+{
+  /* XXX: could be optimized further */
+  invoke_NPN_GetStringIdentifiers(names, nameCount, identifiers);
+
+#if USE_NPIDENTIFIER_CACHE
+  if (use_npidentifier_cache()) {
+	for (int i = 0; i < nameCount; i++) {
+	  NPIdentifier ident = identifiers[i];
+	  if (npidentifier_cache_lookup(ident) == NULL) {
+		npidentifier_cache_reserve(1);
+		npidentifier_cache_add_string(ident, names[i]);
+	  }
+	}
+  }
+#endif
+}
+
+static void
 g_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIdentifier *identifiers)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_GetStringIdentifiers called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_GetStringIdentifiers not called from the main thread\n");
 	return;
   }
 
@@ -2550,7 +2859,7 @@ g_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIdentifie
 	return;
 
   D(bugiI("NPN_GetStringIdentifiers names=%p\n", names));
-  invoke_NPN_GetStringIdentifiers(names, nameCount, identifiers);
+  cached_NPN_GetStringIdentifiers(names, nameCount, identifiers);
   D(bugiD("NPN_GetStringIdentifiers done\n"));
 }
 
@@ -2584,15 +2893,31 @@ invoke_NPN_GetIntIdentifier(int32_t intid)
 }
 
 static NPIdentifier
+cached_NPN_GetIntIdentifier(int32_t intid)
+{
+  NPIdentifier ident;
+  if (!use_npidentifier_cache())
+	ident = invoke_NPN_GetIntIdentifier(intid);
+#if USE_NPIDENTIFIER_CACHE
+  else if (!npidentifier_cache_has_int(intid, &ident)) {
+	ident = invoke_NPN_GetIntIdentifier(intid);
+	npidentifier_cache_reserve(1);
+	npidentifier_cache_add_int(ident, intid);
+  }
+#endif
+  return ident;
+}
+
+static NPIdentifier
 g_NPN_GetIntIdentifier(int32_t intid)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_GetIntIdentifier called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_GetIntIdentifier not called from the main thread\n");
 	return NULL;
   }
 
   D(bugiI("NPN_GetIntIdentifier intid=%d\n", intid));
-  NPIdentifier ret = invoke_NPN_GetIntIdentifier(intid);
+  NPIdentifier ret = cached_NPN_GetIntIdentifier(intid);
   D(bugiD("NPN_GetIntIdentifier return: %p\n", ret));
   return ret;
 }
@@ -2627,10 +2952,25 @@ invoke_NPN_IdentifierIsString(NPIdentifier identifier)
 }
 
 static bool
+cached_NPN_IdentifierIsString(NPIdentifier ident)
+{
+#if USE_NPIDENTIFIER_CACHE
+  if (use_npidentifier_cache()) {
+	NPIdentifierInfo *npi = npidentifier_cache_lookup(ident);
+	if (npi)
+	  return npi->string_len > 0;
+  }
+#endif
+  /* cache update is postponed to actual NPN_UTF8FromIdentifier() or
+	 NPN_IntFromIdentifier() */
+  return invoke_NPN_IdentifierIsString(ident);
+}
+
+static bool
 g_NPN_IdentifierIsString(NPIdentifier identifier)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_IdentifierIsString called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_IdentifierIsString not called from the main thread\n");
 	return false;
   }
   
@@ -2670,15 +3010,34 @@ invoke_NPN_UTF8FromIdentifier(NPIdentifier identifier)
 }
 
 static NPUTF8 *
+cached_NPN_UTF8FromIdentifier(NPIdentifier identifier)
+{
+  NPUTF8 *str;
+  if (!use_npidentifier_cache())
+	str = invoke_NPN_UTF8FromIdentifier(identifier);
+  else {
+#if USE_NPIDENTIFIER_CACHE
+	str = npidentifier_cache_get_string_copy(identifier);
+	if (str == NULL) {
+	  str = invoke_NPN_UTF8FromIdentifier(identifier);
+	  npidentifier_cache_reserve(1);
+	  npidentifier_cache_add_string(identifier, str);
+	}
+#endif
+  }
+  return str;
+}
+
+static NPUTF8 *
 g_NPN_UTF8FromIdentifier(NPIdentifier identifier)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_UTF8FromIdentifier called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_UTF8FromIdentifier not called from the main thread\n");
 	return NULL;
   }
 
   D(bugiI("NPN_UTF8FromIdentifier identifier=%p\n", identifier));
-  NPUTF8 *ret = invoke_NPN_UTF8FromIdentifier(identifier);
+  NPUTF8 *ret = cached_NPN_UTF8FromIdentifier(identifier);
   D(bugiD("NPN_UTF8FromIdentifier return: '%s'\n", ret));
   return ret;
 }
@@ -2714,15 +3073,38 @@ invoke_NPN_IntFromIdentifier(NPIdentifier identifier)
 }
 
 static int32_t
+cached_NPN_IntFromIdentifier(NPIdentifier identifier)
+{
+  int32_t value;
+  if (!use_npidentifier_cache())
+	value = invoke_NPN_IntFromIdentifier(identifier);
+  else {
+#if USE_NPIDENTIFIER_CACHE
+	NPIdentifierInfo *npi = npidentifier_cache_lookup(identifier);
+	if (npi) {
+	  assert(npi->string_len == 0);
+	  value = npi->u.value;
+	}
+	else {
+	  value = invoke_NPN_IntFromIdentifier(identifier);
+	  npidentifier_cache_reserve(1);
+	  npidentifier_cache_add_int(identifier, value);
+	}
+#endif
+  }
+  return value;
+}
+
+static int32_t
 g_NPN_IntFromIdentifier(NPIdentifier identifier)
 {
-  if (!pid_check()) {
-	npw_printf("WARNING: NPN_IntFromIdentifier called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_IntFromIdentifier not called from the main thread\n");
 	return 0;
   }
   
   D(bugiI("NPN_IntFromIdentifier identifier=%p\n", identifier));
-  int32_t ret = invoke_NPN_IntFromIdentifier(identifier);
+  int32_t ret = cached_NPN_IntFromIdentifier(identifier);
   D(bugiD("NPN_IntFromIdentifier return: %d\n", ret));
   return ret;
 }
@@ -3006,6 +3388,13 @@ static NPError g_NPP_New(NPMIMEType plugin_type, uint32_t instance_id,
 		plugin->use_xembed = supports_XEmbed && needs_XEmbed;
 	}
   }
+
+  // assume Gtk plugin (no Xt event loop) if XEMBED is used
+  if (!plugin->use_xembed) {
+	if (xt_source_create() < 0)
+	  return NPERR_GENERIC_ERROR;
+  }
+
   return ret;
 }
 
@@ -3074,6 +3463,9 @@ static NPError g_NPP_Destroy(NPP instance, NPSavedData **sdata)
   D(bugiI("NPP_Destroy instance=%p\n", instance));
   NPError ret = plugin_funcs.destroy(instance, sdata);
   D(bugiD("NPP_Destroy return: %d [%s]\n", ret, string_of_NPError(ret)));
+
+  if (!plugin->use_xembed)
+	xt_source_destroy();
 
   npw_plugin_instance_invalidate(plugin);
   npw_plugin_instance_unref(plugin);
@@ -3723,19 +4115,205 @@ typedef gboolean (*GSourceDispatchFunc)(GSource *, GSourceFunc, gpointer);
 typedef void (*GSourceFinalizeFunc)(GSource *);
 
 // Xt events
+static GSource *xt_source = NULL;
+static int xt_source_count = 0;
 static GPollFD xt_event_poll_fd;
+static const int XT_DEFAULT_TIMEOUT = 25;
+static const int XT_MAX_DISPATCH_EVENTS = 10;
+
+static void xt_dummy_timeout_cb(XtPointer closure, XtIntervalId *id)
+{
+  /* dummy function, never called */
+  npw_printf("ERROR: xt_dummy_timeout_cb() should never be called\n");
+}
+
+static int xt_has_compatible_appcontext_timerQueue(void)
+{
+  int is_compatible;
+  XtIntervalId id;
+  TimerEventRec *tq, *tq_probe;
+
+  /* Try to determine where is the pointer to the next allocated
+	 TimerEventRec.
+
+	 Besides, XtAppAddTimeOut() shall not have been called already
+	 because we want to be sure any (libXt internal) "free"
+	 TimerEventRec pointer cache is empty. */
+  tq = XtNew(TimerEventRec);
+  XtFree((char *)tq);
+  tq_probe = XtNew(TimerEventRec);
+  XtFree((char *)tq_probe);
+  if (tq != tq_probe)
+	return 0;
+
+  id = XtAppAddTimeOut(x_app_context, 0,
+					   xt_dummy_timeout_cb,
+					   GUINT_TO_POINTER(0xdeadbeef));
+
+  tq = x_app_context->timerQueue;
+  is_compatible = tq == tq_probe
+	&& tq->app == x_app_context
+	&& tq->te_proc == xt_dummy_timeout_cb
+	&& tq->te_closure == GUINT_TO_POINTER(0xdeadbeef)
+	;
+
+  XtRemoveTimeOut(id);
+  return is_compatible;
+}
+
+static void xt_dummy_input_cb(XtPointer closure, int *source, XtInputId *id)
+{
+  /* dummy function, never called */
+  npw_printf("ERROR: xt_dummy_input_cb() should never be called\n");
+}
+
+static inline int get_appcontext_input_count_at(int offset)
+{
+  return *((short *)((char *)x_app_context + offset));
+}
+
+static inline int add_appcontext_input(int fd, int n)
+{
+  return XtAppAddInput(x_app_context,
+					   fd,
+					   GUINT_TO_POINTER(XtInputWriteMask),
+					   xt_dummy_input_cb,
+					   GUINT_TO_POINTER(0xdead0000));
+}
+
+static int get_appcontext_input_count_offset(void)
+{
+#define low_offset		offsetof(struct _XtAppStruct, __maxed__nfds)
+#define high_offset		offsetof(struct _XtAppStruct, __maybe__input_max)
+#define n_offsets_max	(high_offset - low_offset)/2
+  int i, ofs, n_offsets = 0;
+  int offsets[n_offsets_max] = { 0, };
+
+#define n_inputs_max	4 /* number of refinements/input sources */
+  int fd, id, n_inputs = 0;
+  struct { int fd, id; } inputs[n_inputs_max] = { 0, };
+
+  if ((fd = open("/dev/null", O_WRONLY)) < 0)
+	return 0;
+  if ((id = add_appcontext_input(fd, 0)) < 0) {
+	close(fd);
+	return 0;
+  }
+  inputs[n_inputs].fd = fd;
+  inputs[n_inputs].id = id;
+  n_inputs++;
+
+  for (ofs = low_offset; ofs < high_offset; ofs += 2) {
+	if (get_appcontext_input_count_at(ofs) == 1)
+	  offsets[n_offsets++] = ofs;
+  }
+
+  while (n_inputs < n_inputs_max) {
+	if ((fd = open("/dev/null", O_WRONLY)) < 0)
+	  break;
+	if ((id = add_appcontext_input(fd, n_inputs)) < 0) {
+	  close(fd);
+	  break;
+	}
+	inputs[n_inputs].fd = fd;
+	inputs[n_inputs].id = id;
+	n_inputs++;
+
+	int n = 0;
+	for (i = 0; i < n_offsets; i++) {
+	  if (get_appcontext_input_count_at(offsets[i]) == n_inputs)
+		offsets[n++] = offsets[i];
+	}
+	for (i = n; i < n_offsets; i++)
+	  offsets[i] = 0;
+	n_offsets = n;
+  }
+
+  for (i = 0; i < n_inputs; i++) {
+	XtRemoveInput(inputs[i].id);
+	close(inputs[i].fd);
+  }
+
+  if (n_offsets == 1)
+	return offsets[0];
+
+#undef n_fds_max
+#undef n_offsets_max
+#undef high_offset
+#undef low_offset
+  return 0;
+}
+
+static int get_appcontext_input_count(void)
+{
+  static int input_count_offset = -1;
+  if (input_count_offset < 0)
+	input_count_offset = get_appcontext_input_count_offset();
+  if (input_count_offset == 0)
+	return 1; /* fake we have input to trigger timeout */
+  return get_appcontext_input_count_at(input_count_offset);
+}
+
+static int xt_has_compatible_appcontext(void)
+{
+  return xt_has_compatible_appcontext_timerQueue();
+}
+
+static int xt_get_next_timeout(GSource *source)
+{
+  static int has_compatible_appcontext = -1;
+  if (has_compatible_appcontext < 0) {
+	if ((has_compatible_appcontext = xt_has_compatible_appcontext()) == 0)
+	  npw_printf("WARNING: xt_get_next_timeout() is not optimizable\n");
+  }
+  int timeout = XT_DEFAULT_TIMEOUT;
+  if (has_compatible_appcontext) {
+	int input_timeout, timer_timeout;
+	/* Check there is any input source to process */
+	if (get_appcontext_input_count() > 0)
+	  input_timeout = XT_DEFAULT_TIMEOUT;
+	else
+	  input_timeout = -1;
+	/* Check there is any timer to process */
+	if (x_app_context->timerQueue == NULL)
+	  timer_timeout = -1;
+	else {
+	  /* Determine delay to next timeout. Zero means timeout already expired */
+	  struct timeval *next = &x_app_context->timerQueue->te_timer_value;
+	  GTimeVal now;
+	  int64_t diff;
+	  g_source_get_current_time(source, &now);
+	  if ((diff = (int64_t)next->tv_sec - (int64_t)now.tv_sec) < 0)
+		timer_timeout = 0;
+	  else if ((diff = diff*1000 + ((int64_t)next->tv_usec - (int64_t)now.tv_usec)/1000) <= 0)
+		timer_timeout = 0;
+	  else
+		timer_timeout = diff;
+	}
+	if (input_timeout < 0)
+	  timeout = timer_timeout;
+	else if (timer_timeout < 0)
+	  timeout = input_timeout;
+	else
+	  timeout = MIN(input_timeout, timer_timeout);
+  }
+  return timeout;
+}
 
 static gboolean xt_event_prepare(GSource *source, gint *timeout)
 {
   int mask = XtAppPending(x_app_context);
-  return mask & XtIMXEvent;
+  if (mask)
+	return TRUE;
+  /* XXX: create new GPollFD for input sources? */
+  return (*timeout = xt_get_next_timeout(source)) == 0;
 }
 
 static gboolean xt_event_check(GSource *source)
 {
   if (xt_event_poll_fd.revents & G_IO_IN) {
 	int mask = XtAppPending(x_app_context);
-	if (mask & XtIMXEvent)
+	if (mask)
 	  return TRUE;
   }
   return FALSE;
@@ -3744,11 +4322,11 @@ static gboolean xt_event_check(GSource *source)
 static gboolean xt_event_dispatch(GSource *source, GSourceFunc callback, gpointer user_data)
 {
   int i;
-  for (i = 0; i < 5; i++) {
+  for (i = 0; i < XT_MAX_DISPATCH_EVENTS; i++) {
 	int mask = XtAppPending(x_app_context);
-	if ((mask & XtIMXEvent) == 0)
+	if (mask == 0)
 	  break;
-	XtAppProcessEvent(x_app_context, XtIMXEvent);
+	XtAppProcessEvent(x_app_context, XtIMAll);
   }
   return TRUE;
 }
@@ -3762,15 +4340,31 @@ static GSourceFuncs xt_event_funcs = {
   (GSourceDummyMarshal)NULL
 };
 
-static gboolean xt_event_polling_timer_callback(gpointer user_data)
+static int xt_source_create(void)
 {
-  int i;
-  for (i = 0; i < 5; i++) {
-	if ((XtAppPending(x_app_context) & (XtIMAll & ~XtIMXEvent)) == 0)
-	  break;
-	XtAppProcessEvent(x_app_context, XtIMAll & ~XtIMXEvent);
+  if (++xt_source_count > 1 && xt_source != NULL)
+	return 0;
+
+  if ((xt_source = g_source_new(&xt_event_funcs, sizeof(GSource))) == NULL) {
+	npw_printf("ERROR: failed to initialize Xt events listener\n");
+	return -1;
   }
-  return TRUE;
+  g_source_set_priority(xt_source, GDK_PRIORITY_EVENTS);
+  g_source_set_can_recurse(xt_source, TRUE);
+  g_source_attach(xt_source, NULL);
+  xt_event_poll_fd.fd = ConnectionNumber(x_display);
+  xt_event_poll_fd.events = G_IO_IN;
+  xt_event_poll_fd.revents = 0;
+  g_source_add_poll(xt_source, &xt_event_poll_fd);
+  return 0;
+}
+
+static void xt_source_destroy(void)
+{
+  if (--xt_source_count < 1 && xt_source) {
+	g_source_destroy(xt_source);
+	xt_source = NULL;
+  }
 }
 
 // RPC events
@@ -3825,10 +4419,11 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	return 1;
   }
   D(bug("  Plugin connection: %s\n", connection_path));
+  D(bug("  Plugin viewer pid: %d\n", getpid()));
 
-  pid_init();
-  D(bug("  Plugin viewer pid: %d\n", g_viewer_pid));
-  
+  thread_check_init();
+  D(bug("  Plugin main thread: %p\n", g_main_thread));
+
   // Cleanup environment, the program may fork/exec a native shell
   // script and having 32-bit libraries in LD_PRELOAD is not right,
   // though not a fatal error
@@ -3886,24 +4481,6 @@ static int do_main(int argc, char **argv, const char *connection_path)
 
   id_init();
 
-  // Initialize Xt events listener (integrate X events into GTK events loop)
-  GSource *xt_source = g_source_new(&xt_event_funcs, sizeof(GSource));
-  if (xt_source == NULL) {
-	npw_printf("ERROR: failed to initialize Xt events listener\n");
-	return 1;
-  }
-  g_source_set_priority(xt_source, GDK_PRIORITY_EVENTS);
-  g_source_set_can_recurse(xt_source, TRUE);
-  g_source_attach(xt_source, NULL);
-  xt_event_poll_fd.fd = ConnectionNumber(x_display);
-  xt_event_poll_fd.events = G_IO_IN;
-  xt_event_poll_fd.revents = 0;
-  g_source_add_poll(xt_source, &xt_event_poll_fd);
-
-  gint xt_polling_timer_id = g_timeout_add(25,
-										   xt_event_polling_timer_callback,
-										   NULL);
-
   // Initialize RPC events listener
   GSource *rpc_source = g_source_new(&rpc_event_funcs, sizeof(GSource));
   if (rpc_source == NULL) {
@@ -3924,9 +4501,13 @@ static int do_main(int argc, char **argv, const char *connection_path)
   gtk_main();
   D(bug("--- EXIT ---\n"));
 
-  g_source_remove(xt_polling_timer_id);
+#if USE_NPIDENTIFIER_CACHE
+  npidentifier_cache_destroy();
+#endif
+
   g_source_destroy(rpc_source);
-  g_source_destroy(xt_source);
+  if (xt_source)
+	g_source_destroy(xt_source);
 
   if (g_user_agent)
 	free(g_user_agent);

@@ -2642,6 +2642,7 @@ extern "C" {
     extern GHashTable *g_hash_table_new(GHashFunc, GEqualFunc);
     extern const gchar *g_dir_read_name(GDir *);
     extern gboolean g_hash_table_remove(GHashTable *, gconstpointer);
+    extern void g_hash_table_remove_all(GHashTable *);
     extern gchar *g_utf8_strdown(const gchar *, gssize);
     extern GIOCondition g_io_channel_get_buffer_condition(GIOChannel *);
     extern GSource *g_child_watch_source_new(GPid);

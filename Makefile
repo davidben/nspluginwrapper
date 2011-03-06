@@ -23,10 +23,10 @@ endif
 ifeq ($(SNAPSHOT),)
 SNAPSHOT := $(shell echo "$(RELEASE)" | grep "^0")
 ifeq ($(SNAPSHOT),$(RELEASE))
-SNAPSHOT := 1
+SNAPSHOT := 2
 endif
 endif
-ifeq ($(SNAPSHOT),1)
+ifeq ($(SNAPSHOT),2)
 VERSION_SUFFIX = -$(SVNDATE)
 endif
 
@@ -77,7 +77,7 @@ X_LDFLAGS += -Wl,--rpath,$(x11prefix)/$(lib64)
 endif
 
 ARCH_32 = $(ARCH)
-ifeq ($(biarch), yes)
+ifeq ($(build_biarch), yes)
 ARCH_32 = $(TARGET_ARCH)
 LSB_LIBS = $(LSB_OBJ_DIR)/libc.so $(LSB_OBJ_DIR)/libgcc_s_32.so
 LSB_LIBS += $(LSB_CORE_STUBS:%=$(LSB_OBJ_DIR)/%.so)
@@ -114,7 +114,7 @@ npviewer_PROGRAM = npviewer.bin
 npviewer_RAWSRCS = npw-viewer.c npw-common.c npw-malloc.c npw-rpc.c rpc.c debug.c utils.c npruntime.c
 npviewer_SOURCES = $(npviewer_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 npviewer_OBJECTS = $(npviewer_RAWSRCS:%.c=npviewer-%.o)
-ifeq ($(biarch),yes)
+ifeq ($(build_biarch),yes)
 npviewer_CFLAGS  = $(CFLAGS_32)
 npviewer_CFLAGS += -I$(LSB_INC_DIR)
 npviewer_CFLAGS += -I$(LSB_INC_DIR)/glib-2.0
@@ -155,7 +155,7 @@ libxpcom_RAWSRCS = libxpcom.c debug.c
 libxpcom_SOURCES = $(libxpcom_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 libxpcom_OBJECTS = $(libxpcom_RAWSRCS:%.c=libxpcom-%.o)
 libxpcom_CFLAGS  = $(PIC_CFLAGS)
-ifeq ($(biarch),yes)
+ifeq ($(build_biarch),yes)
 libxpcom_CFLAGS += -I$(LSB_INC_DIR)
 libxpcom_LDFLAGS = $(LDFLAGS_32) -L$(LSB_OBJ_DIR)
 endif
@@ -182,7 +182,7 @@ ifneq (,$(findstring $(OS),netbsd dragonfly))
 npconfig_LDFLAGS += $(libpthread_LDFLAGS)
 endif
 
-nploader_PROGRAM = npviewer
+nploader_PROGRAM = npviewer.sh
 nploader_RAWSRCS = npw-viewer.sh
 nploader_SOURCES = $(nploader_RAWSRCS:%.sh=$(SRC_PATH)/src/%.sh)
 
@@ -255,51 +255,43 @@ distclean: clean
 
 uninstall: uninstall.player uninstall.wrapper uninstall.viewer uninstall.libxpcom uninstall.libnoxshm uninstall.loader uninstall.config uninstall.dirs
 uninstall.dirs:
-	rmdir $(DESTDIR)$(pkglibdir)/noarch
-	rmdir $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)
-	rmdir $(DESTDIR)$(pkglibdir)/$(ARCH)
-ifneq ($(ARCH),$(ARCH_32))
-	rmdir $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)
-	rmdir $(DESTDIR)$(pkglibdir)/$(ARCH_32)
-endif
+	rmdir -p $(DESTDIR)$(nptargetdir) || :
+	rmdir -p $(DESTDIR)$(nphostdir) || :
+	rmdir -p $(DESTDIR)$(npcommondir) || :
 uninstall.player:
-	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npplayer_PROGRAM)
+	rm -f $(DESTDIR)$(nphostdir)/$(npplayer_PROGRAM)
 uninstall.wrapper:
-	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npwrapper_LIBRARY)
+	rm -f $(DESTDIR)$(nphostdir)/$(npwrapper_LIBRARY)
 uninstall.viewer:
-	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(npviewer_PROGRAM)
-	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(npviewer_PROGRAM:%.bin=%)
+	rm -f $(DESTDIR)$(nptargetdir)/$(npviewer_PROGRAM)
+	rm -f $(DESTDIR)$(nptargetdir)/$(npviewer_PROGRAM:%.bin=%)
 uninstall.libxpcom:
-	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libxpcom_LIBRARY)
+	rm -f $(DESTDIR)$(nptargetdir)/$(libxpcom_LIBRARY)
 uninstall.libnoxshm:
-	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libnoxshm_LIBRARY)
+	rm -f $(DESTDIR)$(nptargetdir)/$(libnoxshm_LIBRARY)
 uninstall.loader:
-	rm -f $(DESTDIR)$(pkglibdir)/noarch/$(nploader_PROGRAM)
+	rm -f $(DESTDIR)$(npcommondir)/$(nploader_PROGRAM)
 uninstall.config:
 	rm -f $(DESTDIR)$(bindir)/nspluginwrapper
-	rm -f $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM)
+	rm -f $(DESTDIR)$(nphostdir)/$(npconfig_PROGRAM)
 uninstall.mkruntime:
-	rm -f $(DESTDIR)$(pkglibdir)/noarch/mkruntime
+	rm -f $(DESTDIR)$(npcommondir)/mkruntime
 
 install: install.dirs install.player install.wrapper install.viewer install.libxpcom install.libnoxshm install.loader install.config
 install.dirs:
-	mkdir -p $(DESTDIR)$(pkglibdir)/noarch
-	mkdir -p $(DESTDIR)$(pkglibdir)/$(ARCH)
-	mkdir -p $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)
-ifneq ($(ARCH),$(ARCH_32))
-	mkdir -p $(DESTDIR)$(pkglibdir)/$(ARCH_32)
-	mkdir -p $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)
-endif
+	mkdir -p $(DESTDIR)$(npcommondir) || :
+	mkdir -p $(DESTDIR)$(nphostdir) || :
+	mkdir -p $(DESTDIR)$(nptargetdir) || :
 ifeq ($(build_player),yes)
 install.player: $(npplayer_PROGRAM)
-	$(INSTALL) -m 755 $(STRIP_OPT) $(npplayer_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npplayer_PROGRAM)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(npplayer_PROGRAM) $(DESTDIR)$(nphostdir)/$(npplayer_PROGRAM)
 	mkdir -p $(DESTDIR)$(bindir)
-	$(LN_S) $(pkglibdir)/$(ARCH)/$(OS)/$(npplayer_PROGRAM) $(DESTDIR)$(bindir)/nspluginplayer
+	$(LN_S) $(nphostdir)/$(npplayer_PROGRAM) $(DESTDIR)$(bindir)/nspluginplayer
 else
 install.player:
 endif
 install.wrapper: $(npwrapper_LIBRARY)
-	$(INSTALL) -m 755 $(STRIP_OPT) $(npwrapper_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npwrapper_LIBRARY)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(npwrapper_LIBRARY) $(DESTDIR)$(nphostdir)/$(npwrapper_LIBRARY)
 ifeq ($(build_viewer),yes)
 install.viewer: install.viewer.bin install.viewer.glue
 install.libxpcom: do.install.libxpcom
@@ -310,26 +302,26 @@ install.libxpcom:
 install.libnoxshm:
 endif
 install.viewer.bin: $(npviewer_PROGRAM)
-	$(INSTALL) -m 755 $(STRIP_OPT) $(npviewer_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(npviewer_PROGRAM)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(npviewer_PROGRAM) $(DESTDIR)$(nptargetdir)/$(npviewer_PROGRAM)
 install.viewer.glue::
-	p=$(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(npviewer_PROGRAM:%.bin=%);	\
+	p=$(DESTDIR)$(nptargetdir)/$(npviewer_PROGRAM:%.bin=%);	\
 	echo "#!/bin/sh" > $$p;								\
 	echo "TARGET_OS=$(TARGET_OS)" >> $$p;						\
 	echo "TARGET_ARCH=$(TARGET_ARCH)" >> $$p;					\
-	echo ". $(pkglibdir)/noarch/$(nploader_PROGRAM)" >> $$p;			\
+	echo ". $(npcommondir)/$(nploader_PROGRAM)" >> $$p;			\
 	chmod 755 $$p
 do.install.libxpcom: $(libxpcom_LIBRARY)
-	$(INSTALL) -m 755 $(STRIP_OPT) $(libxpcom_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libxpcom_LIBRARY)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(libxpcom_LIBRARY) $(DESTDIR)$(nptargetdir)/$(libxpcom_LIBRARY)
 do.install.libnoxshm: $(libnoxshm_LIBRARY)
-	$(INSTALL) -m 755 $(STRIP_OPT) $(libnoxshm_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libnoxshm_LIBRARY)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(libnoxshm_LIBRARY) $(DESTDIR)$(nptargetdir)/$(libnoxshm_LIBRARY)
 install.config: $(npconfig_PROGRAM)
-	$(INSTALL) -m 755 $(STRIP_OPT) $(npconfig_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(npconfig_PROGRAM) $(DESTDIR)$(nphostdir)/$(npconfig_PROGRAM)
 	mkdir -p $(DESTDIR)$(bindir)
-	$(LN_S) $(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM) $(DESTDIR)$(bindir)/nspluginwrapper
+	$(LN_S) $(nphostdir)/$(npconfig_PROGRAM) $(DESTDIR)$(bindir)/nspluginwrapper
 install.loader: $(nploader_PROGRAM)
-	$(INSTALL) -m 755 $(nploader_PROGRAM) $(DESTDIR)$(pkglibdir)/noarch/$(nploader_PROGRAM)
+	$(INSTALL) -m 755 $(nploader_PROGRAM) $(DESTDIR)$(npcommondir)/$(nploader_PROGRAM)
 install.mkruntime: $(SRC_PATH)/utils/mkruntime.sh
-	$(INSTALL) -m 755 $< $(DESTDIR)$(pkglibdir)/noarch/mkruntime
+	$(INSTALL) -m 755 $< $(DESTDIR)$(npcommondir)/mkruntime
 
 $(archivedir)::
 	[ -d $(archivedir) ] || mkdir $(archivedir) > /dev/null 2>&1
@@ -342,7 +334,7 @@ $(archivedir)$(SRCARCHIVE): $(archivedir) $(FILES)
 	BUILDDIR=`mktemp -d /tmp/buildXXXXXXXX`						; \
 	mkdir -p $$BUILDDIR/$(PACKAGE)-$(VERSION)					; \
 	(cd $(SRC_PATH) && tar c $(FILES)) | tar x -C $$BUILDDIR/$(PACKAGE)-$(VERSION)	; \
-	[ "$(SNAPSHOT)" = "1" ] && svndate_def="%" || svndate_def="#"			; \
+	[ "$(SNAPSHOT)" = "2" ] && svndate_def="%" || svndate_def="#"			; \
 	sed -e "s/^[%#]define svndate.*/$${svndate_def}define svndate $(SVNDATE)/" 	  \
 	  < $(SRC_PATH)/nspluginwrapper.spec						  \
 	  > $$BUILDDIR/$(PACKAGE)-$(VERSION)/nspluginwrapper.spec			; \
@@ -367,7 +359,7 @@ localrpm: $(archivedir)$(SRCARCHIVE).bz2
 
 changelog: ../common/authors.xml
 	svn_prefix=`svn info .|sed -n '/^URL *: .*\/svn\/\(.*\)$$/s//\1\//p'`; \
-	LC_ALL=C TZ=GMT svn2cl --strip-prefix=$$svn_prefix --authors=../common/authors.xml --accum || :
+	LC_ALL=C TZ=GMT svn2cl --strip-prefix=$$svn_prefix --authors=../common/authors.xml || :
 changelog.commit: changelog
 	svn commit -m "Generated by svn2cl." ChangeLog
 
@@ -413,7 +405,7 @@ npconfig-%.o: $(SRC_PATH)/src/%.c
 	$(CC) -o $@ -c $< $(CPPFLAGS) $(CFLAGS)
 
 $(nploader_PROGRAM): $(nploader_SOURCES)
-	sed -e "s|%NPW_LIBDIR%|$(pkglibdir)|" $< > $@
+	sed -e 's|%NPW_VIEWER_DIR%|$(nptargetdir_var)|' $< > $@
 	chmod 755 $@
 
 $(LSB_OBJ_DIR)::

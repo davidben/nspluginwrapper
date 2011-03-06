@@ -19,60 +19,6 @@ TMPO="${TMPDIR1}/npw-conf-${RANDOM}-$$-${RANDOM}.o"
 TMPE="${TMPDIR1}/npw-conf-${RANDOM}-$$-${RANDOM}"
 TMPS="${TMPDIR1}/npw-conf-${RANDOM}-$$-${RANDOM}.S"
 
-# default parameters
-prefix="/usr"
-lib32=""
-lib64=""
-x_base_dirs=""
-biarch="guess"
-build_viewer="guess"
-build_player="yes"
-linux_only="guess"
-strip="no"
-cc="gcc"
-cxx="g++"
-host_os=`uname -s | tr '[A-Z]' '[a-z]'`
-host_cpu=`uname -m`
-target_os="linux"
-target_cpu="i386"
-rpc_init_timeout=5
-malloc_hooks="glib,libc"
-use_pid_check="no"
-case "$host_cpu" in
-arm*)
-    host_cpu="arm"
-    ;;
-i386|i486|i586|i686|i86pc|BePC)
-    host_cpu="i386"
-    ;;
-ia64)
-    host_cpu="ia64"
-    ;;
-"Power Macintosh"|ppc)
-    host_cpu="ppc"
-    ;;
-ppc64)
-    host_cpu="ppc64"
-    ;;
-sparc)
-    host_cpu="sparc"
-    ;;
-sparc64)
-    host_cpu="sparc64"
-    ;;
-x86_64|amd64)
-    host_cpu="x86_64"
-    ;;
-*)
-    host_cpu="unknown"
-    ;;
-esac
-case "$host_os" in
-sunos*)
-    host_os="solaris"
-    ;;
-esac
-
 # find source path
 # XXX: we assume an absolute path is given when launching configure, 
 # except in './configure' case.
@@ -84,6 +30,105 @@ if test -z "$source_path" -o "$source_path" = "." ; then
     source_path_used="no"
 fi
 
+# determine versions
+VERSION=`sed < $source_path/$PACKAGE.spec -n '/^\%define version[	]*/s///p'`
+RELEASE=`sed < $source_path/$PACKAGE.spec -n '/^\%define release[	]*/s///p'`
+SVNDATE=`sed < $source_path/$PACKAGE.spec -n '/^\%define svndate[ 	]*/s///p'`
+if test -z "$SVNDATE"; then
+    SVNDATE=`date '+%Y%m%d'`
+fi
+
+MAJOR_VERSION=`echo "$VERSION"|cut -d'.' -f1`
+MINOR_VERSION=`echo "$VERSION"|cut -d'.' -f2`
+MICRO_VERSION=`echo "$VERSION"|cut -d'.' -f3`
+
+# development snapshots are officially generated tarballs for testing
+# ("odd" minor and micro versions)
+is_odd() {
+    local rem=`expr "$1" % 2`
+    test $rem -eq 1 && return 0 || return 1
+}
+
+if is_odd $MINOR_VERSION || is_odd $MICRO_VERSION; then
+    SNAPSHOT=1
+else
+    SNAPSHOT=0
+fi
+
+# snapshots can also be unofficially generated tarballs
+# (Release: 0.1 in specfile)
+if echo "$RELEASE" | grep -q ^0; then
+    SNAPSHOT=2
+fi
+
+if test $SNAPSHOT -ge 1; then
+    yes_for_snapshots="yes"
+else
+    yes_for_snapshots="no"
+fi
+
+# default parameters
+prefix="/usr"
+lib32=""
+lib64=""
+x_base_dirs=""
+build_viewer="guess"
+build_player="yes"
+build_generic="guess"
+build_biarch="guess"
+strip="no"
+cc="gcc"
+cxx="g++"
+host_os=`uname -s | tr '[A-Z]' '[a-z]'`
+host_cpu=`uname -m`
+target_os="linux"
+target_cpu="i386"
+rpc_init_timeout=5
+malloc_hooks="glib,libc"
+enable_malloc_check="$yes_for_snapshots"
+enable_thread_check="$yes_for_snapshots"
+
+normalize_cpu() {
+local cpu="$1"
+case "$cpu" in
+arm*)
+    cpu="arm"
+    ;;
+i[3456]86|k[678]|i86pc|BePC)
+    cpu="i386"
+    ;;
+ia64)
+    cpu="ia64"
+    ;;
+"Power Macintosh"|ppc)
+    cpu="ppc"
+    ;;
+ppc64)
+    cpu="ppc64"
+    ;;
+sparc)
+    cpu="sparc"
+    ;;
+sparc64)
+    cpu="sparc64"
+    ;;
+x86_64|amd64)
+    cpu="x86_64"
+    ;;
+esac
+echo "$cpu"
+}
+
+normalize_os() {
+local os="$1"
+case "$os" in
+sunos*)
+    os="solaris"
+    ;;
+esac
+echo "$os"
+}
+
 for opt do
 case "$opt" in
 --prefix=*)
@@ -92,14 +137,20 @@ case "$opt" in
 --pkglibdir=*)
     pkglibdir=`echo "$opt" | cut -d '=' -f 2`
     ;;
+--viewer-paths=*)
+    viewer_paths=`echo "$opt" | cut -d '=' -f 2`
+    ;;
 --target-os=*)
     target_os=`echo "$opt" | cut -d '=' -f 2 | tr '[A-Z]' '[a-z]'`
     ;;
 --target-cpu=*)
-    target_cpu=`echo "$opt" | cut -d '=' -f 2 | sed -e 's/^i.86$/i386/'`
+    target_cpu=`echo "$opt" | cut -d '=' -f 2`
     ;;
 --enable-generic)
-    linux_only="no"
+    build_generic="yes"
+    ;;
+--disable-generic)
+    build_generic="no"
     ;;
 --enable-strip)
     strip="yes"
@@ -108,10 +159,10 @@ case "$opt" in
     strip="no"
     ;;
 --enable-biarch)
-    biarch="yes"
+    build_biarch="yes"
     ;;
 --disable-biarch)
-    biarch="no"
+    build_biarch="no"
     ;;
 --enable-viewer)
     build_viewer="yes"
@@ -125,11 +176,17 @@ case "$opt" in
 --disable-player)
     build_player="no"
     ;;
---enable-pid-check)
-    use_pid_check="yes"
+--enable-thread-check)
+    enable_thread_check="yes"
     ;;
---disable-pid-check)
-    use_pid_check="no"
+--disable-thread-check)
+    enable_thread_check="no"
+    ;;
+--enable-malloc-check)
+    enable_malloc_check="yes"
+    ;;
+--disable-malloc-check)
+    enable_malloc_check="no"
     ;;
 --with-lib32=*)
     lib32=`echo "$opt" | cut -d '=' -f 2`
@@ -155,26 +212,37 @@ case "$opt" in
 esac
 done
 
+host_cpu=`normalize_cpu "$host_cpu"`
+host_os=`normalize_os "$host_os"`
+target_cpu=`normalize_cpu "$target_cpu"`
+target_os=`normalize_os "$target_os"`
+
 # check for linux only build
-if test "$linux_only" = "guess"; then
+if test "$build_generic" = "guess"; then
     if test "$host_os" = "linux" -a "$target_os" = "linux"; then
-	linux_only="yes"
+	build_generic="no"
     else
-	linux_only="no"
+	build_generic="yes"
     fi
 fi
 
 # check for biarch build (Linux only)
-if test "$biarch" = "guess"; then
-    # XXX: biarch builds require LSB headers for now
-    biarch="no"
+# XXX: biarch builds require LSB headers for now
+build_biarch_possible="no"
+if test "$host_os" = "linux" -a "$target_os" = "linux"; then
     case $host_cpu:$target_cpu in
     x86_64:i386 | ppc64:ppc)
-	if test "$host_os" = "linux"; then
-	    biarch="yes"
-	fi
+	build_biarch_possible="yes"
 	;;
     esac
+fi
+if test "$build_biarch" = "guess"; then
+    build_biarch="$build_biarch_possible"
+elif test "$build_biarch" = "yes"; then
+    if test "$build_biarch_possible" = "no"; then
+	echo "WARNING: bi-arch build is not possible, disabling"
+	build_biarch="no"
+    fi
 fi
 
 # check for viewer build
@@ -182,7 +250,7 @@ if test "$build_viewer" = "guess"; then
     build_viewer="no"
     case $host_os in
     linux)
-	if test "$host_cpu" = "$target_cpu" -o "$biarch" = "yes"; then
+	if test "$host_cpu" = "$target_cpu" -o "$build_biarch" = "yes"; then
 	    build_viewer="yes"
 	fi
 	;;
@@ -222,6 +290,12 @@ fi
 # check for installation root
 if test -z "$pkglibdir"; then
     pkglibdir="$prefix/lib/$PACKAGE"
+fi
+
+# check for viewer paths
+default_viewer_paths="$pkglibdir/%ARCH%/%OS%"
+if test -z "$viewer_paths"; then
+    viewer_paths="$default_viewer_paths"
 fi
 
 # check for __attribute__((visibility())) support
@@ -280,7 +354,7 @@ else
 fi
 
 # check for __stack_chk_fail() in target GNU C library
-if test "$biarch" = "yes"; then
+if test "$build_biarch" = "yes"; then
     glibc_header_dir="/usr/include"
     libc_provides_ssp=no
     if test -f $glibc_header_dir/features.h \
@@ -370,7 +444,7 @@ if test "$compiler" = "gcc"; then
 	    CFLAGS="$CFLAGS -mtune=generic"
 	fi
     fi
-    if test "$biarch" = "yes" -a -z "$CFLAGS_32"; then
+    if test "$build_biarch" = "yes" -a -z "$CFLAGS_32"; then
 	CFLAGS_32="-m32 -O2 -g"
 	if check_cc_option -mtune=generic $CFLAGS_32; then
 	    CFLAGS_32="$CFLAGS_32 -mtune=generic"
@@ -596,7 +670,7 @@ for mh in $malloc_hooks_list; do
 	is_ok="yes"
 	;;
     glib)
-	if test "x$linux_only" = "xno"; then
+	if test "x$build_generic" = "xyes"; then
 	    echo "WARNING: disabling glib memory hooks with --enable-generic"
 	elif ! $pkgconfig --atleast-version=2.10 glib-2.0; then
 	    echo "WARNING: disabling glib memory hooks that require glib >= 2.10 (system is $GLIB_VERSION)"
@@ -631,6 +705,7 @@ echo "Standard options:"
 echo "  --help                      print this message"
 echo "  --prefix=PREFIX             install in PREFIX [$prefix]"
 echo "  --pkglibdir=ROOT            install private files in ROOT [$pkglibdir]"
+echo "  --viewer-paths=PATH         allowed viewer lookup PATH [$viewer_paths]"
 echo "  --target-os=OS              build plugin support for target OS [$target_os]"
 echo "  --target-cpu=CPU            build plugin support for target CPU [$target_cpu]"
 echo "  --enable-viewer             build viewer [$build_viewer]"
@@ -639,9 +714,10 @@ echo ""
 echo "Advanced options (experts only):"
 echo "  --source-path=PATH          path of source code [$source_path]"
 echo "  --enable-strip              strip resulting binaries and libraries [$strip]"
-echo "  --enable-generic            don't use system-specific additions"
-echo "  --enable-biarch             build both 32-bit and 64-bit components at once"
-echo "  --enable-pid-check          enable PID check (DEBUG) [$use_pid_check]"
+echo "  --enable-generic            build with generic APIs [$build_generic]"
+echo "  --enable-biarch             build both 32-bit and 64-bit components at once [$build_biarch]"
+echo "  --enable-thread-check       enable main thread checks (DEBUG) [$enable_thread_check]"
+echo "  --enable-malloc-check       enable memory allocation checks (DEBUG) [$enable_malloc_check]"
 echo "  --with-lib32=NAME           use NAME as the 32-bit library dir name [$lib32]"
 echo "  --with-lib64=NAME           use NAME as the 64-bit library dir name [$lib64]"
 echo "  --with-x11-prefix=PREFIX    use PREFIX as the X11 base dir [autodetect]"
@@ -654,18 +730,19 @@ echo "NOTE: The object files are built at the place where configure is launched"
 exit 1
 fi
 
+echo "Source path               $source_path"
 echo "Install prefix            $prefix"
 echo "nspluginwrapper root dir  $pkglibdir"
-echo "Strip binaries            $strip"
-echo "Bi-arch build             $biarch"
+echo "Viewer paths              $viewer_paths"
 echo "Build viewer              $build_viewer"
-echo "Build for Linux only      $linux_only"
 echo "Build standalone player   $build_player"
+echo "Build 32-/64-bit at once  $build_biarch"
+echo "Build with generic APIs   $build_generic"
 echo "32-bit library dir name   $lib32"
 echo "64-bit library dir name   $lib64"
-echo "Source path               $source_path"
 echo "C compiler                $cc"
 echo "C++ compiler              $cxx"
+echo "Strip binaries            $strip"
 echo "Host OS                   $host_os"
 echo "Host CPU                  $host_cpu"
 echo "Host big endian           $bigendian"
@@ -673,7 +750,8 @@ echo "Target OS                 $target_os"
 echo "Target CPU                $target_cpu"
 echo "RPC init timeout          $rpc_init_timeout secs"
 echo "Memory allocation hooks   $malloc_hooks"
-echo "Use PID check (DEBUG)     $use_pid_check"
+echo "Use thread checks (DEBUG) $enable_thread_check"
+echo "Use malloc checks (DEBUG) $enable_malloc_check"
 
 config_mak="config-host.mak"
 echo "# Automatically generated by configure - do not modify" > $config_mak
@@ -691,7 +769,7 @@ echo "GTK_CFLAGS=$GTK_CFLAGS" >> $config_mak
 echo "GTK_LDFLAGS=$GTK_LDFLAGS" >> $config_mak
 echo "CURL_CFLAGS=$CURL_CFLAGS" >> $config_mak
 echo "CURL_LDFLAGS=$CURL_LDFLAGS" >> $config_mak
-if test "$biarch" = "yes"; then
+if test "$build_biarch" = "yes"; then
 echo "LDFLAGS_32=-m32" >> $config_mak
 echo "CFLAGS_32=$CFLAGS_32" >> $config_mak
 else
@@ -768,7 +846,7 @@ fi
 echo "SRC_PATH=$source_path" >> $config_mak
 echo "build_viewer=$build_viewer" >> $config_mak
 echo "build_player=$build_player" >> $config_mak
-echo "biarch=$biarch" >> $config_mak
+echo "build_biarch=$build_biarch" >> $config_mak
 echo "lib32=$lib32" >> $config_mak
 echo "lib64=$lib64" >> $config_mak
 echo "prefix=$prefix" >> $config_mak
@@ -780,21 +858,11 @@ echo "#define LIBDIR \"$libdir\"" >> $config_h
 echo "x11prefix=$x_base_dir" >> $config_mak
 echo "ALLOW_STRIP=$strip" >> $config_mak
 
-VERSION=`sed < $source_path/$PACKAGE.spec -n '/^\%define version[	]*/s///p'`
-RELEASE=`sed < $source_path/$PACKAGE.spec -n '/^\%define release[	]*/s///p'`
-SVNDATE=`sed < $source_path/$PACKAGE.spec -n '/^\%define svndate[ 	]*/s///p'`
-if test -z "$SVNDATE"; then
-    SVNDATE=`date '+%Y%m%d'`
-fi
-SNAPSHOT=0
-if echo "$RELEASE" | grep -q ^0; then
-    SNAPSHOT=1
-fi
 echo "VERSION=$VERSION" >> $config_mak
 echo "SVNDATE=$SVNDATE" >> $config_mak
 echo "SNAPSHOT=$SNAPSHOT" >> $config_mak
 echo "#define NPW_SNAPSHOT $SNAPSHOT" >> $config_h
-if test "$SNAPSHOT" = "1"; then
+if test $SNAPSHOT -ge 2; then
     echo "#define NPW_VERSION \"$VERSION-Pre ($SVNDATE)\"" >> $config_h
 else
     echo "#define NPW_VERSION \"$VERSION\"" >> $config_h
@@ -802,6 +870,26 @@ fi
 
 echo "pkglibdir=$pkglibdir" >> $config_mak
 echo "#define NPW_LIBDIR \"$pkglibdir\"" >> $config_h
+
+# check if we want to install files in ARCH/OS specific locations
+if echo ":$viewer_paths" | $EGREP -q ":$pkglibdir/%(ARCH|OS)%"; then
+    npw_common_libdir="$pkglibdir/noarch"
+    npw_host_libdir="$pkglibdir/$host_cpu/$host_os"
+    npw_target_libdir="$pkglibdir/$target_cpu/$target_os"
+    npw_target_libdir_var="$pkglibdir/\\\$\$TARGET_ARCH/\\\$\$TARGET_OS"
+else
+    npw_common_libdir="$pkglibdir"
+    npw_host_libdir="$npw_common_libdir"
+    npw_target_libdir="$npw_common_libdir"
+    npw_target_libdir_var="$npw_common_libdir"
+fi
+echo "npcommondir=$npw_common_libdir" >> $config_mak
+echo "nphostdir=$npw_host_libdir" >> $config_mak
+echo "nptargetdir=$npw_target_libdir" >> $config_mak
+echo "nptargetdir_var=$npw_target_libdir_var" >> $config_mak
+echo "#define NPW_HOST_LIBDIR \"$npw_host_libdir\"" >> $config_h
+echo "#define NPW_TARGET_LIBDIR \"$npw_target_libdir\"" >> $config_h
+echo "#define NPW_VIEWER_PATHS \"$viewer_paths\"" >> $config_h
 
 echo "#define RPC_INIT_TIMEOUT $rpc_init_timeout" >> $config_h
 
@@ -832,11 +920,29 @@ if test "$libc_provides_ssp" = "yes"; then
 else
     echo "#undef TARGET_LIBC_PROVIDES_SSP" >> $config_h
 fi
-if test "$use_pid_check" = "yes"; then
-    echo "#define USE_PID_CHECK 1" >> $config_h
+if test "$enable_thread_check" = "yes"; then
+    echo "#define ENABLE_THREAD_CHECK 1" >> $config_h
 else
-    echo "#define USE_PID_CHECK 0" >> $config_h
+    echo "#undef ENABLE_THREAD_CHECK" >> $config_h
 fi
+if test "$enable_malloc_check" = "yes"; then
+    echo "#define ENABLE_MALLOC_CHECK 1" >> $config_h
+else
+    echo "#undef ENABLE_MALLOC_CHECK" >> $config_h
+fi
+
+# check for functions in <glib.h>
+for func in g_hash_table_remove_all g_hash_table_find; do
+    cat > $TMPC << EOF
+extern void $func(void);
+int main(void) { $func(); return 0; }
+EOF
+    if $cc $TMPC -o $TMPE $GLIB_CFLAGS $GLIB_LDFLAGS > /dev/null 2>&1; then
+        func_def=`echo "$func" | tr '[:lower:]./-' '[:upper:]___'`
+        echo "#define HAVE_$func_def 1" >> $config_h
+    fi
+    rm -f $TMPC $TMPE
+done
 
 config_mak="config.mak"
 echo "# Automatically generated by configure - do not modify" > $config_mak
@@ -846,8 +952,10 @@ config_h="config.h"
 echo "/* Automatically generated by configure - do not modify */" > $config_h
 echo "#include \"config-host.h\"" >> $config_h
 
-if test "$linux_only" = "yes"; then
-    echo "#define BUILD_LINUX_ONLY 1" >> $config_h
+if test "$build_generic" = "yes"; then
+    echo "#define BUILD_GENERIC 1" >> $config_h
+else
+    echo "#undef BUILD_GENERIC" >> $config_h
 fi
 
 if test "$target_os" = "linux"; then

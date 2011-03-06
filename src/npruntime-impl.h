@@ -27,6 +27,7 @@ typedef struct {
   uint32_t npobj_id;
   bool is_valid;
   void *plugin;
+  void *hasMethod_cache;
 } NPObjectInfo;
 
 extern NPObjectInfo *npobject_info_new(NPObject *npobj) attribute_hidden;
@@ -59,6 +60,10 @@ extern char *string_of_NPVariant(const struct _NPVariant *arg) attribute_hidden;
 extern void print_npvariant_args(const struct _NPVariant *args, uint32_t nargs) attribute_hidden;
 
 // Deactivate all NPObject instances
-extern void npruntime_deactivate(void);
+extern void npruntime_deactivate(void) attribute_hidden;
+
+// Check whether to use NPRuntime data caching
+// (on by default, disabled with NPW_NPRUNTIME_CACHE=0|no)
+extern bool npruntime_use_cache(void) attribute_hidden;
 
 #endif /* NPRUNTIME_IMPL_H */

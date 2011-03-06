@@ -45,9 +45,9 @@
 #define NPW_VIEWER NPW_VIEWER_BASE
 #define NPW_WRAPPER_BASE "npwrapper"
 #define NPW_WRAPPER NPW_WRAPPER_BASE ".so"
-#define NPW_OLD_DEFAULT_PLUGIN_PATH NPW_LIBDIR "/" HOST_ARCH "/" NPW_WRAPPER
-#define NPW_DEFAULT_PLUGIN_PATH NPW_LIBDIR "/" HOST_ARCH "/" HOST_OS "/" NPW_WRAPPER
-#define NPW_PLUGIN_IDENT "NPW:" NPW_VERSION
+#define NPW_DEFAULT_PLUGIN_PATH NPW_HOST_LIBDIR "/" NPW_WRAPPER
+#define NPW_PLUGIN_INFO_VERSION 2
+#define NPW_PLUGIN_IDENT "NPW:X:" NPW_VERSION
 #define NPW_PLUGIN_IDENT_SIZE 32
 typedef struct __attribute__((packed)) {
   char ident[NPW_PLUGIN_IDENT_SIZE];
@@ -55,6 +55,8 @@ typedef struct __attribute__((packed)) {
   time_t mtime;
   char target_arch[65];
   char target_os[65];
+  char struct_version; /* extended format "NPW:X:VERSION" */
+  char viewer_path[PATH_MAX];
 } NPW_PluginInfo;
 
 #if defined(BUILD_XPCOM)

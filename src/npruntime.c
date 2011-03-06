@@ -30,15 +30,55 @@
 #include "debug.h"
 
 
+// Define to enable NPClass::HasMethod cache
+#define USE_NPCLASS_HAS_METHOD_CACHE 1
+
+// Define to enable NPClass::HasProperty cache (derived from ::HasMethod cache)
+#define USE_NPCLASS_HAS_PROPERTY_CACHE 1
+
 // Defined in npw-{wrapper,viewer}.c
 extern rpc_connection_t *g_rpc_connection attribute_hidden;
 
 // Defined in npw-viewer.c
-#if USE_PID_CHECK && NPW_IS_PLUGIN
-extern bool pid_check(void);
+#if defined(ENABLE_THREAD_CHECK) && NPW_IS_PLUGIN
+extern bool thread_check(void);
 #else
-#define pid_check() true
+#define thread_check() true
 #endif
+
+
+/* ====================================================================== */
+/* === Helpers                                                        === */
+/* ====================================================================== */
+
+static inline bool get_use_npruntime_cache_env(void)
+{
+  const gchar *env = getenv("NPW_NPRUNTIME_CACHE");
+  return env == NULL || (strcmp(env, "no") != 0 && strcmp(env, "0") != 0);
+}
+
+bool npruntime_use_cache(void)
+{
+  static int use_cache = -1;
+  if (G_UNLIKELY(use_cache < 0))
+	use_cache = get_use_npruntime_cache_env();
+  return use_cache;
+}
+
+static inline bool use_npclass_has_method_cache(void)
+{
+#if USE_NPCLASS_HAS_METHOD_CACHE
+  return npruntime_use_cache();
+#else
+  return false;
+#endif
+}
+
+static inline bool use_npclass_has_property_cache(void)
+{
+  /* this depends on the NPClass::HasMethod cache */
+  return use_npclass_has_method_cache();
+}
 
 
 /* ====================================================================== */
@@ -131,8 +171,8 @@ void g_NPClass_Invalidate(NPObject *npobj)
   if (!is_valid_npobject_class(npobj))
 	return;
 
-  if (!pid_check()) {
-	npw_printf("WARNING: NPClass::Invalidate called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPClass::Invalidate not called from the main thread\n");
 	return;
   }
 
@@ -196,18 +236,34 @@ static bool npclass_invoke_HasMethod(NPObject *npobj, NPIdentifier name)
   return ret;
 }
 
+static bool npclass_cached_HasMethod(NPObject *npobj, NPIdentifier name)
+{
+  NPObjectInfo *npobj_info = npobject_info_lookup(npobj);
+  if (use_npclass_has_method_cache() && npobj_info) {
+	if (G_UNLIKELY(npobj_info->hasMethod_cache == NULL))
+	  npobj_info->hasMethod_cache = g_hash_table_new(NULL, NULL);
+	gpointer hasMethod = NULL;
+	if (g_hash_table_lookup_extended(npobj_info->hasMethod_cache, name, NULL, &hasMethod))
+	  return GPOINTER_TO_UINT(hasMethod);
+  }
+  bool hasMethod = npclass_invoke_HasMethod(npobj, name);
+  if (use_npclass_has_method_cache() && npobj_info)
+	g_hash_table_insert(npobj_info->hasMethod_cache, name, GUINT_TO_POINTER(hasMethod));
+  return hasMethod;
+}
+
 bool g_NPClass_HasMethod(NPObject *npobj, NPIdentifier name)
 {
   if (!is_valid_npobject_class(npobj))
 	return false;
 
-  if (!pid_check()) {
-	npw_printf("WARNING: NPClass::HasMethod called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPClass::HasMethod not called from the main thread\n");
 	return false;
   }
 
   D(bugiI("NPClass::HasMethod(npobj %p, name id %p)\n", npobj, name));
-  bool ret = npclass_invoke_HasMethod(npobj, name);
+  bool ret = npclass_cached_HasMethod(npobj, name);
   D(bugiD("NPClass::HasMethod return: %d\n", ret));
   return ret;
 }
@@ -300,8 +356,8 @@ bool g_NPClass_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *args,
   if (!is_valid_npobject_class(npobj))
 	return false;
 
-  if (!pid_check()) {
-	npw_printf("WARNING: NPClass::Invoke called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPClass::Invoke not called from the main thread\n");
 	return false;
   }
 
@@ -399,8 +455,8 @@ bool g_NPClass_InvokeDefault(NPObject *npobj, const NPVariant *args, uint32_t ar
   if (!is_valid_npobject_class(npobj))
 	return false;
 
-  if (!pid_check()) {
-	npw_printf("WARNING: NPClass::InvokeDefault called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPClass::InvokeDefault not called from the main thread\n");
 	return false;
   }
 
@@ -468,18 +524,29 @@ static bool npclass_invoke_HasProperty(NPObject *npobj, NPIdentifier name)
   return ret;
 }
 
+static bool npclass_cached_HasProperty(NPObject *npobj, NPIdentifier name)
+{
+  NPObjectInfo *npobj_info = npobject_info_lookup(npobj);
+  if (use_npclass_has_property_cache() && npobj_info && npobj_info->hasMethod_cache) {
+	/* If the NPIdentifier references a method, it can't be a property */
+	if (g_hash_table_lookup_extended(npobj_info->hasMethod_cache, name, NULL, NULL))
+	  return false;
+  }
+  return npclass_invoke_HasProperty(npobj, name);
+}
+
 bool g_NPClass_HasProperty(NPObject *npobj, NPIdentifier name)
 {
   if (!is_valid_npobject_class(npobj))
 	return false;
 
-  if (!pid_check()) {
-	npw_printf("WARNING: NPClass::HasProperty called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPClass::HasProperty not called from the main thread\n");
 	return false;
   }
 
   D(bugiI("NPClass::HasProperty(npobj %p, name id %p)\n", npobj, name));
-  bool ret = npclass_invoke_HasProperty(npobj, name);
+  bool ret = npclass_cached_HasProperty(npobj, name);
   D(bugiD("NPClass::HasProperty return: %d\n", ret));
   return ret;
 }
@@ -559,8 +626,8 @@ bool g_NPClass_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *result
   if (!is_valid_npobject_class(npobj))
 	return false;
 
-  if (!pid_check()) {
-	npw_printf("WARNING: NPClass::GetProperty called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPClass::GetProperty not called from the main thread\n");
 	return false;
   }
 
@@ -645,8 +712,8 @@ bool g_NPClass_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *
   if (!is_valid_npobject_class(npobj))
 	return false;
 
-  if (!pid_check()) {
-	npw_printf("WARNING: NPClass::SetProperty called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPClass::SetProperty not called from the main thread\n");
 	return false;
   }
 
@@ -716,8 +783,8 @@ bool g_NPClass_RemoveProperty(NPObject *npobj, NPIdentifier name)
   if (!is_valid_npobject_class(npobj))
 	return false;
 
-  if (!pid_check()) {
-	npw_printf("WARNING: NPClass::RemoveProperty called from the wrong process\n");
+  if (!thread_check()) {
+	npw_printf("WARNING: NPClass::RemoveProperty not called from the main thread\n");
 	return false;
   }
   
@@ -734,22 +801,31 @@ bool g_NPClass_RemoveProperty(NPObject *npobj, NPIdentifier name)
 
 NPObjectInfo *npobject_info_new(NPObject *npobj)
 {
-  NPObjectInfo *npobj_info = NPW_MemNew0(NPObjectInfo, 1);
+  NPObjectInfo *npobj_info = NPW_MemNew(NPObjectInfo, 1);
   if (npobj_info) {
 	static uint32_t id;
 	npobj_info->npobj = npobj;
 	npobj_info->npobj_id = ++id;
 	npobj_info->is_valid = true;
+	npobj_info->plugin = NULL;
+	npobj_info->hasMethod_cache = NULL;
   }
   return npobj_info;
 }
 
 void npobject_info_destroy(NPObjectInfo *npobj_info)
 {
-  if (npobj_info) {
-	npw_plugin_instance_unref(npobj_info->plugin);
-	NPW_MemFree(npobj_info);
+  if (npobj_info == NULL)
+	return;
+
+  npw_plugin_instance_unref(npobj_info->plugin);
+
+  if (npobj_info->hasMethod_cache) {
+	g_hash_table_destroy(npobj_info->hasMethod_cache);
+	npobj_info->hasMethod_cache = NULL;
   }
+
+  NPW_MemFree(npobj_info);
 }
 
 

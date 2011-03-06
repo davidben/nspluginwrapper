@@ -1,7 +1,7 @@
 %define name	nspluginwrapper
-%define version	1.2.2
+%define version	1.3.0
 %define release	1
-#define svndate	DATE
+#define svndate 20090102
 
 # define 32-bit arch of multiarch platforms
 %define arch_32 %{nil}
@@ -159,7 +159,7 @@ fi
 %{plugindir}/npwrapper.so
 %dir %{pkglibdir}
 %dir %{pkglibdir}/noarch
-%{pkglibdir}/noarch/npviewer
+%{pkglibdir}/noarch/npviewer.sh
 %dir %{pkglibdir}/%{_arch}
 %dir %{pkglibdir}/%{_arch}/%{_os}
 %{pkglibdir}/%{_arch}/%{_os}/npconfig
@@ -191,6 +191,14 @@ fi
 %endif
 
 %changelog
+* Fri Jan 02 2009 Gwenole Beauchesne <gb.public@free.fr> 1.3.0-1
+- don't poll for Xt events in Gtk (XEMBED) plug-ins
+- use 40 Hz timer for Xt events only when necessary (Xt input sources)
+- add NPIdentifier and NPClass::HasMethod caches, i.e. lower RPC traffic
+- add support for multiple viewer paths, see --viewer-paths=PATH-EXPR
+- add basic checks for malloc()'ed buffer underflow/overflow
+- add checks for single-threaded calls into the browser (NPN_*() functions)
+
 * Fri Jan 02 2009 Gwenole Beauchesne <gb.public@free.fr> 1.2.2-1
 - fix support for the VLC plug-in
 - fix memory deallocation in NPN_GetStringIdentifiers()

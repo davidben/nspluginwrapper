@@ -1,6 +1,14 @@
 nspluginwrapper NEWS -- history of user-visible changes.  2009-01-02
 Copyright (C) 2005-2009 Gwenole Beauchesne
 
+Version 1.3.0 (BETA) - 02.Jan.2009
+* Don't poll for Xt events in Gtk (XEMBED) plug-ins
+* Use 40 Hz timer for Xt events only when necessary (Xt input sources)
+* Add NPIdentifier and NPClass::HasMethod caches, i.e. lower RPC traffic
+* Add support for multiple viewer paths, see --viewer-paths=PATH-EXPR
+* Add basic checks for malloc()'ed buffer underflow/overflow
+* Add checks for single-threaded calls into the browser (NPN_*() functions)
+
 Version 1.2.2 - 02.Jan.2009
 * Fix support for the VLC plug-in
 * Fix memory deallocation in NPN_GetStringIdentifiers()
@@ -12,7 +20,8 @@ Version 1.2.0 - 26.Dec.2008
 * Add support for SunStudio compilers
 * Add support for Flash Player 10 on OpenSolaris 2008.11
 * Fix build on non-Linux platforms
-* Fix NPP_Destroy() to keep NPP instances longer, but destroy window immediately
+* Fix NPP_Destroy() to keep NPP instances longer
+* Fix NPP_Destroy() to destroy the plugin window immediately
 
 Version 1.1.10 (BETA) - 08.Dec.2008
 * Fix NPPVpluginScriptableNPObject::Invalidate()

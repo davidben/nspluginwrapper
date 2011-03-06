@@ -71,6 +71,71 @@ static int strstart(const char *str, const char *val, const char **ptr)
   return 1;
 }
 
+static const char *strnstr(const char *str, int len, const char *substr)
+{
+  const char *match = strstr(str, substr);
+  if (len > 0 && (match + strlen(substr) > str + len))
+	match = NULL;
+  return match;
+}
+
+typedef struct {
+  const char *name;
+  const char *value;
+} Var;
+
+static int strexpand(char *dst, int dstlen, const char *src, int srclen, const Var *vars)
+{
+  if (dst == NULL || dstlen < 1 || src == NULL)
+	return -1;
+
+  if (srclen <= 0)
+	srclen = strlen(src);
+
+  int n = 0;
+  for (int i = 0; i < srclen; i++) {
+	char ch = src[i];
+	if (ch != '%') {
+	  dst[n++] = ch;
+	  if (n >= dstlen - 1)
+		return -1;
+	}
+	else {
+	  char var[16];
+	  const char *str = &src[i + 1];
+	  const char *end = strchr(str, '%');
+	  if (end == NULL)
+		error("unterminated var '%s'", str);
+
+	  int len = end - str;
+	  if (len >= sizeof(var) - 1) {
+		len = sizeof(var) - 1;
+		memcpy(var, str, len);
+		var[len] = '\0';
+		error("unsupported var '%s...'", var);
+	  }
+	  memcpy(var, str, len);
+	  var[len] = '\0';
+
+	  str = NULL;
+	  for (int j = 0; vars[j].name != NULL; j++) {
+		if (strcmp(vars[j].name, var) == 0) {
+		  str = vars[j].value;
+		  break;
+		}
+	  }
+	  if (str == NULL)
+		error("could not expand var '%s'", var);
+	  i += len + 1;
+	  len = strlen(str);
+	  memcpy(&dst[n], str, len);
+	  n += len;
+	}
+  }
+  dst[n] = '\0';
+  return 0;
+}
+
 /* Implement mkdir -p with default permissions (derived from busybox code) */
 static int mkdir_p(const char *path)
 {
@@ -489,6 +554,30 @@ enum {
   EXIT_VIEWER_NATIVE	= 20
 };
 
+static bool is_plugin_viewer_ok(const char *viewer_path, const char *filename)
+{
+  int pid = fork();
+  if (pid < 0)
+	return false;
+  if (pid == 0) {
+	if (!g_verbose) {
+	  // don't spit out errors in non-verbose mode, we only need
+	  // to know whether there is a valid viewer or not
+	  freopen("/dev/null", "w", stderr);
+	}
+	execl(viewer_path, NPW_VIEWER, "--test", "--plugin", filename, NULL);
+	exit(1);
+  }
+  else {
+	int status;
+	while (waitpid(pid, &status, 0) != pid)
+	  ;
+	if (WIFEXITED(status) && WEXITSTATUS(status) == 0)
+	  return true;
+  }
+  return false;
+}
+
 static int detect_plugin_viewer(const char *filename, NPW_PluginInfo *out_plugin_info)
 {
   static const char *target_arch_table[] = {
@@ -522,52 +611,60 @@ static int detect_plugin_viewer(const char *filename, NPW_PluginInfo *out_plugin
 	  && out_plugin_info->target_os && strcmp(out_plugin_info->target_os, HOST_OS) == 0)
 	return EXIT_VIEWER_NATIVE;
 
-  for (int i = 0; i < target_arch_table_size; i++) {
-	const char *target_arch = target_arch_table[i];
-	if (target_arch == NULL)
-	  continue;
-	char viewer_arch_path[PATH_MAX];
-	sprintf(viewer_arch_path, "%s/%s", NPW_LIBDIR, target_arch);
-	if (access(viewer_arch_path, F_OK) != 0) {
-	  target_arch_table[i] = NULL;		// this target ARCH is not available, skip it for good
-	  continue;
-	}
-	for (int j = 0; j < target_os_table_size; j++) {
-	  const char *target_os = target_os_table[j];
-	  if (target_os == NULL)
+  enum { VAR_ARCH, VAR_OS, VAR_COUNT };
+  Var vars[VAR_COUNT+1];
+  vars[VAR_ARCH].name = "ARCH";
+  vars[VAR_OS].name = "OS";
+  vars[VAR_COUNT].name = NULL;
+  vars[VAR_COUNT].value = NULL;
+
+  char viewer_path[sizeof(out_plugin_info->viewer_path)];
+  const int viewer_path_len = sizeof(viewer_path) - strlen(NPW_VIEWER) - 1;
+  const char viewer_paths[] = NPW_VIEWER_PATHS;
+  const char *viewer_path_spec_end, *viewer_path_spec = viewer_paths;
+  do {
+	int len;
+	if ((viewer_path_spec_end = strchr(viewer_path_spec, ':')) != NULL)
+	  len = viewer_path_spec_end - viewer_path_spec;
+	else
+	  len = strchr(viewer_path_spec, '\0') - viewer_path_spec;
+
+	for (int i = 0; i < target_arch_table_size; i++) {
+	  const char *target_arch = target_arch_table[i];
+	  if (target_arch == NULL)
 		continue;
-	  char viewer_path[PATH_MAX];
-	  sprintf(viewer_path, "%s/%s/%s", viewer_arch_path, target_os, NPW_VIEWER);
-	  if (access(viewer_path, F_OK) != 0)
-		continue;
-	  int pid = fork();
-	  if (pid < 0)
-		continue;
-	  else if (pid == 0) {
-		if (!g_verbose) {
-		  // don't spit out errors in non-verbose mode, we only need
-		  // to know whether there is a valid viewer or not
-		  freopen("/dev/null", "w", stderr);
+	  vars[VAR_ARCH].value = target_arch;
+
+	  for (int j = 0; j < target_os_table_size; j++) {
+		const char *target_os = target_os_table[j];
+		if (target_os == NULL)
+		  continue;
+		vars[VAR_OS].value = target_os;
+
+		if (strexpand(viewer_path, viewer_path_len, viewer_path_spec, len, vars) < 0)
+		  continue;
+		strcat(viewer_path, "/" NPW_VIEWER);
+		if (access(viewer_path, F_OK) != 0)
+		  continue;
+
+		if (is_plugin_viewer_ok(viewer_path, filename)) {
+		  strcpy(out_plugin_info->target_arch, target_arch);
+		  strcpy(out_plugin_info->target_os, target_os);
+		  strcpy(out_plugin_info->viewer_path, viewer_path);
+		  return EXIT_VIEWER_OK;
 		}
-		execl(viewer_path, NPW_VIEWER, "--test", "--plugin", filename, NULL);
-		exit(1);
+
+		if (strnstr(viewer_path_spec, len, "%OS%") == NULL)
+		  break; // don't iterate over OS table if there is no "%OS%" pattern
 	  }
-	  else {
-		int status;
-		while (waitpid(pid, &status, 0) != pid)
-		  ;
-		if (WIFEXITED(status)) {
-		  status = WEXITSTATUS(status);
-		  if (status == EXIT_VIEWER_OK && out_plugin_info) {
-			strcpy(out_plugin_info->target_arch, target_arch);
-			strcpy(out_plugin_info->target_os, target_os);
-		  }
-		  return status;
-		}
-		return EXIT_VIEWER_ERROR;
-	  }
+
+	  if (strnstr(viewer_path_spec, len, "%ARCH%") == NULL)
+		break; // don't iterate over ARCH table if there is no "%ARCH%" pattern
 	}
-  }
+
+	viewer_path_spec += len + 1;
+  } while (viewer_path_spec_end != NULL);
+
   return EXIT_VIEWER_NOT_FOUND;
 }
 
@@ -604,15 +701,27 @@ static bool is_wrapper_plugin_handle(void *handle, NPW_PluginInfo *out_plugin_in
   if ((pi = (NPW_PluginInfo *)dlsym(handle, "NPW_Plugin")) == NULL)
 	return false;
   if (out_plugin_info) {
+	int plugin_info_version = 0;
+	if (strncmp(pi->ident, "NPW:0.9.90", 10) != 0)
+	  plugin_info_version = 1;
+	if (strncmp(pi->ident, "NPW:X:", 6) == 0)
+	  plugin_info_version = pi->struct_version;
+	out_plugin_info->struct_version = plugin_info_version;
 	strcpy(out_plugin_info->ident, pi->ident);
 	strcpy(out_plugin_info->path, pi->path);
 	out_plugin_info->mtime = pi->mtime;
-	out_plugin_info->target_arch[0] = '\0';
-	out_plugin_info->target_os[0] = '\0';
-	if (strncmp(pi->ident, "NPW:0.9.90", 10) != 0) {					// additional members in 0.9.91+
+	if (plugin_info_version >= 1) {		// additional members in 0.9.91+
 	  strcpy(out_plugin_info->target_arch, pi->target_arch);
 	  strcpy(out_plugin_info->target_os, pi->target_os);
 	}
+	else {
+	  out_plugin_info->target_arch[0] = '\0';
+	  out_plugin_info->target_os[0] = '\0';
+	}
+	if (plugin_info_version >= 2)		// additional members in 1.3.0+
+	  strcpy(out_plugin_info->viewer_path, pi->viewer_path);
+	else
+	  out_plugin_info->viewer_path[0] = '\0';
   }
   return true;
 }
@@ -628,12 +737,26 @@ static bool is_wrapper_plugin(const char *plugin_path, NPW_PluginInfo *out_plugi
   return ret;
 }
 
+static bool is_master_wrapper_plugin(const char *plugin_path)
+{
+  static const char *master_plugin_paths[] = {
+	NPW_LIBDIR "/" HOST_ARCH "/" NPW_WRAPPER,
+	NPW_LIBDIR "/" HOST_ARCH "/" HOST_OS "/" NPW_WRAPPER,
+	NPW_DEFAULT_PLUGIN_PATH,
+	NULL
+  };
+  for (int i = 0; master_plugin_paths[i] != NULL; i++) {
+	if (strcmp(master_plugin_paths[i], plugin_path) == 0)
+	  return true;
+  }
+  return false;
+}
+
 static bool is_wrapper_plugin_0(const char *plugin_path)
 {
   NPW_PluginInfo plugin_info;
   return is_wrapper_plugin(plugin_path, &plugin_info)
-	&& strcmp(plugin_info.path, NPW_DEFAULT_PLUGIN_PATH) != 0			// exclude OS/ARCH npwrapper.so
-	&& strcmp(plugin_info.path, NPW_OLD_DEFAULT_PLUGIN_PATH) != 0;		// exclude ARCH npwrapper.so
+	&& !is_master_wrapper_plugin(plugin_path);
 }
 
 static bool has_system_wide_wrapper_plugin(const char *plugin_path, bool check_ident)
@@ -789,11 +912,17 @@ static int do_install_plugin(const char *plugin_path, const char *plugin_dir, NP
 	if (!is_plugin_viewer_available(plugin_path, plugin_info))
 	  return 15;
   }
+  if (plugin_info->viewer_path[0] == '\0') {
+	if (!is_plugin_viewer_available(plugin_path, plugin_info))
+	  return 16;
+  }
 
   NPW_PluginInfo *pi = (NPW_PluginInfo *)(plugin_data + ofs - NPW_PLUGIN_IDENT_SIZE);
   pi->mtime = st.st_mtime;
   strcpy(pi->target_arch, plugin_info->target_arch);
   strcpy(pi->target_os, plugin_info->target_os);
+  pi->struct_version = w_plugin_info.struct_version;
+  strcpy(pi->viewer_path, plugin_info->viewer_path);
 
   int mode = 0700;
   if (!is_user_home_path(d_plugin_path) &&
@@ -902,6 +1031,7 @@ static int update_plugin(const char *plugin_path)
 
   int ret = 0;
   NPW_PluginInfo plugin_info;
+  memset(&plugin_info, 0, sizeof(plugin_info));
   is_wrapper_plugin(plugin_path, &plugin_info);
 
   struct stat st;
@@ -968,13 +1098,21 @@ static int auto_update_plugins(void)
 static int list_plugin(const char *plugin_path)
 {
   NPW_PluginInfo plugin_info;
+  memset(&plugin_info, 0, sizeof(plugin_info));
   is_wrapper_plugin(plugin_path, &plugin_info);
 
   printf("%s\n", plugin_path);
   printf("  Original plugin: %s\n", plugin_info.path);
+  if (plugin_info.struct_version >= 2 && plugin_info.viewer_path[0] != '\0')
+	printf("  Plugin viewer: %s\n", plugin_info.viewer_path);
   char *str = strtok(plugin_info.ident, ":");
   if (str && strcmp(str, "NPW") == 0) {
 	str = strtok(NULL, ":");
+	if (plugin_info.struct_version >= 2) { /* skip 'X' */
+	  if (str[0] != 'X')
+		error("invalid NPW_PluginInfo format");
+	  str = strtok(NULL, ":");
+	}
 	if (str) {
 	  printf("  Wrapper version string: %s", str);
 	  str = strtok(NULL, ":");
@@ -1083,15 +1221,19 @@ static int process_install(int argc, char *argv[])
 
   for (i = 0; i < argc; i++) {
 	NPW_PluginInfo plugin_info;
+	memset(&plugin_info, 0, sizeof(plugin_info));
+
 	const char *plugin_path = argv[i];
 	if (!is_plugin(plugin_path, &plugin_info))
 	  error("%s is not a valid NPAPI plugin", plugin_path);
+
 	ret = detect_plugin_viewer(plugin_path, &plugin_info);
 	if (ret != EXIT_VIEWER_OK) {
 	  if (ret == EXIT_VIEWER_NATIVE)
 		return 0; /* silently ignore exit status */
 	  error("no appropriate viewer found for %s", plugin_path);
 	}
+
 	ret = install_plugin(plugin_path, &plugin_info);
 	if (ret != 0)
 	  return ret;

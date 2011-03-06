@@ -33,6 +33,18 @@ NPW_MemAllocCopy (uint32_t size, const void *ptr);
 void
 NPW_MemFree (void *ptr);
 
+void *
+NPW_Debug_MemAlloc (uint32_t size, const char *file, int lineno);
+
+void *
+NPW_Debug_MemAlloc0 (uint32_t size, const char *file, int lineno);
+
+void *
+NPW_Debug_MemAllocCopy (uint32_t size, const void *ptr, const char *file, int lineno);
+
+void
+NPW_Debug_MemFree (void *ptr, const char *file, int lineno);
+
 #define NPW_MemNew(type, n) \
   ((type *) NPW_MemAlloc ((n) * sizeof (type)))
 
@@ -41,5 +53,12 @@ NPW_MemFree (void *ptr);
 
 #define NPW_MemClone(type, ptr) \
   ((type *) NPW_MemAllocCopy (sizeof (type), ptr))
+
+#ifdef ENABLE_MALLOC_CHECK
+# define NPW_MemAlloc(SIZE)		NPW_Debug_MemAlloc(SIZE, __FILE__, __LINE__)
+# define NPW_MemAlloc0(SIZE)		NPW_Debug_MemAlloc0(SIZE, __FILE__, __LINE__)
+# define NPW_MemAllocCopy(SIZE, PTR)	NPW_Debug_MemAllocCopy(SIZE, PTR, __FILE__, __LINE__)
+# define NPW_MemFree(PTR)		NPW_Debug_MemFree(PTR, __FILE__, __LINE__)
+#endif
 
 #endif /* NPW_MALLOC_H */

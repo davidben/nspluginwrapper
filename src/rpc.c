@@ -60,8 +60,10 @@
 // build of the viewer can interoperate with non-Linux wrappers. Linux
 // distributions can use this code though.
 // XXX better clean-up dead sockets properly on failure...
-#ifdef BUILD_LINUX_ONLY
+#ifndef BUILD_GENERIC
+#if defined(__linux__)
 #define USE_ANONYMOUS_SOCKETS 1
+#endif
 #endif
 
 // Define the maximum amount of time (in seconds) to wait for a message
@@ -459,6 +461,8 @@ struct rpc_connection {
   int status;
   int socket;
   char *socket_path;
+  struct sockaddr_un socket_addr;
+  socklen_t socket_addr_len;
   int server_socket;
   int server_thread_active;
   pthread_t server_thread;
@@ -663,25 +667,22 @@ static int _rpc_socket_path(char **pathp, const char *ident)
   return n;
 }
 
-// Initialize server-side RPC system
-rpc_connection_t *rpc_init_server(const char *ident)
+// Create a new RPC connection (initialize common structure members)
+static rpc_connection_t *rpc_connection_new(int type, const char *ident)
 {
-  D(bug("rpc_init_server ident='%s'\n", ident));
-
   rpc_connection_t *connection;
-  struct sockaddr_un addr;
-  socklen_t addr_len;
 
   if (ident == NULL)
 	return NULL;
 
-  connection = (rpc_connection_t *)calloc(1, sizeof(*connection));
-  if (connection == NULL)
+  if ((connection = (rpc_connection_t *)calloc(1, sizeof(*connection))) == NULL)
 	return NULL;
-  connection->type = RPC_CONNECTION_SERVER;
+
+  connection->type = type;
   connection->refcnt = 1;
   connection->status = RPC_STATUS_CLOSED;
   connection->socket = -1;
+  connection->server_socket = -1;
   connection->server_thread_active = 0;
   connection->error_callback = NULL;
   connection->error_callback_data = NULL;
@@ -690,136 +691,54 @@ rpc_connection_t *rpc_init_server(const char *ident)
   connection->handle_depth = 0;
   connection->sync_depth = 0;
   connection->pending_sync_depth = 0;
+
   if ((connection->types = rpc_map_new_full((free))) == NULL) {
 	rpc_exit(connection);
 	return NULL;
   }
+
   if ((connection->methods = rpc_map_new()) == NULL) {
 	rpc_exit(connection);
 	return NULL;
   }
 
-  if ((connection->server_socket = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0)) < 0) {
-	perror("server socket");
+  int fd = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0);
+  if (fd < 0) {
+	perror("socket");
 	rpc_exit(connection);
 	return NULL;
   }
 
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-  connection->socket_path = NULL;
-  addr_len = _rpc_socket_path(&connection->socket_path, ident);
-  memcpy(&addr.sun_path[0], connection->socket_path, addr_len);
-  addr_len += offsetof(struct sockaddr_un, sun_path); /* though POSIX says size of the actual sockaddr structure */
-#ifdef HAVE_SOCKADDR_UN_SUN_LEN
-  addr.sun_len = addr_len;
-#endif
+  if (type == RPC_CONNECTION_SERVER)
+	connection->server_socket = fd;
+  else {
+	connection->socket = fd;
 
-  if (bind(connection->server_socket, (struct sockaddr *)&addr, addr_len) < 0) {
-	perror("server bind");
-	rpc_exit(connection);
-	return NULL;
-  }
-
-  if (listen(connection->server_socket, 1) < 0) {
-	perror("server listen");
-	rpc_exit(connection);
-	return NULL;
-  }
-
-  connection->status = RPC_STATUS_ACTIVE;
-  return connection;
-}
-
-// Initialize client-side RPC system
-rpc_connection_t *rpc_init_client(const char *ident)
-{
-  D(bug("rpc_init_client ident='%s'\n", ident));
-
-  rpc_connection_t *connection;
-  struct sockaddr_un addr;
-  socklen_t addr_len;
-
-  if (ident == NULL)
-	return NULL;
-
-  connection = (rpc_connection_t *)calloc(1, sizeof(*connection));
-  if (connection == NULL)
-	return NULL;
-  connection->type = RPC_CONNECTION_CLIENT;
-  connection->refcnt = 1;
-  connection->status = RPC_STATUS_CLOSED;
-  connection->server_socket = -1;
-  connection->error_callback = NULL;
-  connection->error_callback_data = NULL;
-  connection->dispatch_depth = 0;
-  connection->invoke_depth = 0;
-  connection->handle_depth = 0;
-  connection->sync_depth = 0;
-  connection->pending_sync_depth = 0;
-  if ((connection->types = rpc_map_new_full((free))) == NULL) {
-	rpc_exit(connection);
-	return NULL;
-  }
-  if ((connection->methods = rpc_map_new()) == NULL) {
-	rpc_exit(connection);
-	return NULL;
-  }
-
-  if ((connection->socket = socket(AF_UNIX, SOCK_STREAM|SOCK_CLOEXEC, 0)) < 0) {
-	perror("client socket");
-	rpc_exit(connection);
-	return NULL;
-  }
-
-  if (rpc_set_non_blocking_io(connection->socket) < 0) {
-	perror("client socket set non-blocking");
-	rpc_exit(connection);
-	return NULL;
-  }
-
-  memset(&addr, 0, sizeof(addr));
-  addr.sun_family = AF_UNIX;
-  connection->socket_path = NULL;
-  addr_len = _rpc_socket_path(&connection->socket_path, ident);
-  memcpy(&addr.sun_path[0], connection->socket_path, addr_len);
-  addr_len += offsetof(struct sockaddr_un, sun_path); /* though POSIX says size of the actual sockaddr structure */
-#ifdef HAVE_SOCKADDR_UN_SUN_LEN
-  addr.sun_len = addr_len;
-#endif
-
-  // Wait at most RPC_INIT_TIMEOUT seconds for server to initialize
-  const int N_CONNECT_WAIT_DELAY = 10;
-  int n_connect_attempts = (rpc_init_timeout() * 1000) / N_CONNECT_WAIT_DELAY;
-  if (n_connect_attempts == 0)
-	n_connect_attempts = 1;
-  while (n_connect_attempts > 0) {
-	if (connect(connection->socket, (struct sockaddr *)&addr, addr_len) == 0)
-	  break;
-	if (n_connect_attempts > 1 && errno != ECONNREFUSED && errno != ENOENT) {
-	  perror("client_connect");
+	if (rpc_set_non_blocking_io(fd) < 0) {
+	  perror("socket set non-blocking");
 	  rpc_exit(connection);
 	  return NULL;
 	}
-	n_connect_attempts--;
-	rpc_delay(N_CONNECT_WAIT_DELAY * 1000);
-  }
-  if (n_connect_attempts == 0) {
-	rpc_exit(connection);
-	return NULL;
   }
 
-  connection->status = RPC_STATUS_ACTIVE;
+  memset(&connection->socket_addr, 0, sizeof(connection->socket_addr));
+  connection->socket_addr.sun_family = AF_UNIX;
+  connection->socket_path = NULL;
+  connection->socket_addr_len = _rpc_socket_path(&connection->socket_path, ident);
+  memcpy(&connection->socket_addr.sun_path[0], connection->socket_path, connection->socket_addr_len);
+  connection->socket_addr_len += offsetof(struct sockaddr_un, sun_path); /* though POSIX says size of the actual sockaddr structure */
+#ifdef HAVE_SOCKADDR_UN_SUN_LEN
+  connection->socket_addr.sun_len = connection->socket_addr_len;
+#endif
+
   return connection;
 }
 
-// Close RPC connection
-int rpc_exit(rpc_connection_t *connection)
+// Destroy an RPC connection
+static void rpc_connection_destroy(rpc_connection_t *connection)
 {
-  D(bug("rpc_exit\n"));
-
   if (connection == NULL)
-	return RPC_ERROR_CONNECTION_NULL;
+	return;
 
   if (connection->socket_path) {
 	if (connection->socket_path[0])
@@ -860,6 +779,78 @@ int rpc_exit(rpc_connection_t *connection)
   }
 
   free(connection);
+}
+
+// Initialize server-side RPC system
+rpc_connection_t *rpc_init_server(const char *ident)
+{
+  D(bug("rpc_init_server ident='%s'\n", ident));
+
+  rpc_connection_t *connection;
+
+  if ((connection = rpc_connection_new(RPC_CONNECTION_SERVER, ident)) == NULL)
+	return NULL;
+
+  if (bind(connection->server_socket, (struct sockaddr *)&connection->socket_addr, connection->socket_addr_len) < 0) {
+	perror("server bind");
+	rpc_exit(connection);
+	return NULL;
+  }
+
+  if (listen(connection->server_socket, 1) < 0) {
+	perror("server listen");
+	rpc_exit(connection);
+	return NULL;
+  }
+
+  connection->status = RPC_STATUS_ACTIVE;
+  return connection;
+}
+
+// Initialize client-side RPC system
+rpc_connection_t *rpc_init_client(const char *ident)
+{
+  D(bug("rpc_init_client ident='%s'\n", ident));
+
+  rpc_connection_t *connection;
+
+  if ((connection = rpc_connection_new(RPC_CONNECTION_CLIENT, ident)) == NULL)
+	return NULL;
+
+  // Wait at most RPC_INIT_TIMEOUT seconds for server to initialize
+  const int N_CONNECT_WAIT_DELAY = 10;
+  int n_connect_attempts = (rpc_init_timeout() * 1000) / N_CONNECT_WAIT_DELAY;
+  if (n_connect_attempts == 0)
+	n_connect_attempts = 1;
+  while (n_connect_attempts > 0) {
+	if (connect(connection->socket, (struct sockaddr *)&connection->socket_addr, connection->socket_addr_len) == 0)
+	  break;
+	if (n_connect_attempts > 1 && errno != ECONNREFUSED && errno != ENOENT) {
+	  perror("client_connect");
+	  rpc_exit(connection);
+	  return NULL;
+	}
+	n_connect_attempts--;
+	rpc_delay(N_CONNECT_WAIT_DELAY * 1000);
+  }
+  if (n_connect_attempts == 0) {
+	rpc_exit(connection);
+	return NULL;
+  }
+
+  connection->status = RPC_STATUS_ACTIVE;
+  return connection;
+}
+
+// Close RPC connection
+int rpc_exit(rpc_connection_t *connection)
+{
+  D(bug("rpc_exit\n"));
+
+  if (connection == NULL)
+	return RPC_ERROR_CONNECTION_NULL;
+
+  rpc_connection_destroy(connection);
   return RPC_ERROR_NO_ERROR;
 }
 

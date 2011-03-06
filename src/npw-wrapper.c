@@ -21,7 +21,6 @@
 #define _GNU_SOURCE 1 /* RTLD_DEFAULT */
 #include "sysdeps.h"
 
-#include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -61,11 +60,16 @@ const NPW_PluginInfo NPW_Plugin = {
   NPW_DEFAULT_PLUGIN_PATH,
   0,
   HOST_OS,
-  HOST_ARCH
+  HOST_ARCH,
+  NPW_PLUGIN_INFO_VERSION,
+  ""
 };
 
 // Path to plugin to use
 static const char *plugin_path = NPW_Plugin.path;
+
+// Path to associated plugin viewer
+static const char *plugin_viewer_path = NPW_Plugin.viewer_path;
 
 // Netscape exported functions
 static NPNetscapeFuncs mozilla_funcs;
@@ -2607,7 +2611,7 @@ g_NP_GetValue(void *future, NPPVariable variable, void *value)
 	  str =
 		"<a href=\"http://gwenole.beauchesne.info/projects/nspluginwrapper/\">nspluginwrapper</a> "
 		" is a cross-platform NPAPI plugin viewer, in particular for linux/i386 plugins.<br>"
-		"This software is available under the terms of the GNU General Public License.<br>"
+		"This <b>beta</b> software is available under the terms of the GNU General Public License.<br>"
 		;
 	  ret = NPERR_NO_ERROR;
 	}
@@ -3348,15 +3352,13 @@ static void plugin_init(int is_NP_Initialize)
 
   static int init_count = 0;
   ++init_count;
-  char viewer_path[PATH_MAX];
-  sprintf(viewer_path, "%s/%s/%s/%s", NPW_LIBDIR, NPW_Plugin.target_arch, NPW_Plugin.target_os, NPW_VIEWER);
   char connection_path[128];
   sprintf(connection_path, "%s/%s/%d-%d", NPW_CONNECTION_PATH, plugin_file_name, getpid(), init_count);
 
   // Cache MIME info and plugin name/description
   if (g_plugin.name == NULL && g_plugin.description == NULL && g_plugin.formats == NULL) {
 	char command[1024];
-	if (snprintf(command, sizeof(command), "%s --info --plugin %s", viewer_path, plugin_path) >= sizeof(command))
+	if (snprintf(command, sizeof(command), "%s --info --plugin %s", plugin_viewer_path, plugin_path) >= sizeof(command))
 	  return;
 	FILE *viewer_fp = popen(command, "r");
 	if (viewer_fp == NULL)
@@ -3416,7 +3418,7 @@ static void plugin_init(int is_NP_Initialize)
 
 	npw_close_all_open_files();
 
-	execv(viewer_path, argv);
+	execv(plugin_viewer_path, argv);
 	npw_printf("ERROR: failed to execute NSPlugin viewer\n");
 	_Exit(255);
   }

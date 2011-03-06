@@ -195,6 +195,7 @@ void g_hash_table_lookup_extended() {} ;
 void g_hash_table_new() {} ;
 void g_hash_table_new_full() {} ;
 void g_hash_table_remove() {} ;
+void g_hash_table_remove_all() {} ;
 void g_hash_table_replace() {} ;
 void g_hash_table_size() {} ;
 void g_hash_table_steal() {} ;
