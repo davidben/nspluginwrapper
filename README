@@ -1,0 +1,99 @@
+
+  nspluginwrapper
+  A cross-platform NPAPI plugin viewer
+
+  Copyright (C) 2005-2006 Gwenole Beauchesne
+
+
+License
+-------
+
+nspluginwrapper is available under the terms of the GNU General Public License.
+See the file "COPYING" that is included in the distribution for details.
+
+
+Overview
+--------
+
+nspluginwrapper consists in a proxy plugin and a viewer for NPAPI
+compatible plugins. It makes it possible to use 32-bit x86 plugins
+like Adobe Flash Player on other platforms like Linux/x86_64, *BSD and
+even Linux/ppc.
+
+
+Quick build notes
+-----------------
+
+To simplify the build of the 32-bit viewer, a minimal subset of LSB
+Desktop 3.1 is included in this distribution. Hence, you only have
+to proceed as follows:
+
+$ ./configure
+$ make
+# make install
+
+Or, if you prefer from a source package:
+$ rpm --rebuild nspluginwrapper.src.rpm
+
+
+Requirements and Installation
+-----------------------------
+
+A Mozilla based browser built with GTK 2 support is currently required
+for proper operation. An alternative is Konqueror but it does not yet
+support the npruntime scripting API.
+
+On package installation, 32-bit plugins are automatically recognized
+provided they are available in the /usr/lib/mozilla/plugins directory.
+
+You can manually install/remove/update plugins with "nspluginwrapper".
+
+   usage: nspluginwrapper [flags] [command [plugin(s)]]
+
+   -h --help               print this message
+   -a --auto               set automatic mode for plugins discovery
+   -l --list               list plugins currently installed
+   -u --update             update plugin(s) currently installed
+   -i --install [FILE(S)]  install plugin(s)
+   -r --remove [FILE(S)]   remove plugin(s)
+
+[plugin(s)] are full paths to actual plugin binaries (e.g. nppdf.so
+for Acrobat Reader, libflashplayer.so for Flash).
+
+
+Compatibility List
+------------------
+
+Please bear in mind this is *BETA* software.
+
+The following plugins work reasonnably well:
+- Acrobat Reader      5.0.9
+- Acrobat Reader      7.0.1
+- DejaVu Libre	      3.5.14
+- Flash Player	      7.0
+- Flash Player        9.0b2
+- Linux J2K           0.0.2
+- Mplayerplug-in      2.80
+- Mplayerplug-in      3.25
+- Real Player         8.0
+- Real Player         10.0.5
+- Tcl plugin          3.1
+- Squeak VM plugin    3.7
+
+Broken or partially working:
+- Real Player         8.0
+- Adobe SVG           3.01x88
+
+
+History
+-------
+
+Please consult the file "NEWS" for the release history.
+An auto-generated "ChangeLog" is also available in this distribution.
+
+
+Author
+------
+
+Gwenole Beauchesne,
+<gb.public@free.fr>

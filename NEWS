@@ -1,0 +1,38 @@
+nspluginwrapper NEWS -- history of user-visible changes.  2006-12-26
+Copyright (C) 2006 Gwenole Beauchesne
+
+Version 0.9.91.1 (BETA) - 26.Dec.2006
+* Fix NPRuntime bridge (VLC plugin)
+* Fix Mozilla plugins dir creation on NetBSD and FreeBSD hosts
+* Fix potential buffer overflow in RPC marshalers
+* Handle empty args for plugin creation (flasharcade.com)
+
+Version 0.9.91 (BETA) - 22.Dec.2006
+* Add scripting support through the NPRuntime API
+* Add XEMBED support for e.g. MPlayer plug-in
+* Add support for NetBSD, FreeBSD and non-x86 Linux platforms
+* Fix focus problems
+* Fix some rare hangs
+* Create Mozilla plugins dir if it does not exist yet
+
+Version 0.9.90.4 (BETA) - 18.Nov.2006
+* Robustify error condition (Darryl L. Miles)
+* Reduce plugin load times
+* Fix post data to a URL
+* Add printing support
+* Add Konqueror browser support
+
+Version 0.9.90.3 (BETA) - 19.Sep.2006
+* Fix acrobat reader 7 plugin
+
+Version 0.9.90.2 (BETA) - 15.Sep.2006
+* Use a bidirectional communication channel rather than two channels +
+  a "delayed" execution engine
+
+Version 0.9.90.1 (BETA) - 05.Jun.2006
+* Handle SuSE Linux Mozilla paths
+* Don't use QEMU on IA-64 platforms
+* Portability fixes to non-Linux platforms
+
+Version 0.9.90 (BETA) - 25.Oct.2005
+* First public beta that has decent Flash Player support
