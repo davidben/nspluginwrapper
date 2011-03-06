@@ -55,7 +55,7 @@
    */
   #include <inttypes.h>
 
-  #ifndef __cplusplus
+  #if !defined(__cplusplus) && !defined(bool)
     typedef int bool;
   #endif
 #elif defined(bsdi) || defined(FREEBSD) || defined(OPENBSD)

@@ -811,7 +811,7 @@ void npobject_destroy(NPObject *npobj)
 
 void npobject_associate(NPObject *npobj, NPObjectInfo *npobj_info)
 {
-  assert(npobj && npobj_info && npobj_info > 0);
+  assert(npobj && npobj_info && npobj_info->npobj_id > 0);
   npobject_hash_table_insert(npobj, npobj_info);
 }
 
@@ -835,10 +835,14 @@ bool npobject_bridge_new(void)
 
 void npobject_bridge_destroy(void)
 {
-  if (g_npobject_ids)
+  if (g_npobject_ids) {
 	g_hash_table_destroy(g_npobject_ids);
-  if (g_npobjects)
+	g_npobject_ids = NULL;
+  }
+  if (g_npobjects) {
 	g_hash_table_destroy(g_npobjects);
+	g_npobjects = NULL;
+  }
 }
 
 void npobject_hash_table_insert(NPObject *npobj, NPObjectInfo *npobj_info)

@@ -146,13 +146,13 @@ handle_f3 (rpc_connection_t *connection)
 static int
 handle_f4 (rpc_connection_t *connection)
 {
-  handle_fN (connection, RPC_TEST_METHOD_F4);
+  return handle_fN (connection, RPC_TEST_METHOD_F4);
 }
 
 static int
 handle_f5 (rpc_connection_t *connection)
 {
-  handle_fN (connection, RPC_TEST_METHOD_F5);
+  return handle_fN (connection, RPC_TEST_METHOD_F5);
 }
 
 int

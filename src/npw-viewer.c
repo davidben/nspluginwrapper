@@ -111,11 +111,13 @@ static void destroy_window(PluginInstance *plugin);
 static void *plugin_instance_allocate(void);
 static void plugin_instance_deallocate(PluginInstance *plugin);
 static void plugin_instance_finalize(PluginInstance *plugin);
+static void plugin_instance_invalidate(PluginInstance *plugin);
 
 static NPW_PluginInstanceClass PluginInstanceClass = {
   (NPW_PluginInstanceAllocateFunctionPtr)plugin_instance_allocate,
   (NPW_PluginInstanceDeallocateFunctionPtr)plugin_instance_deallocate,
-  (NPW_PluginInstanceFinalizeFunctionPtr)plugin_instance_finalize
+  (NPW_PluginInstanceFinalizeFunctionPtr)plugin_instance_finalize,
+  (NPW_PluginInstanceInvalidateFunctionPtr)plugin_instance_invalidate
 };
 
 static void *plugin_instance_allocate(void)
@@ -134,7 +136,30 @@ static void plugin_instance_finalize(PluginInstance *plugin)
 	g_object_unref(plugin->browser_toplevel);
 	plugin->browser_toplevel = NULL;
   }
+  if (plugin->instance) {
+	free(plugin->instance);
+	plugin->instance = NULL;
+  }
+}
+
+static void plugin_instance_invalidate(PluginInstance *plugin)
+{
   destroy_window(plugin);
+
+  /* NPP instance is no longer valid beyond this point. Drop the link
+	 to the PluginInstance now so that future RPC with this
+	 PluginInstance will actually emit a NULL instance, which the
+	 other side will deal as a no-op for all functions but
+	 NPN_GetValue().
+
+	 However, don't free() the NPP instance yet as it could be used
+	 later, e.g. in some NPObject::Invalidate()... Note: this also
+	 means we forbid that function to call into the browser in an NPP
+	 instance. */
+  if (plugin->instance_id) {
+	id_remove(plugin->instance_id);
+	plugin->instance_id = 0;
+  }
 }
 
 // Pid support routines
@@ -671,7 +696,9 @@ static void destroy_window(PluginInstance *plugin)
 	if (plugin->use_xembed) {
 	  GtkData *toolkit = (GtkData *)plugin->toolkit_data;
 	  if (toolkit->container) {
+		gdk_flush();
 		gtk_widget_destroy(toolkit->container);
+		gdk_flush();
 		toolkit->container = NULL;
 	  }
 	}
@@ -682,6 +709,7 @@ static void destroy_window(PluginInstance *plugin)
 		XtUnrealizeWidget(toolkit->top_widget);
 		XtDestroyWidget(toolkit->top_widget);
 		XSync(x_display, False);
+		toolkit->top_widget = None;
 	  }
 	}
 	free(plugin->toolkit_data);
@@ -919,7 +947,7 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 	*(void **)value = XtDisplayToApplicationContext(x_display);
 	break;
   case NPNVToolkit:
-	*(NPNToolkitType *)value = NPNVGtk2;
+	*(NPNToolkitType *)value = NPW_TOOLKIT;
 	break;
 #if USE_XPCOM
   case NPNVserviceManager: {
@@ -963,6 +991,15 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
   case NPNVPluginElementNPObject:
 	return g_NPN_GetValue_real(instance, variable, value);
   default:
+	switch (variable & 0xff) {
+	case 13: /* NPNVToolkit */
+	  if (NPW_TOOLKIT == NPNVGtk2) {
+		// Gtk2 does not need to depend on a specific C++ ABI
+		*(NPNToolkitType *)value = NPW_TOOLKIT;
+		return NPERR_NO_ERROR;
+	  }
+	  break;
+	}
 	npw_printf("WARNING: unhandled variable %d (%s) in NPN_GetValue()\n", variable, string_of_NPNVariable(variable));
 	return NPERR_INVALID_PARAM;
   }
@@ -3035,17 +3072,7 @@ static NPError g_NPP_Destroy(NPP instance, NPSavedData **sdata)
   NPError ret = plugin_funcs.destroy(instance, sdata);
   D(bugiD("NPP_Destroy return: %d [%s]\n", ret, string_of_NPError(ret)));
 
-  /* NPP instance is no longer valid beyond this point. So, let's also
-	 drop the link to the PluginInstance now */
-  plugin->instance = NULL;
-  instance->ndata = NULL;
-  id_remove(plugin->instance_id);
-  plugin->instance_id = 0;
-  /* ... reset instance_id so that future RPC with this PluginInstance
-	 will actually emit a NULL instance, which the other side will
-	 deal as a no-op for all functions but NPN_GetValue() */
-  free(instance);
-
+  npw_plugin_instance_invalidate(plugin);
   npw_plugin_instance_unref(plugin);
   return ret;
 }
@@ -4008,16 +4035,30 @@ int main(int argc, char **argv)
   }
 
   // Open plug-in and get exported lib functions
-  void *handle = NULL;
+  void *handles[10] = { NULL, };
+  int n_handles = 0;
   if (plugin_path == NULL)
 	cmd = CMD_HELP;
   else {
+	void *handle;
 	const char *error;
+#if defined(__sun)
+	/* XXX: check for Flash Player only? */
+	const char SunStudio_libCrun[] = "libCrun.so.1";
+	D(bug("  trying to open SunStudio C++ runtime '%s'\n", SunStudio_libCrun));
+	if ((handle = dlopen(SunStudio_libCrun, RTLD_LAZY|RTLD_GLOBAL)) == NULL) {
+	  npw_printf("ERROR: %s\n", dlerror());
+	  return 1;
+	}
+	handles[n_handles++] = handle;
+	dlerror();
+#endif
 	D(bug("  %s\n", plugin_path));
 	if ((handle = dlopen(plugin_path, RTLD_LAZY)) == NULL) {
 	  npw_printf("ERROR: %s\n", dlerror());
 	  return 1;
 	}
+	handles[n_handles++] = handle;
 	dlerror();
 	g_plugin_NP_GetMIMEDescription = (NP_GetMIMEDescriptionUPP)dlsym(handle, "NP_GetMIMEDescription");
 	if ((error = dlerror()) != NULL) {
@@ -4053,7 +4094,10 @@ int main(int argc, char **argv)
 	break;
   }
 
-  if (handle)
-	dlclose(handle);
+  while (--n_handles >= 0) {
+	void * const handle = handles[n_handles];
+	if (handle)
+	  dlclose(handle);
+  }
   return ret;
 }

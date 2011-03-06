@@ -39,6 +39,123 @@
 #define XP_UNIX
 #endif
 
+#if defined(__sun)
+
+#ifndef SOLARIS
+#define SOLARIS
+#endif
+
+#define PR_AF_INET6 26  /* same as AF_INET6 */
+
+#if defined(sparc) || defined(__sparc)
+#undef  IS_LITTLE_ENDIAN
+#define IS_BIG_ENDIAN 1
+#define PR_ALIGN_OF_INT64   8
+#define PR_ALIGN_OF_DOUBLE  8
+#if defined(__sparcv9)
+#define IS_64
+#endif
+#elif defined(__x86_64)
+#define IS_LITTLE_ENDIAN 1
+#undef  IS_BIG_ENDIAN
+#define PR_ALIGN_OF_INT64   8
+#define PR_ALIGN_OF_DOUBLE  8
+#define IS_64
+#elif defined(i386) || defined(__i386)
+#define IS_LITTLE_ENDIAN 1
+#undef  IS_BIG_ENDIAN
+#define PR_ALIGN_OF_INT64   4
+#define PR_ALIGN_OF_DOUBLE  4
+#else
+#error unknown processor
+#endif
+
+#ifdef IS_64
+
+#define PR_BYTES_PER_BYTE   1
+#define PR_BYTES_PER_SHORT  2
+#define PR_BYTES_PER_INT    4
+#define PR_BYTES_PER_INT64  8
+#define PR_BYTES_PER_LONG   8
+#define PR_BYTES_PER_FLOAT  4
+#define PR_BYTES_PER_DOUBLE 8
+#define PR_BYTES_PER_WORD   8
+#define PR_BYTES_PER_DWORD  8
+#define PR_BYTES_PER_WORD_LOG2   3
+#define PR_BYTES_PER_DWORD_LOG2  3
+
+#define PR_BITS_PER_BYTE    8
+#define PR_BITS_PER_SHORT   16
+#define PR_BITS_PER_INT     32
+#define PR_BITS_PER_INT64   64
+#define PR_BITS_PER_LONG    64
+#define PR_BITS_PER_FLOAT   32
+#define PR_BITS_PER_DOUBLE  64
+#define PR_BITS_PER_WORD    64
+
+#define PR_BITS_PER_BYTE_LOG2   3
+#define PR_BITS_PER_SHORT_LOG2  4
+#define PR_BITS_PER_INT_LOG2    5
+#define PR_BITS_PER_INT64_LOG2  6
+#define PR_BITS_PER_LONG_LOG2   6
+#define PR_BITS_PER_FLOAT_LOG2  5
+#define PR_BITS_PER_DOUBLE_LOG2 6
+#define PR_BITS_PER_WORD_LOG2   6
+
+#define PR_ALIGN_OF_SHORT   2
+#define PR_ALIGN_OF_INT     4
+#define PR_ALIGN_OF_LONG    8
+#define PR_ALIGN_OF_FLOAT   4
+#define PR_ALIGN_OF_POINTER 8
+
+#else /* IS_64 */
+
+#define PR_BYTES_PER_BYTE   1
+#define PR_BYTES_PER_SHORT  2
+#define PR_BYTES_PER_INT    4
+#define PR_BYTES_PER_INT64  8
+#define PR_BYTES_PER_LONG   4
+#define PR_BYTES_PER_FLOAT  4
+#define PR_BYTES_PER_DOUBLE 8
+#define PR_BYTES_PER_WORD   4
+#define PR_BYTES_PER_DWORD  8
+#define PR_BYTES_PER_WORD_LOG2   2
+#define PR_BYTES_PER_DWORD_LOG2  3
+
+#define PR_BITS_PER_BYTE    8
+#define PR_BITS_PER_SHORT   16
+#define PR_BITS_PER_INT     32
+#define PR_BITS_PER_INT64   64
+#define PR_BITS_PER_LONG    32
+#define PR_BITS_PER_FLOAT   32
+#define PR_BITS_PER_DOUBLE  64
+#define PR_BITS_PER_WORD    32
+
+#define PR_BITS_PER_BYTE_LOG2   3
+#define PR_BITS_PER_SHORT_LOG2  4
+#define PR_BITS_PER_INT_LOG2    5
+#define PR_BITS_PER_INT64_LOG2  6
+#define PR_BITS_PER_LONG_LOG2   5
+#define PR_BITS_PER_FLOAT_LOG2  5
+#define PR_BITS_PER_DOUBLE_LOG2 6
+#define PR_BITS_PER_WORD_LOG2   5
+
+#define PR_ALIGN_OF_SHORT   2
+#define PR_ALIGN_OF_INT     4
+#define PR_ALIGN_OF_LONG    4
+#define PR_ALIGN_OF_FLOAT   4
+#define PR_ALIGN_OF_POINTER 4
+
+#endif /* IS_64 */
+
+#ifndef HAVE_LONG_LONG
+#define	HAVE_LONG_LONG
+#endif
+#define	HAVE_ALIGNED_DOUBLES
+#define	HAVE_ALIGNED_LONGLONGS
+
+#else
+
 #ifndef LINUX
 #define LINUX
 #endif
@@ -658,6 +775,8 @@
 #if PR_ALIGN_OF_INT64 == 8
 #define HAVE_ALIGNED_LONGLONGS
 #endif
+
+#endif /* LINUX */
 
 #ifndef NO_NSPR_10_SUPPORT
 

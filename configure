@@ -164,14 +164,15 @@ if test "$linux_only" = "guess"; then
     fi
 fi
 
-# check for biarch build
+# check for biarch build (Linux only)
 if test "$biarch" = "guess"; then
+    # XXX: biarch builds require LSB headers for now
+    biarch="no"
     case $host_cpu:$target_cpu in
     x86_64:i386 | ppc64:ppc)
-	biarch="yes"
-	;;
-    *)
-	biarch="no"
+	if test "$host_os" = "linux"; then
+	    biarch="yes"
+	fi
 	;;
     esac
 fi
@@ -308,6 +309,8 @@ cat > $TMPC << EOF
 #define COMPILER_NAME "xlc"
 #elif defined __sgi
 #define COMPILER_NAME "mipspro"
+#elif defined __SUNPRO_C || defined __SUNPRO_CC
+#define COMPILER_NAME "sunstudio"
 #else
 #define COMPILER_NAME "unknown"
 #endif
@@ -340,7 +343,9 @@ if test "$compiler" = "gcc"; then
 	cc="$cc -std=c99"
     fi
 elif test "$compiler" = "icc"; then
-    if check_cc_option -c99; then
+    if check_cc_option -std=c99; then
+	cc="$cc -std=c99"
+    elif check_cc_option -c99; then
 	cc="$cc -c99"
     fi
 elif test "$compiler" = "xlc"; then
@@ -350,6 +355,10 @@ elif test "$compiler" = "xlc"; then
 elif test "$compiler" = "mipspro"; then
     if check_cc_option -c99; then
 	cc="$cc -c99"
+    fi
+elif test "$compiler" = "sunstudio"; then
+    if check_cc_option -xc99; then
+	cc="$cc -xc99"
     fi
 fi
 

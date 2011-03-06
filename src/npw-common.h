@@ -36,6 +36,7 @@
 /* Supported NPAPI interfaces */
 #define NPW_NPAPI_VERSION		17
 #define NPW_NP_CLASS_STRUCT_VERSION	1
+#define NPW_TOOLKIT			NPNVGtk2
 
 /* What are we building? */
 #if defined BUILD_WRAPPER
@@ -58,7 +59,8 @@
   NPW_PluginInstanceClass *klass;		\
   uint32_t                 refcount;		\
   NPP                      instance;		\
-  uint32_t                 instance_id;
+  uint32_t                 instance_id;		\
+  bool                     is_valid
 
 typedef struct _NPW_PluginInstance	NPW_PluginInstance;
 typedef struct _NPW_PluginInstanceClass	NPW_PluginInstanceClass;
@@ -77,11 +79,15 @@ typedef void
 typedef void
 (*NPW_PluginInstanceFinalizeFunctionPtr) (NPW_PluginInstance *plugin);
 
+typedef void
+(*NPW_PluginInstanceInvalidateFunctionPtr) (NPW_PluginInstance *plugin);
+
 struct _NPW_PluginInstanceClass
 {
   NPW_PluginInstanceAllocateFunctionPtr   allocate;
   NPW_PluginInstanceDeallocateFunctionPtr deallocate;
   NPW_PluginInstanceFinalizeFunctionPtr   finalize;
+  NPW_PluginInstanceInvalidateFunctionPtr invalidate;
 };
 
 void *
@@ -92,6 +98,16 @@ npw_plugin_instance_ref(void *ptr) attribute_hidden;
 
 void
 npw_plugin_instance_unref(void *ptr) attribute_hidden;
+
+void
+npw_plugin_instance_invalidate(void *ptr) attribute_hidden;
+
+static inline bool
+npw_plugin_instance_is_valid(void *ptr)
+{
+  NPW_PluginInstance *plugin = (NPW_PluginInstance *)ptr;
+  return plugin && plugin->is_valid;
+}
 
 #define NPW_PLUGIN_INSTANCE(instance)	npw_get_plugin_instance (instance)
 #define NPW_PLUGIN_INSTANCE_NPP(plugin)	npw_get_plugin_instance_npp (plugin)
@@ -135,7 +151,7 @@ npw_get_plugin_instance_npp (NPW_PluginInstance *plugin)
 #define NPW_DECL_STREAM_INSTANCE		\
   NPStream *stream;				\
   uint32_t  stream_id;				\
-  int       is_plugin_stream;
+  int       is_plugin_stream
 
 typedef struct _NPW_StreamInstance NPW_StreamInstance;
 struct _NPW_StreamInstance

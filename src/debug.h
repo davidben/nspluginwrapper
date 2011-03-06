@@ -73,7 +73,7 @@ extern void npw_vprintf(const char *format, va_list args) attribute_hidden;
   }													\
 } while (0)
 #else
-# define npw_return_if_fail(expr, val)		do {} while (0)
+# define npw_return_if_fail(expr)			do {} while (0)
 # define npw_return_val_if_fail(expr, val)	do {} while (0)
 #endif
 

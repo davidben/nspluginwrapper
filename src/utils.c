@@ -249,7 +249,14 @@ const char *string_of_NPPVariable(int variable)
 	_(NPPVformValue);
 #undef _
   default:
-	str = "<unknown variable>";
+	switch (variable & 0xff) {
+#define _(VAL, VAR) case VAL: str = #VAR; break
+	  _(10, NPPVpluginScriptableInstance);
+#undef _
+	default:
+	  str = "<unknown variable>";
+	  break;
+	}
 	break;
   }
 
@@ -278,7 +285,17 @@ const char *string_of_NPNVariable(int variable)
 	_(NPNVSupportsWindowless);
 #undef _
   default:
-	str = "<unknown variable>";
+	switch (variable & 0xff) {
+#define _(VAL, VAR) case VAL: str = #VAR; break
+	  _(10, NPNVserviceManager);
+	  _(11, NPNVDOMElement);
+	  _(12, NPNVDOMWindow);
+	  _(13, NPNVToolkit);
+#undef _
+	default:
+	  str = "<unknown variable>";
+	  break;
+	}
 	break;
   }
 
@@ -360,6 +377,7 @@ void npw_close_all_open_files(void)
 {
   const int min_fd = 3;
 
+#if defined(__linux__)
   DIR *dir = opendir("/proc/self/fd");
   if (dir) {
 	const int dfd = dirfd(dir);
@@ -374,12 +392,13 @@ void npw_close_all_open_files(void)
 	  }
 	}
 	closedir(dir);
+	return;
   }
-  else {
-	const int open_max = get_open_max();
-	for (int fd = min_fd; fd < open_max; fd++)
-	  close(fd);
-  }
+#endif
+
+  const int open_max = get_open_max();
+  for (int fd = min_fd; fd < open_max; fd++)
+	close(fd);
 }
 
 

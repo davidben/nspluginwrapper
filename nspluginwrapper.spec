@@ -1,5 +1,5 @@
 %define name	nspluginwrapper
-%define version	1.1.10
+%define version	1.2.0
 %define release	1
 #define svndate	DATE
 
@@ -160,7 +160,6 @@ fi
 %dir %{pkglibdir}
 %dir %{pkglibdir}/noarch
 %{pkglibdir}/noarch/npviewer
-%{pkglibdir}/noarch/mkruntime
 %dir %{pkglibdir}/%{_arch}
 %dir %{pkglibdir}/%{_arch}/%{_os}
 %{pkglibdir}/%{_arch}/%{_os}/npconfig
@@ -192,6 +191,15 @@ fi
 %endif
 
 %changelog
+* Fri Dec 26 2008 Gwenole Beauchesne <gb.public@free.fr> 1.2.0-1
+- drop obsolete mkruntime scripts
+- use valgrind if NPW_USE_VALGRIND=yes
+- add support for SunStudio compilers
+- add support for Flash Player 10 on OpenSolaris 2008.11
+- fix build on non-Linux platforms
+- fix NPP_Destroy() to keep NPP instances longer
+- fix NPP_Destroy() to destroy the plugin window immediately
+
 * Mon Dec 08 2008 Gwenole Beauchesne <gb.public@free.fr> 1.1.10-1
 - fix NPPVpluginScriptableNPObject::Invalidate()
 - fix condition for delayed NPN_ReleaseObject() call

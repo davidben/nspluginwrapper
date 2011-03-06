@@ -201,7 +201,7 @@ static int _rpc_init_timeout(void)
 	timeout = atoi(timeout_str);
   if (timeout <= 0)
 	timeout = RPC_INIT_TIMEOUT;
-  D(bug("RPC message timeout set to %d sec\n", timeout));
+  D(bug("RPC init timeout set to %d sec\n", timeout));
   return timeout;
 }
 

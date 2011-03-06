@@ -42,6 +42,7 @@ npw_plugin_instance_new(NPW_PluginInstanceClass *klass)
     {
       plugin->klass = klass;
       plugin->refcount = 1;
+      plugin->is_valid = true;
     }
   return plugin;
 }
@@ -70,6 +71,18 @@ npw_plugin_instance_unref(void *ptr)
     klass->deallocate (plugin);
   else
     NPW_MemFree (plugin);
+}
+
+void
+npw_plugin_instance_invalidate(void *ptr)
+{
+  NPW_PluginInstance *plugin = (NPW_PluginInstance *)ptr;
+  if (plugin == NULL)
+    return;
+  NPW_PluginInstanceClass *klass = plugin->klass;
+  if (klass && klass->invalidate)
+    klass->invalidate(ptr);
+  plugin->is_valid = false;
 }
 
 /* ====================================================================== */

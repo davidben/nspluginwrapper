@@ -26,6 +26,11 @@ export LD_LIBRARY_PATH=$NPW_VIEWER_DIR
 # XXX: BTW, anything other than "yes" is interpreted as "no"
 NPW_USE_XSHM=${NPW_USE_XSHM:-yes}
 
+# Enable use of valgrind?
+# Define NPW_VALGRIND_OPTIONS if you want to pass additional options to valgrind
+NPW_USE_VALGRIND=${NPW_USE_VALGRIND:-no}
+can_use_valgrind="no"
+
 case $ARCH in
 i?86|i86pc)
     ARCH=i386
@@ -55,7 +60,7 @@ if test "$ARCH" != "$TARGET_ARCH"; then
 	else
 	    LOADER=`which qemu-i386`
 	    # Don't allow Xshm with qemu
-	    NPW_USE_XSHM=no
+	    NPW_USE_XSHM="no"
 	fi
 	;;
     ppc)
@@ -68,7 +73,7 @@ if test "$ARCH" != "$TARGET_ARCH"; then
 	else
 	    LOADER=`which qemu-ppc`
 	    # Don't allow Xshm with qemu
-	    NPW_USE_XSHM=no
+	    NPW_USE_XSHM="no"
 	fi
 	;;
     esac
@@ -103,7 +108,7 @@ fi
 # Use sound wrappers wherever possible (Flash 9 plugin)
 case " $@ " in
 *" --test "*|*" -t "*)
-    # do nothing
+    # do nothing, don't even allow valgrind'ing here
     ;;
 *)
     # XXX: detect QEMU target soundwrapper differently
@@ -120,9 +125,22 @@ case " $@ " in
 		fi
 	    fi
 	fi
+	can_use_valgrind="yes"
+	;;
+    "")
+	can_use_valgrind="yes"
 	;;
     esac
     ;;
 esac
+
+if test "$NPW_USE_VALGRIND:$can_use_valgrind" = "yes:yes"; then
+    valgrind=`which valgrind 2>/dev/null`
+    if test -x "$valgrind"; then
+	LOADER="$LOADER $valgrind --log-fd=1 $NPW_VALGRIND_OPTIONS"
+	export G_SLICE=always-malloc
+	export NPW_INIT_TIMEOUT=30
+    fi
+fi
 
 exec $LOADER $NPW_VIEWER_DIR/npviewer.bin ${1+"$@"}

@@ -173,11 +173,13 @@ static void toolkit_flush(void)
 static void *plugin_instance_allocate(void);
 static void plugin_instance_deallocate(PluginInstance *plugin);
 static void plugin_instance_finalize(PluginInstance *plugin);
+static void plugin_instance_invalidate(PluginInstance *plugin);
 
 static NPW_PluginInstanceClass PluginInstanceClass = {
   (NPW_PluginInstanceAllocateFunctionPtr)plugin_instance_allocate,
   (NPW_PluginInstanceDeallocateFunctionPtr)plugin_instance_deallocate,
-  (NPW_PluginInstanceFinalizeFunctionPtr)plugin_instance_finalize
+  (NPW_PluginInstanceFinalizeFunctionPtr)plugin_instance_finalize,
+  (NPW_PluginInstanceInvalidateFunctionPtr)plugin_instance_invalidate
 };
 
 static void *plugin_instance_allocate(void)
@@ -194,6 +196,19 @@ static void plugin_instance_finalize(PluginInstance *plugin)
 {
   id_remove(plugin->instance_id);
   rpc_connection_unref(plugin->connection);
+}
+
+static void plugin_instance_invalidate(PluginInstance *plugin)
+{
+  /* Browser's NPP instance is no longer valid beyond this point. So,
+	 let's just break the link to nspluginwrapper's PluginInstance now.  */
+  if (plugin->instance) {
+	plugin->instance->pdata = NULL;
+	plugin->instance = NULL;
+  }
+  /* We don't reset instance_id here because we still need the NPP ->
+	 PluginInstance mapping for incoming RPC. However, the important
+	 thing is plugin->instance to be NULL.  */
 }
 
 
@@ -1892,14 +1907,7 @@ g_NPP_Destroy(NPP instance, NPSavedData **save)
 	}
   }
 
-  /* Browser's NPP instance is no longer valid beyond this point. So,
-	 let's just break the link to nspluginwrapper's PluginInstance now */
-  plugin->instance = NULL;
-  instance->pdata = NULL;
-  /* We don't reset instance_id here because we still need the NPP ->
-	 PluginInstance mapping for incoming RPC. However, the important
-	 thing is plugin->instance to be NULL */
-
+  npw_plugin_instance_invalidate(plugin);
   npw_plugin_instance_unref(plugin);
   return ret;
 }
@@ -2599,7 +2607,7 @@ g_NP_GetValue(void *future, NPPVariable variable, void *value)
 	  str =
 		"<a href=\"http://gwenole.beauchesne.info/projects/nspluginwrapper/\">nspluginwrapper</a> "
 		" is a cross-platform NPAPI plugin viewer, in particular for linux/i386 plugins.<br>"
-		"This is <b>beta</b> software available under the terms of the GNU General Public License.<br>"
+		"This software is available under the terms of the GNU General Public License.<br>"
 		;
 	  ret = NPERR_NO_ERROR;
 	}
@@ -3363,7 +3371,7 @@ static void plugin_init(int is_NP_Initialize)
 		// Consume the whole line, we can't see our tags here
 		while (fgets(line, sizeof(line), viewer_fp)) {
 		  len = strlen(line);
-		  if (line > 0 && line[len - 1] == '\n')
+		  if (len > 0 && line[len - 1] == '\n')
 			break;
 		}
 		continue;

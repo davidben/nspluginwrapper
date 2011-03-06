@@ -544,6 +544,11 @@ static int detect_plugin_viewer(const char *filename, NPW_PluginInfo *out_plugin
 	  if (pid < 0)
 		continue;
 	  else if (pid == 0) {
+		if (!g_verbose) {
+		  // don't spit out errors in non-verbose mode, we only need
+		  // to know whether there is a valid viewer or not
+		  freopen("/dev/null", "w", stderr);
+		}
 		execl(viewer_path, NPW_VIEWER, "--test", "--plugin", filename, NULL);
 		exit(1);
 	  }
@@ -858,7 +863,7 @@ static int auto_install_plugins(void)
   return 0;
 }
 
-static int remove_plugin(const char *plugin_path, ...)
+static int remove_plugin(const char *plugin_path)
 {
   if (g_verbose)
 	printf("Remove plugin %s\n", plugin_path);
@@ -867,6 +872,11 @@ static int remove_plugin(const char *plugin_path, ...)
 	return 1;
 
   return 0;
+}
+
+static int remove_plugin_cb(const char *plugin_path, void *unused)
+{
+  return remove_plugin(plugin_path);
 }
 
 static int auto_remove_plugins(void)
@@ -878,14 +888,14 @@ static int auto_remove_plugins(void)
 	  const char *plugin_dir = plugin_dirs[i];
 	  if (g_verbose)
 		printf("Auto-remove plugins from %s\n", plugin_dir);
-	  process_plugin_dir(plugin_dir, (is_plugin_cb)is_wrapper_plugin_0, (process_plugin_cb)remove_plugin);
+	  process_plugin_dir(plugin_dir, (is_plugin_cb)is_wrapper_plugin_0, (process_plugin_cb)remove_plugin_cb);
 	}
   }
   free(plugin_dirs);
   return 0;
 }
 
-static int update_plugin(const char *plugin_path, ...)
+static int update_plugin(const char *plugin_path)
 {
   if (g_verbose)
 	printf("Update plugin %s\n", plugin_path);
@@ -934,6 +944,11 @@ static int update_plugin(const char *plugin_path, ...)
   return ret;
 }
 
+static int update_plugin_cb(const char *plugin_path, void *unused)
+{
+  return update_plugin(plugin_path);
+}
+
 static int auto_update_plugins(void)
 {
   const char **plugin_dirs = get_mozilla_plugin_dirs();
@@ -943,14 +958,14 @@ static int auto_update_plugins(void)
 	  const char *plugin_dir = plugin_dirs[i];
 	  if (g_verbose)
 		printf("Auto-update plugins from %s\n", plugin_dir);
-	  process_plugin_dir(plugin_dir, (is_plugin_cb)is_wrapper_plugin_0, (process_plugin_cb)update_plugin);
+	  process_plugin_dir(plugin_dir, (is_plugin_cb)is_wrapper_plugin_0, (process_plugin_cb)update_plugin_cb);
 	}
   }
   free(plugin_dirs);
   return 0;
 }
 
-static int list_plugin(const char *plugin_path, ...)
+static int list_plugin(const char *plugin_path)
 {
   NPW_PluginInfo plugin_info;
   is_wrapper_plugin(plugin_path, &plugin_info);
@@ -970,6 +985,11 @@ static int list_plugin(const char *plugin_path, ...)
   }
 
   return 0;
+}
+
+static int list_plugin_cb(const char *plugin_path, void *unused)
+{
+  return list_plugin(plugin_path);
 }
 
 static void print_usage(void)
@@ -1022,7 +1042,7 @@ static int process_list(int argvc, char *argv[])
 	  const char *plugin_dir = plugin_dirs[i];
 	  if (g_verbose)
 		printf("List plugins in %s\n", plugin_dir);
-	  process_plugin_dir(plugin_dir, (is_plugin_cb)is_wrapper_plugin_0, (process_plugin_cb)list_plugin);
+	  process_plugin_dir(plugin_dir, (is_plugin_cb)is_wrapper_plugin_0, (process_plugin_cb)list_plugin_cb);
 	}
   }
   free(plugin_dirs);

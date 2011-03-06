@@ -251,12 +251,12 @@ get_mime_type_from_content (guchar *bytes, guint size)
   gchar *mime_type = NULL;
 
   /* XXX: poor man's MIME type characterisation */
-  static const gchar gif_sig[] = {0x47, 0x49, 0x46, 0x38};
-  static const gchar png_sig[] = {0x89, 0x50, 0x4e, 0x47};
-  static const gchar jpg_sig[] = {0xff, 0xd8, 0xff};
-  static const gchar bmp_sig[] = {0x42, 0x4d};
-  static const gchar flv_sig[] = {0x46, 0x4c, 0x56};
-  static const gchar xml_sig[] = {0x3c, 0x3f, 0x78, 0x6d, 0x6c};
+  static const guchar gif_sig[] = {0x47, 0x49, 0x46, 0x38};
+  static const guchar png_sig[] = {0x89, 0x50, 0x4e, 0x47};
+  static const guchar jpg_sig[] = {0xff, 0xd8, 0xff};
+  static const guchar bmp_sig[] = {0x42, 0x4d};
+  static const guchar flv_sig[] = {0x46, 0x4c, 0x56};
+  static const guchar xml_sig[] = {0x3c, 0x3f, 0x78, 0x6d, 0x6c};
 
 #define MATCH(TYPE)						\
   (size >= sizeof (TYPE##_sig) &&				\
