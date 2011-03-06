@@ -124,6 +124,14 @@ static const char *get_system_mozilla_plugin_dir(void)
 	  };
 	  dirs = freebsd_dirs;
 	}
+#elif defined(__DragonFly__)
+	{
+	  static const char *dragonfly_dirs[] = {
+		"/usr/pkg/" LIB "/mozilla/plugins",
+		"/usr/pkg/" LIB "/firefox/plugins",
+	  };
+	  dirs = dragonfly_dirs;
+	}
 #elif defined(__NetBSD__)
 	{
 	  static const char *netbsd_dirs[] = {
@@ -205,6 +213,13 @@ static const char **get_mozilla_plugin_dirs(void)
 	"/usr/X11R6/lib/linux-mozilla/plugins",
 	"/usr/local/lib/npapi/linux-flashplugin",
 	"/usr/X11R6/Adobe/Acrobat7.0/ENU/Browser/intellinux",
+#endif
+#if defined(__DragonFly__)
+	"/usr/pkg/lib/netscape/plugins",
+	"/usr/pkg/lib/firefox/plugins",
+	"/usr/pkg/lib/RealPlayer/mozilla",
+	"/usr/pkg/Acrobat5/Browsers/intellinux",
+	"/usr/pkg/Acrobat7/Browser/intellinux",
 #endif
 #if defined(__NetBSD__)
 	"/usr/pkg/lib/netscape/plugins",
@@ -500,7 +515,14 @@ static bool is_plugin_fd(int fd, NPW_PluginInfo *out_plugin_info)
   return ret;
 }
 
-static bool is_plugin_viewer_available(const char *filename, NPW_PluginInfo *out_plugin_info)
+enum {
+  EXIT_VIEWER_NOT_FOUND	= -2,
+  EXIT_VIEWER_ERROR		= -1,
+  EXIT_VIEWER_OK		= 0,
+  EXIT_VIEWER_NATIVE	= 20
+};
+
+static int detect_plugin_viewer(const char *filename, NPW_PluginInfo *out_plugin_info)
 {
   static const char *target_arch_table[] = {
 	NULL,
@@ -541,7 +563,7 @@ static bool is_plugin_viewer_available(const char *filename, NPW_PluginInfo *out
 	  if (target_os == NULL)
 		continue;
 	  if (strcmp(target_arch, HOST_ARCH) == 0 && strcmp(target_os, HOST_OS) == 0)
-		continue;						// skip viewers that match host OS/ARCH pairs
+		return EXIT_VIEWER_NATIVE;		// don't wrap plugins for host OS/ARCH
 	  char viewer_path[PATH_MAX];
 	  sprintf(viewer_path, "%s/%s/%s", viewer_arch_path, target_os, NPW_VIEWER);
 	  if (access(viewer_path, F_OK) != 0)
@@ -557,17 +579,24 @@ static bool is_plugin_viewer_available(const char *filename, NPW_PluginInfo *out
 		int status;
 		while (waitpid(pid, &status, 0) != pid)
 		  ;
-		if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-		  if (out_plugin_info) {
+		if (WIFEXITED(status)) {
+		  status = WEXITSTATUS(status);
+		  if (status == EXIT_VIEWER_OK && out_plugin_info) {
 			strcpy(out_plugin_info->target_arch, target_arch);
 			strcpy(out_plugin_info->target_os, target_os);
 		  }
-		  return true;
+		  return status;
 		}
+		return EXIT_VIEWER_ERROR;
 	  }
 	}
   }
-  return false;
+  return EXIT_VIEWER_NOT_FOUND;
+}
+
+static bool is_plugin_viewer_available(const char *filename, NPW_PluginInfo *out_plugin_info)
+{
+  return detect_plugin_viewer(filename, out_plugin_info) == EXIT_VIEWER_OK;
 }
 
 static bool is_plugin(const char *filename, NPW_PluginInfo *out_plugin_info)
@@ -997,7 +1026,7 @@ static int process_update(int argc, char *argv[])
 
 static int process_install(int argc, char *argv[])
 {
-  int i;
+  int i, ret;
 
   if (g_auto)
 	return auto_install_plugins();
@@ -1008,9 +1037,15 @@ static int process_install(int argc, char *argv[])
   for (i = 0; i < argc; i++) {
 	NPW_PluginInfo plugin_info;
 	const char *plugin_path = argv[i];
-	if (!is_compatible_plugin(plugin_path, &plugin_info))
+	if (!is_plugin(plugin_path, &plugin_info))
 	  error("%s is not a valid NPAPI plugin", plugin_path);
-	int ret = install_plugin(plugin_path, &plugin_info);
+	ret = detect_plugin_viewer(plugin_path, &plugin_info);
+	if (ret != EXIT_VIEWER_OK) {
+	  if (ret == EXIT_VIEWER_NATIVE)
+		return 0; /* silently ignore exit status */
+	  error("no appropriate viewer found for %s", plugin_path);
+	}
+	ret = install_plugin(plugin_path, &plugin_info);
 	if (ret != 0)
 	  return ret;
   }

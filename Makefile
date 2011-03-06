@@ -41,9 +41,14 @@ ifneq (,$(findstring $(OS),linux))
 libdl_LDFLAGS = -ldl
 endif
 
+libpthread_LDFLAGS = -lpthread
+ifeq ($(OS),dragonfly)
+libpthread_LDFLAGS = -pthread
+endif
+
 X_CFLAGS  = -I$(x11prefix)/include
 X_LDFLAGS = -L$(x11prefix)/$(lib64) -lX11 -lXt
-ifeq ($(OS),netbsd)
+ifneq (,$(findstring $(OS),netbsd dragonfly))
 X_LDFLAGS += -Wl,--rpath,$(x11prefix)/$(lib64)
 endif
 
@@ -78,7 +83,7 @@ npwrapper_RAWSRCS = npw-wrapper.c npw-rpc.c rpc.c debug.c utils.c npruntime.c
 npwrapper_SOURCES = $(npwrapper_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 npwrapper_OBJECTS = $(npwrapper_RAWSRCS:%.c=npwrapper-%.os)
 npwrapper_CFLAGS  = $(CFLAGS) $(X_CFLAGS) $(MOZILLA_CFLAGS) $(GLIB_CFLAGS)
-npwrapper_LDFLAGS = $(X_LDFLAGS) -lpthread
+npwrapper_LDFLAGS = $(X_LDFLAGS) $(libpthread_LDFLAGS)
 npwrapper_LDFLAGS += $(GLIB_LDFLAGS)
 
 npviewer_PROGRAM = npviewer.bin
@@ -97,7 +102,7 @@ npviewer_CFLAGS += $(GTK_CFLAGS)
 npviewer_LDFLAGS = $(GTK_LDFLAGS) $(X_LDFLAGS)
 endif
 npviewer_CFLAGS  += $(MOZILLA_CFLAGS)
-npviewer_LDFLAGS += $(libdl_LDFLAGS) -lpthread
+npviewer_LDFLAGS += $(libdl_LDFLAGS) $(libpthread_LDFLAGS)
 ifeq ($(TARGET_ARCH),i386)
 npviewer_MAPFILE = $(SRC_PATH)/src/npw-viewer.map
 endif
@@ -122,11 +127,11 @@ npconfig_RAWSRCS = npw-config.c
 npconfig_SOURCES = $(npconfig_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 npconfig_OBJECTS = $(npconfig_RAWSRCS:%.c=npconfig-%.o)
 npconfig_LDFLAGS = $(libdl_LDFLAGS)
-ifeq ($(OS),netbsd)
+ifneq (,$(findstring $(OS),netbsd dragonfly))
 # We will try to dlopen() the native plugin library. If that lib is
 # linked against libpthread, then so must our program too.
 # XXX use the ELF decoder for native plugins too?
-npconfig_LDFLAGS += -lpthread
+npconfig_LDFLAGS += $(libpthread_LDFLAGS)
 endif
 
 nploader_PROGRAM = npviewer
@@ -261,8 +266,18 @@ $(archivedir)$(SRCARCHIVE): $(archivedir) $(FILES)
 $(archivedir)$(SRCARCHIVE).bz2: $(archivedir)$(SRCARCHIVE)
 	bzip2 -9vf $(archivedir)$(SRCARCHIVE)
 
+RPMBUILD = \
+	RPMDIR=`mktemp -d`								; \
+	mkdir -p $$RPMDIR/{SPECS,SOURCES,BUILD,RPMS,SRPMS}				; \
+	rpmbuild --define "_topdir $$RPMDIR" -ta $(2) $(1) &&				  \
+	find $$RPMDIR/ -name *.rpm -exec mv -f {} $(archivedir) \;			; \
+	rm -rf $$RPMDIR
+
+distrpm: $(archivedir)$(SRCARCHIVE).bz2
+	$(call RPMBUILD,$<,--with generic)
+
 localrpm: $(archivedir)$(SRCARCHIVE).bz2
-	rpm -ta $<
+	$(call RPMBUILD,$<)
 
 changelog: ../common/authors.xml
 	svn_prefix=`svn info .|sed -n '/^URL *: .*\/svn\/\(.*\)$$/s//\1\//p'`; \

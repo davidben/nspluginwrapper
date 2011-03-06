@@ -71,6 +71,15 @@ if test "$ARCH" != "$TARGET_ARCH"; then
     fi
 fi
 
+# Don't wrap host plugins
+case " $@ " in
+*" --test "*|*" -t "*)
+    if test "$TARGET_OS" = "$OS" -a "$TARGET_ARCH" = "$ARCH"; then
+	exit 20 # EXIT_VIEWER_NATIVE
+    fi
+    ;;
+esac
+
 # Expand PATH for RealPlayer package on NetBSD (realplay)
 if test "$OS" = "NetBSD"; then
     REALPLAYER_HOME="/usr/pkg/lib/RealPlayer"

@@ -26,6 +26,7 @@
 #include <limits.h>
 #include <errno.h>
 #include <unistd.h>
+#include <signal.h>
 #include <pthread.h>
 #include <semaphore.h>
 #include <sys/wait.h>

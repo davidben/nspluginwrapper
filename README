@@ -2,7 +2,7 @@
   nspluginwrapper
   A cross-platform NPAPI plugin viewer
 
-  Copyright (C) 2005-2006 Gwenole Beauchesne
+  Copyright (C) 2005-2007 Gwenole Beauchesne
 
 
 License
@@ -34,6 +34,11 @@ $ make
 
 Or, if you prefer from a source package:
 $ rpm --rebuild nspluginwrapper.src.rpm
+
+NOTE: if you are building the Linux viewer to use on a non-Linux
+system (e.g. NetBSD, FreeBSD), you will have to configure the Linux
+build with the --generic-build option. That way, named sockets will be
+used and work under the Linux emulation on those operating systems.
 
 
 Requirements and Installation
@@ -79,6 +84,7 @@ The following plugins work reasonnably well:
 - Real Player         10.0.5
 - Tcl plugin          3.1
 - Squeak VM plugin    3.7
+- Citrix ICA Client   10.0
 
 Broken or partially working:
 - Real Player         8.0

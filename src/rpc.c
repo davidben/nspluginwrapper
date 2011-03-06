@@ -58,8 +58,8 @@
 // build of the viewer can interoperate with non-Linux wrappers. Linux
 // distributions can use this code though.
 // XXX better clean-up dead sockets properly on failure...
-#if defined __linux__
-#define USE_ANONYMOUS_SOCKETS 0
+#ifdef BUILD_LINUX_ONLY
+#define USE_ANONYMOUS_SOCKETS 1
 #endif
 
 // Define the maximum amount of time (in seconds) to wait for a message

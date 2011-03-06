@@ -1,3 +1,10 @@
+#include "config.h"
+
+#ifdef TARGET_LIBC_PROVIDES_SSP
+void __stack_chk_fail() {} ;
+void __stack_chk_fail_local() {} ;
+#endif
+
 void _Exit() {} ;
 void _IO_feof() {} ;
 void _IO_getc() {} ;

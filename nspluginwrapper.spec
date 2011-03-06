@@ -1,7 +1,7 @@
 %define name	nspluginwrapper
-%define version	0.9.91.3
+%define version	0.9.91.4
 %define release	1
-#define svndate 20070304
+#define svndate 20070403
 
 # define 32-bit arch of multiarch platforms
 %define arch_32 %{nil}
@@ -28,13 +28,22 @@
 %define plugindir %{_libdir}/mozilla/plugins
 
 # define to build a biarch package
-# XXX really build one package and handle upgrades
+# NOTE: biarch builds require a "multilib" capable compiler, which
+# should be the default on decent Linux distributions
 %define build_biarch		0
 %if "%{_arch}:%{arch_32}" == "x86_64:i386"
 %define build_biarch		1
 %endif
 %{expand: %{?_with_biarch:	%%global build_biarch 1}}
 %{expand: %{?_without_biarch:	%%global build_biarch 0}}
+
+# define to build a Linux package suitable for other OS (e.g. NetBSD)
+# NOTE: this option is *not* needed on Linux usually. However, if you
+# need this package to be used verbatim on *BSD systems, you have to
+# define this option for your Linux build
+%define build_generic		0
+%{expand: %{?_with_generic:	%%global build_generic 1}}
+%{expand: %{?_without_generic:	%%global build_generic 0}}
 
 Summary:	A compatibility layer for Netscape 4 plugins
 Name:		%{name}
@@ -62,6 +71,9 @@ This package consists in:
 %package %{target_arch}
 Summary:	A viewer for %{target_arch} compiled Netscape 4 plugins
 Group:		Networking/WWW
+%if "%{target_arch}" == "i386"
+Requires:	%{_bindir}/linux32
+%endif
 
 %description %{target_arch}
 nspluginwrapper makes it possible to use Netscape 4 compatible plugins
@@ -84,9 +96,12 @@ biarch="--with-biarch"
 %else
 biarch="--without-biarch"
 %endif
+%if %{build_generic}
+generic_build="--generic-build"
+%endif
 mkdir objs
 pushd objs
-../configure --prefix=%{_prefix} $biarch
+../configure --prefix=%{_prefix} $biarch $generic_build
 make
 popd
 
@@ -143,6 +158,12 @@ fi
 %endif
 
 %changelog
+* Mon Apr  2 2007 Gwenole Beauchesne <gb.public@free.fr> 0.9.91.4-1
+- use anonymous sockets by default
+- don't try to wrap native plugins
+- require linux32 for nspluginwrapper-i386
+- fix build on systems with SSP enabled by default
+
 * Sun Mar  4 2007 Gwenole Beauchesne <gb.public@free.fr> 0.9.91.3-1
 - fix printing with EMBED plugins
 - fix build on Debian systems (Rob Andrews)

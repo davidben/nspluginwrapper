@@ -8,10 +8,11 @@ extern "C" {
 
 
 #define offsetof(TYPE,MEMBER)	((size_t)&((TYPE*)0)->MEMBER)
-#define NULL	(0L)
-
 
 #if !defined(__cplusplus)
+
+#define NULL	(void*)(0)
+
     typedef int wchar_t;
 
 #endif
