@@ -1,7 +1,7 @@
 /*
  *  npw-wrapper.c - Host Mozilla plugin (loads the actual viewer)
  *
- *  nspluginwrapper (C) 2005-2008 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2009 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -1616,7 +1616,7 @@ static int handle_NPN_GetStringIdentifiers(rpc_connection_t *connection)
 									  RPC_TYPE_ARRAY, RPC_TYPE_NP_IDENTIFIER, nameCount, idents,
 									  RPC_TYPE_INVALID);
 
-  NPN_MemFree(idents);
+  NPW_MemFree(idents);
   return rpc_ret;
 }
 

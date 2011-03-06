@@ -1,7 +1,7 @@
 /*
  *  npw-player.c - Standalone plugin player
  *
- *  nspluginwrapper (C) 2005-2008 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2009 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -1324,6 +1324,7 @@ stream_new (Plugin *plugin,
     np_stream_destroy (np_stream);
   if (pstream)
     g_free (pstream);
+  pstream = NULL;
 
  l_return:
   if (error)

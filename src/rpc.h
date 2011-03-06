@@ -1,7 +1,7 @@
 /*
  *  rpc.h - Remote Procedure Calls
  *
- *  nspluginwrapper (C) 2005-2008 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2009 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by

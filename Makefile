@@ -1,5 +1,5 @@
 #
-#  nspluginwrapper Makefile (C) 2005-2008 Gwenole Beauchesne
+#  nspluginwrapper Makefile (C) 2005-2009 Gwenole Beauchesne
 #
 -include config.mak
 

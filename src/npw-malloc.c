@@ -1,7 +1,7 @@
 /*
  *  npw-malloc.c - Memory allocation
  *
- *  nspluginwrapper (C) 2005-2008 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2009 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -197,6 +197,15 @@ void *
 NPW_MemAlloc0 (uint32_t size)
 {
   return get_malloc_hooks ()->memalloc0 (size);
+}
+
+void *
+NPW_MemAllocCopy (uint32_t size, const void *src)
+{
+  void *ptr = NPW_MemAlloc (size);
+  if (ptr)
+    memcpy (ptr, src, size);
+  return ptr;
 }
 
 void

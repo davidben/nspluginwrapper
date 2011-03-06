@@ -1,5 +1,5 @@
 %define name	nspluginwrapper
-%define version	1.2.0
+%define version	1.2.2
 %define release	1
 #define svndate	DATE
 
@@ -191,6 +191,11 @@ fi
 %endif
 
 %changelog
+* Fri Jan 02 2009 Gwenole Beauchesne <gb.public@free.fr> 1.2.2-1
+- fix support for the VLC plug-in
+- fix memory deallocation in NPN_GetStringIdentifiers()
+- fix return value if stream creation failed in standalone player
+
 * Fri Dec 26 2008 Gwenole Beauchesne <gb.public@free.fr> 1.2.0-1
 - drop obsolete mkruntime scripts
 - use valgrind if NPW_USE_VALGRIND=yes

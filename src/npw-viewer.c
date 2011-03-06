@@ -1,7 +1,7 @@
 /*
  *  npw-viewer.c - Target plugin loader and viewer
  *
- *  nspluginwrapper (C) 2005-2008 Gwenole Beauchesne
+ *  nspluginwrapper (C) 2005-2009 Gwenole Beauchesne
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -516,7 +516,7 @@ static void destroy_window_attributes(NPSetWindowCallbackStruct *ws_info)
 {
   if (ws_info == NULL)
 	return;
-  free(ws_info);
+  NPW_MemFree(ws_info);
 }
 
 // Fix size hints in NPWindow (Flash Player doesn't like null width)
@@ -551,20 +551,22 @@ static void fixup_size_hints(PluginInstance *plugin)
 static int create_window(PluginInstance *plugin, NPWindow *window)
 {
   // XXX destroy previous window here?
-  if (plugin->is_windowless)
+  if (plugin->is_windowless) {
 	destroy_window_attributes(plugin->window.ws_info);
-  else
-	assert(plugin->window.ws_info == NULL);
+	plugin->window.ws_info = NULL;
+  }
+  assert(plugin->window.ws_info == NULL);
 
-  // cache new window information (and take ownership of window->ws_info)
+  // cache new window information and reconstruct window attributes
+  NPSetWindowCallbackStruct *ws_info;
+  if ((ws_info = NPW_MemClone(NPSetWindowCallbackStruct, window->ws_info)) == NULL)
+	return -1;
+  if (create_window_attributes(ws_info) < 0)
+	return -1;
   memcpy(&plugin->window, window, sizeof(*window));
   window = &plugin->window;
+  window->ws_info = ws_info;
   fixup_size_hints(plugin);
-
-  // reconstruct window attributes
-  if (create_window_attributes(window->ws_info) < 0)
-	return -1;
-  NPSetWindowCallbackStruct *ws_info = window->ws_info;
 
   // that's all for windowless plugins
   if (plugin->is_windowless)
@@ -646,19 +648,20 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
 // Update window information from NPWindow
 static int update_window(PluginInstance *plugin, NPWindow *window)
 {
-  // always synchronize window attributes (and take ownership of window->ws_info)
-  if (plugin->window.ws_info) {
-	destroy_window_attributes(plugin->window.ws_info);
-	plugin->window.ws_info = NULL;
+  if (plugin->is_windowless) {
+	npw_printf("ERROR: update_window() called for windowless plugin\n");
+	return -1;
   }
-  if (window->ws_info) {
-	create_window_attributes(window->ws_info);
-	plugin->window.ws_info = window->ws_info;
-  }
-  else {
+
+  if (window->ws_info == NULL) {
 	npw_printf("ERROR: no window attributes for window %p\n", window->window);
 	return -1;
   }
+
+  // always synchronize window attributes
+  NPSetWindowCallbackStruct *ws_info = plugin->window.ws_info;
+  memcpy(ws_info, window->ws_info, sizeof(*ws_info));
+  create_window_attributes(ws_info);
 
   // synchronize cliprect
   memcpy(&plugin->window.clipRect, &window->clipRect, sizeof(window->clipRect));;
@@ -3162,8 +3165,15 @@ static int handle_NPP_SetWindow(rpc_connection_t *connection)
   }
 
   NPError ret = g_NPP_SetWindow(PLUGIN_INSTANCE_NPP(plugin), window);
-  if (window)
+
+  if (window) {
+	if (window->ws_info) {
+	  free(window->ws_info);
+	  window->ws_info = NULL;
+	}
 	free(window);
+  }
+
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
