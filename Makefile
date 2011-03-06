@@ -1,4 +1,3 @@
-#!/bin/sh
 #
 #  nspluginwrapper Makefile (C) 2005-2008 Gwenole Beauchesne
 #
@@ -31,11 +30,25 @@ ifeq ($(SNAPSHOT),1)
 VERSION_SUFFIX = -$(SVNDATE)
 endif
 
+ifeq ($(INSTALL),)
+INSTALL = install
+ifneq (,$(findstring $(OS),solaris))
+INSTALL = $(SRC_PATH)/utils/install.sh
+endif
+endif
+
 ifeq ($(ALLOW_STRIP), yes)
 STRIP_OPT = -s
 endif
 
 LN_S = ln -sf
+
+ifeq ($(LD_soname),)
+LD_soname = -soname
+ifeq ($(TARGET_OS),solaris)
+LD_soname = -h
+endif
+endif
 
 ifneq (,$(findstring $(OS),linux))
 libdl_LDFLAGS = -ldl
@@ -44,6 +57,10 @@ endif
 libpthread_LDFLAGS = -lpthread
 ifeq ($(OS),dragonfly)
 libpthread_LDFLAGS = -pthread
+endif
+
+ifneq (,$(findstring $(OS),solaris))
+libsocket_LDFLAGS = -lsocket -lnsl
 endif
 
 PIC_CFLAGS = -fPIC
@@ -90,7 +107,7 @@ npwrapper_RAWSRCS = npw-wrapper.c npw-rpc.c rpc.c debug.c utils.c npruntime.c
 npwrapper_SOURCES = $(npwrapper_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 npwrapper_OBJECTS = $(npwrapper_RAWSRCS:%.c=npwrapper-%.os)
 npwrapper_CFLAGS  = $(CFLAGS) $(X_CFLAGS) $(MOZILLA_CFLAGS) $(GLIB_CFLAGS)
-npwrapper_LDFLAGS = $(X_LDFLAGS) $(libpthread_LDFLAGS)
+npwrapper_LDFLAGS = $(X_LDFLAGS) $(libpthread_LDFLAGS) $(libsocket_LDFLAGS)
 npwrapper_LDFLAGS += $(GLIB_LDFLAGS)
 
 npviewer_PROGRAM = npviewer.bin
@@ -110,17 +127,20 @@ npviewer_LDFLAGS = $(GTK_LDFLAGS) $(X_LDFLAGS)
 endif
 npviewer_CFLAGS  += $(MOZILLA_CFLAGS)
 npviewer_LDFLAGS += $(libdl_LDFLAGS) $(libpthread_LDFLAGS) -lgthread-2.0
-ifeq ($(TARGET_ARCH),i386)
+ifeq ($(TARGET_OS):$(TARGET_ARCH),linux:i386)
 npviewer_MAPFILE = $(SRC_PATH)/src/npw-viewer.map
 endif
 ifneq ($(npviewer_MAPFILE),)
 npviewer_LDFLAGS += -Wl,--export-dynamic
 npviewer_LDFLAGS += -Wl,--version-script,$(npviewer_MAPFILE)
 endif
-ifeq ($(OS):$(TARGET_ARCH),linux:i386)
+ifeq ($(TARGET_OS):$(TARGET_ARCH),linux:i386)
 npviewer_SOURCES += $(SRC_PATH)/src/cxxabi-compat.cpp
 npviewer_OBJECTS += npviewer-cxxabi-compat.o
 npviewer_LDFLAGS += -lsupc++
+endif
+ifeq ($(TARGET_OS):$(TARGET_ARCH),solaris:i386)
+npviewer_LDFLAGS += $(libsocket_LDFLAGS)
 endif
 
 npplayer_PROGRAM  = npplayer
@@ -128,7 +148,7 @@ npplayer_SOURCES  = npw-player.c debug.c rpc.c utils.c glibcurl.c gtk2xtbin.c $(
 npplayer_OBJECTS  = $(npplayer_SOURCES:%.c=npplayer-%.o)
 npplayer_CFLAGS   = $(GTK_CFLAGS) $(MOZILLA_CFLAGS) $(CURL_CFLAGS) $(X_CFLAGS)
 npplayer_LDFLAGS  = $(GTK_LDFLAGS) $(CURL_LDFLAGS) $(X_LDFLAGS)
-npplayer_LDFLAGS += -lgthread-2.0 $(libpthread_LDFLAGS)
+npplayer_LDFLAGS += -lgthread-2.0 $(libpthread_LDFLAGS) $(libsocket_LDFLAGS)
 
 libxpcom_LIBRARY = libxpcom.so
 libxpcom_RAWSRCS = libxpcom.c debug.c
@@ -166,6 +186,18 @@ nploader_PROGRAM = npviewer
 nploader_RAWSRCS = npw-viewer.sh
 nploader_SOURCES = $(nploader_RAWSRCS:%.sh=$(SRC_PATH)/src/%.sh)
 
+test_rpc_RAWSRCS		 = test-rpc-common.c debug.c rpc.c
+test_rpc_client_OBJECTS	 = $(test_rpc_RAWSRCS:%.c=%-client.o)
+test_rpc_server_OBJECTS	 = $(test_rpc_RAWSRCS:%.c=%-server.o)
+test_rpc_client_CPPFLAGS = $(CPPFLAGS) -I$(SRC_PATH)/src -DBUILD_CLIENT -DNPW_COMPONENT_NAME="\"Client\""
+test_rpc_server_CPPFLAGS = $(CPPFLAGS) -I$(SRC_PATH)/src -DBUILD_SERVER -DNPW_COMPONENT_NAME="\"Server\""
+test_rpc_CFLAGS			 = -I$(SRC_PATH)/src $(GLIB_CFLAGS)
+test_rpc_LDFLAGS		 = $(GLIB_LDFLAGS) $(libpthread_LDFLAGS) $(libsocket_LDFLAGS)
+test_rpc_RAWPROGS		 = test-rpc-types test-rpc-nested test-rpc-concurrent
+test_rpc_PROGRAMS		 = \
+	$(test_rpc_RAWPROGS:%=%-client) \
+	$(test_rpc_RAWPROGS:%=%-server)
+
 CPPFLAGS	= -I. -I$(SRC_PATH)
 TARGETS		= $(npconfig_PROGRAM)
 TARGETS		+= $(nploader_PROGRAM)
@@ -178,6 +210,7 @@ endif
 ifeq ($(build_player),yes)
 TARGETS		+= $(npplayer_PROGRAM)
 endif
+TARGETS		+= $(test_rpc_PROGRAMS)
 
 archivedir	= files/
 SRCARCHIVE	= $(PACKAGE)-$(VERSION)$(VERSION_SUFFIX).tar
@@ -191,6 +224,7 @@ FILES		+= $(wildcard src/*.h)
 FILES		+= $(wildcard src/*.sh)
 FILES		+= $(wildcard src/*.map)
 FILES		+= $(wildcard tests/*.html)
+FILES		+= $(wildcard tests/*.c tests/*.h)
 FILES		+= $(wildcard npapi/*.h npapi/nspr/*.h npapi/nspr/obsolete/*.h)
 FILES		+= $(LSB_TOP_DIR)/headers/core_filelist
 FILES		+= $(addprefix $(LSB_TOP_DIR)/headers/,$(shell cat $(LSB_TOP_DIR)/headers/core_filelist))
@@ -254,14 +288,14 @@ ifneq ($(ARCH),$(ARCH_32))
 endif
 ifeq ($(build_player),yes)
 install.player: $(npplayer_PROGRAM)
-	install -m 755 $(STRIP_OPT) $(npplayer_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npplayer_PROGRAM)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(npplayer_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npplayer_PROGRAM)
 	mkdir -p $(DESTDIR)$(bindir)
 	$(LN_S) $(pkglibdir)/$(ARCH)/$(OS)/$(npplayer_PROGRAM) $(DESTDIR)$(bindir)/nspluginplayer
 else
 install.player:
 endif
 install.wrapper: $(npwrapper_LIBRARY)
-	install -m 755 $(STRIP_OPT) $(npwrapper_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npwrapper_LIBRARY)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(npwrapper_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npwrapper_LIBRARY)
 ifeq ($(build_viewer),yes)
 install.viewer: install.viewer.bin install.viewer.glue
 install.libxpcom: do.install.libxpcom
@@ -272,7 +306,7 @@ install.libxpcom:
 install.libnoxshm:
 endif
 install.viewer.bin: $(npviewer_PROGRAM)
-	install -m 755 $(STRIP_OPT) $(npviewer_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(npviewer_PROGRAM)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(npviewer_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(npviewer_PROGRAM)
 install.viewer.glue::
 	p=$(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(npviewer_PROGRAM:%.bin=%);	\
 	echo "#!/bin/sh" > $$p;								\
@@ -281,17 +315,17 @@ install.viewer.glue::
 	echo ". $(pkglibdir)/noarch/$(nploader_PROGRAM)" >> $$p;			\
 	chmod 755 $$p
 do.install.libxpcom: $(libxpcom_LIBRARY)
-	install -m 755 $(STRIP_OPT) $(libxpcom_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libxpcom_LIBRARY)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(libxpcom_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libxpcom_LIBRARY)
 do.install.libnoxshm: $(libnoxshm_LIBRARY)
-	install -m 755 $(STRIP_OPT) $(libnoxshm_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libnoxshm_LIBRARY)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(libnoxshm_LIBRARY) $(DESTDIR)$(pkglibdir)/$(ARCH_32)/$(TARGET_OS)/$(libnoxshm_LIBRARY)
 install.config: $(npconfig_PROGRAM)
-	install -m 755 $(STRIP_OPT) $(npconfig_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM)
+	$(INSTALL) -m 755 $(STRIP_OPT) $(npconfig_PROGRAM) $(DESTDIR)$(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM)
 	mkdir -p $(DESTDIR)$(bindir)
 	$(LN_S) $(pkglibdir)/$(ARCH)/$(OS)/$(npconfig_PROGRAM) $(DESTDIR)$(bindir)/nspluginwrapper
 install.loader: $(nploader_PROGRAM)
-	install -m 755 $(nploader_PROGRAM) $(DESTDIR)$(pkglibdir)/noarch/$(nploader_PROGRAM)
+	$(INSTALL) -m 755 $(nploader_PROGRAM) $(DESTDIR)$(pkglibdir)/noarch/$(nploader_PROGRAM)
 install.mkruntime: $(SRC_PATH)/utils/mkruntime.sh
-	install -m 755 $< $(DESTDIR)$(pkglibdir)/noarch/mkruntime
+	$(INSTALL) -m 755 $< $(DESTDIR)$(pkglibdir)/noarch/mkruntime
 
 $(archivedir)::
 	[ -d $(archivedir) ] || mkdir $(archivedir) > /dev/null 2>&1
@@ -357,13 +391,13 @@ npplayer-%.o: $(SRC_PATH)/src/tidy/%.c
 	$(CC) $(CFLAGS) -o $@ -c $< $(CPPFLAGS) $(npplayer_CFLAGS) -DBUILD_PLAYER
 
 $(libxpcom_LIBRARY): $(libxpcom_OBJECTS) $(LSB_OBJ_DIR) $(LSB_LIBS)
-	$(CC) $(LDFLAGS_32) $(DSO_LDFLAGS) -o $@ $(libxpcom_OBJECTS) $(libxpcom_LDFLAGS) -Wl,--soname,libxpcom.so
+	$(CC) $(LDFLAGS_32) $(DSO_LDFLAGS) -o $@ $(libxpcom_OBJECTS) $(libxpcom_LDFLAGS) -Wl,$(LD_soname),libxpcom.so
 
 libxpcom-%.o: $(SRC_PATH)/src/%.c
 	$(CC) $(CFLAGS_32) -o $@ -c $< $(CPPFLAGS) $(libxpcom_CFLAGS) -DBUILD_XPCOM
 
 $(libnoxshm_LIBRARY): $(libnoxshm_OBJECTS) $(LSB_OBJ_DIR) $(LSB_LIBS)
-	$(CC) $(LDFLAGS_32) $(DSO_LDFLAGS) -o $@ $(libnoxshm_OBJECTS) $(libnoxshm_LDFLAGS) -Wl,--soname,libnoxshm.so
+	$(CC) $(LDFLAGS_32) $(DSO_LDFLAGS) -o $@ $(libnoxshm_OBJECTS) $(libnoxshm_LDFLAGS) -Wl,$(LD_soname),libnoxshm.so
 
 libnoxshm-%.o: $(SRC_PATH)/src/%.c
 	$(CC) $(CFLAGS_32) -o $@ -c $< $(CPPFLAGS) $(libnoxshm_CFLAGS)
@@ -398,3 +432,16 @@ $(LSB_OBJ_DIR)/%.so: $(LSB_OBJ_DIR)/%.o
 	$(CC) $(LDFLAGS_32) -nostdlib $(DSO_LDFLAGS) $< -o $@ \
 		-Wl,--version-script,$(patsubst $(LSB_OBJ_DIR)/%.o,$(LSB_SRC_DIR)/%.Version,$<) \
 		-Wl,-soname,`grep "$(patsubst $(LSB_OBJ_DIR)/%.o,%,$<) " $(LSB_SRC_DIR)/LibNameMap.txt | cut -f2 -d' '`
+
+test-rpc-%-client: test-rpc-%-client.o $(test_rpc_client_OBJECTS)
+	$(CC) -o $@ $< $(test_rpc_client_OBJECTS) $(test_rpc_LDFLAGS)
+test-rpc-%-client.o: $(SRC_PATH)/tests/test-rpc-%.c
+	$(CC) -o $@ -c $< $(test_rpc_client_CPPFLAGS) $(test_rpc_CFLAGS)
+%-client.o: $(SRC_PATH)/src/%.c
+	$(CC) -o $@ -c $< $(test_rpc_client_CPPFLAGS) $(test_rpc_CFLAGS)
+test-rpc-%-server: test-rpc-%-server.o $(test_rpc_server_OBJECTS)
+	$(CC) -o $@ $< $(test_rpc_server_OBJECTS) $(test_rpc_LDFLAGS)
+test-rpc-%-server.o: $(SRC_PATH)/tests/test-rpc-%.c
+	$(CC) -o $@ -c $< $(test_rpc_server_CPPFLAGS) $(test_rpc_CFLAGS)
+%-server.o: $(SRC_PATH)/src/%.c
+	$(CC) -o $@ -c $< $(test_rpc_server_CPPFLAGS) $(test_rpc_CFLAGS)

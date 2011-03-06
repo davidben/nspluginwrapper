@@ -33,6 +33,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <stddef.h>
 #include <unistd.h>
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -64,7 +65,14 @@
 #endif
 
 // Define the maximum amount of time (in seconds) to wait for a message
+#ifndef RPC_MESSAGE_TIMEOUT
 #define RPC_MESSAGE_TIMEOUT 30
+#endif
+
+// Define the maximum amount of time (in seconds) to wait for plugin connection
+#ifndef RPC_INIT_TIMEOUT
+#define RPC_INIT_TIMEOUT 5
+#endif
 
 
 /* ====================================================================== */
@@ -176,6 +184,27 @@ static inline int rpc_message_timeout(void)
   static int timeout = -1;
   if (timeout < 0)
 	timeout = _rpc_message_timeout();
+  return timeout;
+}
+
+// Returns the maximum amount of time (in seconds) to wait for plugin connection
+static int _rpc_init_timeout(void)
+{
+  int timeout = 0;
+  const char *timeout_str = getenv("NPW_INIT_TIMEOUT");
+  if (timeout_str)
+	timeout = atoi(timeout_str);
+  if (timeout <= 0)
+	timeout = RPC_INIT_TIMEOUT;
+  D(bug("RPC message timeout set to %d sec\n", timeout));
+  return timeout;
+}
+
+static inline int rpc_init_timeout(void)
+{
+  static int timeout = -1;
+  if (timeout < 0)
+	timeout = _rpc_init_timeout();
   return timeout;
 }
 
@@ -487,6 +516,16 @@ static inline int rpc_error(rpc_connection_t *connection, int error)
   return error;
 }
 
+#if DEBUG
+static inline int rpc_error_debug(rpc_connection_t *connection, int error, const char *filename, int line)
+{
+  npw_printf("ERROR: RPC error %d caught at %s:%d\n", error, filename, line);
+  return rpc_error(connection, error);
+}
+#define rpc_error(connection, error) \
+		rpc_error_debug(connection, error, __FILE__, __LINE__)
+#endif
+
 // Returns socket fd or -1 if invalid connection
 int rpc_socket(rpc_connection_t *connection)
 {
@@ -586,7 +625,10 @@ rpc_connection_t *rpc_init_server(const char *ident)
   connection->socket_path = NULL;
   addr_len = _rpc_socket_path(&connection->socket_path, ident);
   memcpy(&addr.sun_path[0], connection->socket_path, addr_len);
-  addr_len += sizeof(struct sockaddr_un) - sizeof(addr.sun_path);
+  addr_len += offsetof(struct sockaddr_un, sun_path); /* though POSIX says size of the actual sockaddr structure */
+#ifdef HAVE_SOCKADDR_UN_SUN_LEN
+  addr.sun_len = addr_len;
+#endif
 
   if (bind(connection->server_socket, (struct sockaddr *)&addr, addr_len) < 0) {
 	perror("server bind");
@@ -649,11 +691,14 @@ rpc_connection_t *rpc_init_client(const char *ident)
   connection->socket_path = NULL;
   addr_len = _rpc_socket_path(&connection->socket_path, ident);
   memcpy(&addr.sun_path[0], connection->socket_path, addr_len);
-  addr_len += sizeof(struct sockaddr_un) - sizeof(addr.sun_path);
+  addr_len += offsetof(struct sockaddr_un, sun_path); /* though POSIX says size of the actual sockaddr structure */
+#ifdef HAVE_SOCKADDR_UN_SUN_LEN
+  addr.sun_len = addr_len;
+#endif
 
-  // Wait at most 5 seconds for server to initialize
+  // Wait at most RPC_INIT_TIMEOUT seconds for server to initialize
   const int N_CONNECT_WAIT_DELAY = 10;
-  int n_connect_attempts = 5000 / N_CONNECT_WAIT_DELAY;
+  int n_connect_attempts = (rpc_init_timeout() * 1000) / N_CONNECT_WAIT_DELAY;
   if (n_connect_attempts == 0)
 	n_connect_attempts = 1;
   while (n_connect_attempts > 0) {
@@ -1441,7 +1486,7 @@ static inline rpc_method_callback_t rpc_lookup_callback(rpc_connection_t *connec
 // Dispatch message received in the server loop
 static int _rpc_dispatch(rpc_connection_t *connection, rpc_message_t *message)
 {
-  // wait: <invoke> (body: <method-id> MESSAGE_END
+  // recv: <invoke> (body: <method-id> MESSAGE_END
   D(bug("receiving message\n"));
   int32_t method;
   int error = rpc_message_recv_int32(message, &method);
@@ -1455,14 +1500,6 @@ static int _rpc_dispatch(rpc_connection_t *connection, rpc_message_t *message)
 	return RPC_ERROR_MESSAGE_TYPE_INVALID;
   D(bug("  -- message received [%d]\n", method));
 
-  // send: MESSAGE_ACK
-  error = rpc_message_send_int32(message, RPC_MESSAGE_ACK);
-  if (error != RPC_ERROR_NO_ERROR)
-	return error;
-  error = rpc_message_flush(message);
-  if (error != RPC_ERROR_NO_ERROR)
-	return error;
-
   // call: <method>
   rpc_method_callback_t callback = rpc_lookup_callback(connection, method);
   if (callback)
@@ -1472,37 +1509,35 @@ static int _rpc_dispatch(rpc_connection_t *connection, rpc_message_t *message)
   if (error != RPC_ERROR_NO_ERROR) {
 	int error_code = error;
 
-	// send: MESSAGE_FAILURE <error-code>
-	error = rpc_message_send_int32(message, RPC_MESSAGE_FAILURE);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
-	error = rpc_message_send_int32(message, error_code);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
-	error = rpc_message_flush(message);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
+	// send: MESSAGE_FAILURE <error-code> ("high-level" error codes only)
+	switch (error) {
+	case RPC_ERROR_GENERIC:
+	case RPC_ERROR_ERRNO_SET:
+	case RPC_ERROR_NO_MEMORY:
+	  error = rpc_message_send_int32(message, RPC_MESSAGE_FAILURE);
+	  if (error != RPC_ERROR_NO_ERROR)
+		return error;
+	  error = rpc_message_send_int32(message, error_code);
+	  if (error != RPC_ERROR_NO_ERROR)
+		return error;
+	  error = rpc_message_flush(message);
+	  if (error != RPC_ERROR_NO_ERROR)
+		return error;
+	  break;
+	}
 	return error_code;
   }
-
-  // send: MESSAGE_ACK
-  error = rpc_message_send_int32(message, RPC_MESSAGE_ACK);
-  if (error != RPC_ERROR_NO_ERROR)
-	return error;
-  error = rpc_message_flush(message);
-  if (error != RPC_ERROR_NO_ERROR)
-	return error;
 
   return method;
 }
 
 int rpc_dispatch(rpc_connection_t *connection)
 {
+  int32_t msg_tag;
   rpc_message_t message;
   rpc_message_init(&message, connection);
 
-  // wait: <invoke> (header: MESSAGE_START)
-  int32_t msg_tag;
+  // recv: <invoke> (header: MESSAGE_START)
   int error = rpc_message_recv_int32(&message, &msg_tag);
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
@@ -1513,6 +1548,35 @@ int rpc_dispatch(rpc_connection_t *connection)
   if (method < 0)
 	return rpc_error(connection, method);
   return method;
+}
+
+// Dispatch pending remote calls until we get MSG_TAG
+static int _rpc_dispatch_until(rpc_connection_t *connection, rpc_message_t *message, int32_t expected_msg_tag)
+{
+  if (expected_msg_tag) {
+	for (;;) {
+	  int32_t msg_tag;
+	  int error = rpc_message_recv_int32(message, &msg_tag);
+	  if (error != RPC_ERROR_NO_ERROR)
+		return error;
+	  if (msg_tag == expected_msg_tag)
+		break;
+	  if (msg_tag != RPC_MESSAGE_START)
+		return RPC_ERROR_MESSAGE_TYPE_INVALID;
+	  if ((error = _rpc_dispatch(connection, message)) < 0)
+		return error;
+	}
+  }
+  else {
+	for (;;) {
+	  int ret = _rpc_wait_dispatch(connection, 0);
+	  if (ret == 0)
+		break;
+	  if (ret < 0 || (ret = rpc_dispatch(connection)) < 0)
+		return ret;
+	}
+  }
+  return RPC_ERROR_NO_ERROR;
 }
 
 
@@ -1603,16 +1667,12 @@ int rpc_method_invoke(rpc_connection_t *connection, int method, ...)
   rpc_message_init(&message, connection);
 
   // call: rpc_dispatch() (pending remote calls)
-  for (;;) {
-	int ret = _rpc_wait_dispatch(connection, 0);
-	if (ret == 0)
-	  break;
-	if (ret < 0 || (ret = rpc_dispatch(connection)) < 0)
-	  return ret;
-  }
+  int error = _rpc_dispatch_until(connection, &message, 0);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
 
   // send: <invoke> = MESSAGE_START <method-id> MESSAGE_END
-  int error = rpc_message_send_int32(&message, RPC_MESSAGE_START);
+  error = rpc_message_send_int32(&message, RPC_MESSAGE_START);
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
   error = rpc_message_send_int32(&message, method);
@@ -1624,14 +1684,6 @@ int rpc_method_invoke(rpc_connection_t *connection, int method, ...)
   error = rpc_message_flush(&message);
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
-
-  // wait: MESSAGE_ACK
-  int32_t msg_tag;
-  error = rpc_message_recv_int32(&message, &msg_tag);
-  if (error != RPC_ERROR_NO_ERROR)
-	return rpc_error(connection, error);
-  if (msg_tag != RPC_MESSAGE_ACK)
-	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
 
   // send optional arguments
   va_list args;
@@ -1649,14 +1701,14 @@ int rpc_method_invoke(rpc_connection_t *connection, int method, ...)
 	error = rpc_message_flush(&message);
 	if (error != RPC_ERROR_NO_ERROR)
 	  return rpc_error(connection, error);
-
-	// wait: MESSAGE_ACK
-	error = rpc_message_recv_int32(&message, &msg_tag);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-	if (msg_tag != RPC_MESSAGE_ACK)
-	  return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
   }
+
+  // wait: MESSAGE_ACK
+  error = _rpc_dispatch_until(connection, &message, RPC_MESSAGE_ACK);
+  if (error == RPC_ERROR_ERRNO_SET)
+	perror("rpc_method_invoke");
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
 
   return RPC_ERROR_NO_ERROR;
 }
@@ -1674,7 +1726,11 @@ int rpc_method_get_args(rpc_connection_t *connection, ...)
   rpc_message_t message;
   rpc_message_init(&message, connection);
 
-  // wait: <method-args>
+  // we can't have pending calls here because the method invocation
+  // message and its arguments are atomic (i.e. they are sent right
+  // away, no wait for ACK)
+
+  // recv: <method-args>
   va_list args;
   va_start(args, connection);
   int error = rpc_message_recv_args(&message, args);
@@ -1704,76 +1760,42 @@ int rpc_method_wait_for_reply(rpc_connection_t *connection, ...)
 	return RPC_ERROR_CONNECTION_CLOSED;
 
   int error;
+  int32_t msg_tag;
   rpc_message_t message;
   rpc_message_init(&message, connection);
 
   // call: rpc_dispatch() (pending remote calls)
-  int32_t msg_tag;
-  bool done = false;
-  while (!done) {
-	error = rpc_message_recv_int32(&message, &msg_tag);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-	switch (msg_tag) {
-	case RPC_MESSAGE_START:
-	  if ((error = _rpc_dispatch(connection, &message)) < 0)
-		return rpc_error(connection, error);
-	  break;
-	case RPC_MESSAGE_REPLY:
-	case RPC_MESSAGE_ACK:
-	  done = true;
-	  break;
-	case RPC_MESSAGE_FAILURE:
-	  {
-		// wait: <error-code>
-		int32_t error_code;
-		error = rpc_message_recv_int32(&message, &error_code);
-		if (error != RPC_ERROR_NO_ERROR)
-		  return rpc_error(connection, error);
-		// return other-side error code
-		return rpc_error(connection, error_code);
-	  }
-	default:
-	  return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
-	}
-  }
+  // recv: MESSAGE_REPLY
+  error = _rpc_dispatch_until(connection, &message, RPC_MESSAGE_REPLY);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
 
+  // receive optional arguments
   va_list args;
   va_start(args, connection);
   int type = va_arg(args, int);
   va_end(args);
-
   if (type != RPC_TYPE_INVALID) {
 
-	// wait: <reply>
-	if (msg_tag != RPC_MESSAGE_REPLY)
-	  return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
+	// recv: [ <method-args> ]
 	va_start(args, connection);
 	error = rpc_message_recv_args(&message, args);
 	va_end(args);
 	if (error != RPC_ERROR_NO_ERROR)
 	  return rpc_error(connection, error);
-	error = rpc_message_recv_int32(&message, &msg_tag);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-	if (msg_tag != RPC_MESSAGE_END)
-	  return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
-
-	// send: MESSAGE_ACK
-	error = rpc_message_send_int32(&message, RPC_MESSAGE_ACK);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-	error = rpc_message_flush(&message);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-
-	// wait: MESSAGE_ACK (prepare for final ACK)
-	error = rpc_message_recv_int32(&message, &msg_tag);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
   }
 
+  // recv: MESSAGE_END
+  error = rpc_message_recv_int32(&message, &msg_tag);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
+  if (msg_tag != RPC_MESSAGE_END)
+	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
+
   // wait: MESSAGE_ACK
+  error = rpc_message_recv_int32(&message, &msg_tag);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
   if (msg_tag != RPC_MESSAGE_ACK)
 	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
   
@@ -1810,13 +1832,13 @@ int rpc_method_send_reply(rpc_connection_t *connection, ...)
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
 
-  // wait: MESSAGE_ACK
-  int32_t msg_tag;
-  error = rpc_message_recv_int32(&message, &msg_tag);
+  // send: MESSAGE_ACK
+  error = rpc_message_send_int32(&message, RPC_MESSAGE_ACK);
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
-  if (msg_tag != RPC_MESSAGE_ACK)
-	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
+  error = rpc_message_flush(&message);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
 
   return RPC_ERROR_NO_ERROR;
 }

@@ -92,25 +92,6 @@ static bool FUNC(is_elf_plugin_fd)(int fd, NPW_PluginInfo *out_plugin_info)
   if (ehdr.e_version != EV_CURRENT)
 	return false;
 
-  if (out_plugin_info) {
-	const char *target_arch = "";
-	switch (ehdr.e_machine) {
-	case EM_386:			target_arch = "i386";	break;
-	case EM_X86_64:			target_arch = "x86_64";	break;
-	case EM_SPARC:			target_arch = "sparc";	break;
-	case EM_PPC:			target_arch = "ppc";	break;
-	case EM_PPC64:			target_arch = "ppc64";	break;
-	}
-	strcpy(out_plugin_info->target_arch, target_arch);
-	const char *target_os = "";
-	switch (ehdr.e_ident[EI_OSABI]) {
-	case ELFOSABI_LINUX:	target_os = "linux";	break;
-	case ELFOSABI_SOLARIS:	target_os = "solaris";	break;
-	case ELFOSABI_FREEBSD:	target_os = "freebsd";	break;
-	}
-	strcpy(out_plugin_info->target_os, target_os);
-  }
-
   ElfW(Shdr) *shdr = (ElfW(Shdr) *)load_data(fd, ehdr.e_shoff, ehdr.e_shnum * sizeof(*shdr));
   if (do_swap) {
 	for (i = 0; i < ehdr.e_shnum; i++)
@@ -163,6 +144,40 @@ static bool FUNC(is_elf_plugin_fd)(int fd, NPW_PluginInfo *out_plugin_info)
   ret = (nb_np_syms == 3) && !is_wrapper_plugin;
 
  done:
+  if (out_plugin_info) {
+	const char *target_arch = NULL;
+	switch (ehdr.e_machine) {
+	case EM_386:			target_arch = "i386";	break;
+	case EM_X86_64:			target_arch = "x86_64";	break;
+	case EM_SPARC:			target_arch = "sparc";	break;
+	case EM_PPC:			target_arch = "ppc";	break;
+	case EM_PPC64:			target_arch = "ppc64";	break;
+	}
+	if (target_arch == NULL)
+	  target_arch = "";
+	strcpy(out_plugin_info->target_arch, target_arch);
+
+	const char *target_os = NULL;
+	switch (ehdr.e_ident[EI_OSABI]) {
+	case ELFOSABI_LINUX:	target_os = "linux";	break;
+	case ELFOSABI_SOLARIS:	target_os = "solaris";	break;
+	case ELFOSABI_FREEBSD:	target_os = "freebsd";	break;
+	}
+	if (target_os == NULL) {
+	  for (i = 0; i < ehdr.e_shnum; i++) {
+	    ElfW(Shdr) *sec = &shdr[i];
+	    if ((sec->sh_type == 0x6ffffffd /* SHT_SUNW_verdef */ || sec->sh_type == 0x6ffffffe /*SHT_SUNW_verneed*/)
+			&& strcmp(sdata[ehdr.e_shstrndx] + sec->sh_name, ".SUNW_version") == 0) {
+	      target_os = "solaris";
+	      break;
+	    }
+	  }
+	  if (target_os == NULL)
+	    target_os = "";
+	}
+	strcpy(out_plugin_info->target_os, target_os);
+  }
+
   for (i = 0; i < ehdr.e_shnum; i++)
 	free(sdata[i]);
   free(sdata);

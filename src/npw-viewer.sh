@@ -27,7 +27,7 @@ export LD_LIBRARY_PATH=$NPW_VIEWER_DIR
 NPW_USE_XSHM=${NPW_USE_XSHM:-yes}
 
 case $ARCH in
-i?86)
+i?86|i86pc)
     ARCH=i386
     ;;
 amd64)

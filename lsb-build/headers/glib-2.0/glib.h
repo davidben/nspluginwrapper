@@ -3290,6 +3290,18 @@ extern "C" {
     extern GDate *g_date_new(void);
     extern void g_thread_init_with_errorcheck_mutexes(GThreadFunctions *);
     extern void g_thread_init(GThreadFunctions *);
+
+    extern gpointer g_slice_alloc (gsize block_size) G_GNUC_MALLOC;
+    extern gpointer g_slice_alloc0 (gsize block_size) G_GNUC_MALLOC;
+    extern void g_slice_free1 (gsize block_size, gpointer mem_block);
+#define g_slice_new(type) \
+  ((type*) g_slice_alloc (sizeof (type)))
+#define g_slice_new0(type) \
+  ((type*) g_slice_alloc0 (sizeof (type)))
+#define g_slice_free(type, mem)				do {	\
+  if (1) g_slice_free1 (sizeof (type), (mem));		\
+  else   (void) ((type*) 0 == (mem)); 				\
+} while (0)
 #ifdef __cplusplus
 }
 #endif

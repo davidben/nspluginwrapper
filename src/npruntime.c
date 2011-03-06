@@ -78,7 +78,7 @@ int npclass_handle_Invalidate(rpc_connection_t *connection)
 	D(bug(" done\n"));
   }
 
-  return RPC_ERROR_NO_ERROR;
+  return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
 }
 
 void npclass_invoke_Invalidate(NPObject *npobj)

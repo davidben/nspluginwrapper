@@ -381,7 +381,7 @@ static int do_send_NPSetWindowCallbackStruct(rpc_message_t *message, void *p_val
 	  return error;
 	if ((error = rpc_message_send_int32(message, ws_info->type)) < 0)
 	  return error;
-	if ((error = rpc_message_send_uint32(message, XVisualIDFromVisual(ws_info->visual))) < 0)
+	if ((error = rpc_message_send_uint32(message, ws_info->visual ? XVisualIDFromVisual(ws_info->visual) : 0)) < 0)
 	  return error;
 	if ((error = rpc_message_send_uint32(message, ws_info->colormap)) < 0)
 	  return error;

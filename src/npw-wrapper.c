@@ -243,6 +243,12 @@ static int handle_NPN_UserAgent(rpc_connection_t *connection)
 {
   D(bug("handle_NPN_UserAgent\n"));
 
+  int error = rpc_method_get_args(connection, RPC_TYPE_INVALID);
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_UserAgent() get args", error);
+	return error;
+  }
+
   const char *user_agent = g_NPN_UserAgent(NULL);
   return rpc_method_send_reply(connection, RPC_TYPE_STRING, user_agent, RPC_TYPE_INVALID);
 }
@@ -270,7 +276,7 @@ static int handle_NPN_Status(rpc_connection_t *connection)
 	mozilla_funcs.status(instance, message);
   if (message)
 	free(message);
-  return RPC_ERROR_NO_ERROR;
+  return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
 }
 
 // NPN_GetValue
@@ -390,7 +396,7 @@ static int handle_NPN_InvalidateRect(rpc_connection_t *connection)
 
   g_NPN_InvalidateRect(instance, &invalidRect);
 
-  return RPC_ERROR_NO_ERROR;
+  return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
 }
 
 // NPN_GetURL
@@ -591,7 +597,7 @@ static int handle_NPN_PrintData(rpc_connection_t *connection)
   if (fwrite(printData.data, printData.size, 1, platformPrint->fp) != 1)
 	return RPC_ERROR_ERRNO_SET;
 
-  return RPC_ERROR_NO_ERROR;
+  return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
 }
 
 // NPN_RequestRead
@@ -831,7 +837,7 @@ static int handle_NPN_PushPopupsEnabledState(rpc_connection_t *connection)
 
   g_NPN_PushPopupsEnabledState(instance, enabled);
 
-  return RPC_ERROR_NO_ERROR;
+  return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
 }
 
 // NPN_PopPopupsEnabledState
@@ -861,7 +867,7 @@ static int handle_NPN_PopPopupsEnabledState(rpc_connection_t *connection)
 
   g_NPN_PopPopupsEnabledState(instance);
 
-  return RPC_ERROR_NO_ERROR;
+  return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
 }
 
 // NPN_CreateObject
@@ -1171,7 +1177,7 @@ static int handle_NPN_SetException(rpc_connection_t *connection)
 
   // XXX memory leak (message)
 
-  return RPC_ERROR_NO_ERROR;
+  return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
 }
 
 // NPN_GetStringIdentifier

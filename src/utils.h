@@ -42,6 +42,7 @@ extern const char *string_of_NPStreamType(int stype) attribute_hidden;
 // Misc utility functions
 extern void npw_perror(const char *prefix, int error) attribute_hidden;
 extern const char *npw_strerror(int error) attribute_hidden;
+extern char *npw_asprintf(const char *format, ...) attribute_hidden;
 
 #ifdef __cplusplus
 }

@@ -41,6 +41,7 @@
 
 static bool g_auto = false;
 static bool g_verbose = false;
+static bool g_allow_native = false;
 static const char NPW_CONFIG[] = "nspluginwrapper";
 
 static void error(const char *format, ...)
@@ -140,6 +141,14 @@ static const char *get_system_mozilla_plugin_dir(void)
 	  };
 	  dirs = netbsd_dirs;
 	}
+#elif defined(__sun__)
+	{
+	  static const char *solaris_dirs[] = {
+		LIBDIR "/firefox/plugins",
+		"/usr/sfw/" LIB "/mozilla/plugins",
+	  };
+	  dirs = solaris_dirs;
+	}
 #elif defined(__linux__)
 	if (access("/etc/SuSE-release", F_OK) == 0) {
 	  static const char *suse_dirs[] = {
@@ -227,6 +236,9 @@ static const char **get_mozilla_plugin_dirs(void)
 	"/usr/pkg/lib/RealPlayer/mozilla",
 	"/usr/pkg/Acrobat5/Browsers/intellinux",
 	"/usr/pkg/Acrobat7/Browser/intellinux",
+#endif
+#if defined(__sun__)
+	"/usr/sfw/lib/mozilla/plugins",
 #endif
   };
 
@@ -504,7 +516,8 @@ static int detect_plugin_viewer(const char *filename, NPW_PluginInfo *out_plugin
 	target_os_table[0] = NULL;
 
   // don't wrap plugins for host OS/ARCH
-  if (out_plugin_info
+  if (!g_allow_native
+	  && out_plugin_info
 	  && out_plugin_info->target_arch && strcmp(out_plugin_info->target_arch, HOST_ARCH) == 0
 	  && out_plugin_info->target_os && strcmp(out_plugin_info->target_os, HOST_OS) == 0)
 	return EXIT_VIEWER_NATIVE;
@@ -968,6 +981,7 @@ static void print_usage(void)
   printf("   -h --help               print this message\n");
   printf("   -v --verbose            flag: set verbose mode\n");
   printf("   -a --auto               flag: set automatic mode for plugins discovery\n");
+  printf("   -n --native             flag: allow native plugin(s) to be wrapped\n");
   printf("   -l --list               list plugins currently installed\n");
   printf("   -u --update             update plugin(s) currently installed\n");
   printf("   -i --install [FILE(S)]  install plugin(s)\n");
@@ -990,6 +1004,12 @@ static int process_verbose(int argc, char *argv[])
 static int process_auto(int argc, char *argv[])
 {
   g_auto = true;
+  return 0;
+}
+
+static int process_native(int argc, char *argv[])
+{
+  g_allow_native = true;
   return 0;
 }
 
@@ -1110,6 +1130,7 @@ int main(int argc, char *argv[])
 	{ 'h', "help",		process_help,		1 },
 	{ 'v', "verbose",	process_verbose,	0 },
 	{ 'a', "auto",		process_auto,		0 },
+	{ 'n', "native",	process_native,		0 },
 	{ 'l', "list",		process_list,		1 },
 	{ 'u', "update",	process_update,		1 },
 	{ 'i', "install",	process_install,	1 },

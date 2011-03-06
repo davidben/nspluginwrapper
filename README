@@ -20,6 +20,10 @@ compatible plugins. It makes it possible to use 32-bit x86 plugins
 like Adobe Flash Player on other platforms like Linux/x86_64, *BSD and
 even Linux/ppc.
 
+nspluginwrapper also provides a standalone plugins player. This
+programs makes it possible to execute plugins without an actual
+browser.
+
 
 Quick build notes
 -----------------
@@ -57,6 +61,7 @@ You can manually install/remove/update plugins with "nspluginwrapper".
 
    -h --help               print this message
    -a --auto               set automatic mode for plugins discovery
+   -n --native             allow native plugin(s) to be wrapped
    -l --list               list plugins currently installed
    -u --update             update plugin(s) currently installed
    -i --install [FILE(S)]  install plugin(s)
@@ -78,7 +83,7 @@ The following plugins work reasonnably well:
 - DejaVu Libre        3.5.14
 - Flash Player        7.0
 - Flash Player        9.0.124
-- Flash Player        10.0 (beta 2)
+- Flash Player        10.0 (beta 2, rc)
 - Linux J2K           0.0.2
 - Mplayerplug-in      2.80
 - Mplayerplug-in      3.25

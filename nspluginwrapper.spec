@@ -1,7 +1,7 @@
 %define name	nspluginwrapper
-%define version	1.1.0
+%define version	1.1.2
 %define release	1
-#define svndate 20080706
+#define svndate 20081012
 
 # define 32-bit arch of multiarch platforms
 %define arch_32 %{nil}
@@ -192,6 +192,13 @@ fi
 %endif
 
 %changelog
+* Sun Oct 12 2008 Gwenole Beauchesne <gb.public@free.fr> 1.1.2-1
+- add support for Open Solaris hosts
+- add support for ARM targets (Geraint North)
+- fix support for windowless plugins (Flash Player 10 rc)
+- fix various bugs in RPC code (crashes and concurrent messaging)
+- allow wrapping of native plugins through the -n|--native option
+
 * Sun Jul  6 2008 Gwenole Beauchesne <gb.public@free.fr> 1.1.0-1
 - add support for windowless plugins (Flash Player 10 beta 2)
 - add standalone plugins player (nspluginplayer)

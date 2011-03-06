@@ -19,6 +19,7 @@
   * Split toolkit specific code (npviewer-{x11,gtk,win}.c)
   * Use winelib + override win32 socket to support AF_UNIX (Linux "native")
 - RPC
+  * RPC_MESSAGE_FAILURE handling is broken
   * Need a way to differenciate array of pointers or array of values
     => RPC_TYPE_DYNAMIC (allocate space), RPC_TYPE_STATIC (assumes data alloc'ed?)
     => Rearrange RPC message type descriptors

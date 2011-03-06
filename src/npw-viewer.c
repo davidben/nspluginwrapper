@@ -358,7 +358,11 @@ static int create_window_attributes(NPSetWindowCallbackStruct *ws_info)
 {
   if (ws_info == NULL)
 	return -1;
-  GdkVisual *gdk_visual = gdkx_visual_get((uintptr_t)ws_info->visual);
+  GdkVisual *gdk_visual;
+  if (ws_info->visual)
+	gdk_visual = gdkx_visual_get((uintptr_t)ws_info->visual);
+  else
+	gdk_visual = gdk_visual_get_system();
   if (gdk_visual == NULL) {
 	npw_printf("ERROR: could not reconstruct XVisual from visualID\n");
 	return -2;
@@ -2248,6 +2252,12 @@ static int handle_NP_GetMIMEDescription(rpc_connection_t *connection)
 {
   D(bug("handle_NP_GetMIMEDescription\n"));
 
+  int error = rpc_method_get_args(connection, RPC_TYPE_INVALID);
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NP_GetMIMEDescription() get args", error);
+	return error;
+  }
+
   char *str = g_NP_GetMIMEDescription();
   return rpc_method_send_reply(connection, RPC_TYPE_STRING, str, RPC_TYPE_INVALID);
 }
@@ -2413,6 +2423,12 @@ g_NP_Shutdown(void)
 static int handle_NP_Shutdown(rpc_connection_t *connection)
 {
   D(bug("handle_NP_Shutdown\n"));
+
+  int error = rpc_method_get_args(connection, RPC_TYPE_INVALID);
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NP_Shutdown() get args", error);
+	return error;
+  }
 
   NPError ret = g_NP_Shutdown();
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
@@ -2731,7 +2747,7 @@ static int handle_NPP_URLNotify(rpc_connection_t *connection)
   if (url)
 	free(url);
 
-  return RPC_ERROR_NO_ERROR;
+  return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
 }
 
 // NPP_NewStream
@@ -2980,7 +2996,7 @@ static int handle_NPP_StreamAsFile(rpc_connection_t *connection)
   if (fname)
 	free(fname);
 
-  return RPC_ERROR_NO_ERROR;
+  return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
 }
 
 // NPP_Print
@@ -2998,7 +3014,8 @@ g_NPP_Print(NPP instance, NPPrint *printInfo)
   D(bug(" done\n"));
 }
 
-static void invoke_NPN_PrintData(PluginInstance *plugin, uint32_t platform_print_id, NPPrintData *printData)
+static void
+invoke_NPN_PrintData(PluginInstance *plugin, uint32_t platform_print_id, NPPrintData *printData)
 {
   if (printData == NULL)
 	return;

@@ -1,5 +1,12 @@
-nspluginwrapper NEWS -- history of user-visible changes.  2008-07-06
+nspluginwrapper NEWS -- history of user-visible changes.  2008-10-12
 Copyright (C) 2005-2008 Gwenole Beauchesne
+
+Version 1.1.2 (BETA) - 12.Oct.2008
+* Add support for Open Solaris hosts
+* Add support for ARM targets (Geraint North)
+* Fix support for windowless plugins (Flash Player 10 rc)
+* Fix various bugs in RPC code (crashes and concurrent messaging)
+* Allow wrapping of native plugins through the -n|--native option
 
 Version 1.1.0 (BETA) - 06.Jul.2008
 * Add support for windowless plugins (Flash Player 10 beta 2)
