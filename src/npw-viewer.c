@@ -3482,6 +3482,11 @@ static int handle_NPP_New(rpc_connection_t *connection)
 	  free(argv[i]);
 	free(argv);
   }
+  if (saved) {
+    if (saved->buf)
+      NPN_MemFree(saved->buf);
+    NPN_MemFree(saved);
+  }
 
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
@@ -3527,6 +3532,9 @@ static NPError g_NPP_Destroy_Now(PluginInstance *plugin, NPSavedData **save)
 	*save = save_area;
   } else if (save_area) {
 	npw_printf("WARNING: NPP_Destroy returned save_area, but it was ignored\n");
+    if (save_area->buf)
+      NPN_MemFree(save_area->buf);
+    NPN_MemFree(save_area);
   }
 
   rpc_connection_unref(g_rpc_connection);
@@ -3573,6 +3581,11 @@ static int handle_NPP_Destroy(rpc_connection_t *connection)
 								RPC_TYPE_INT32, ret,
 								RPC_TYPE_NP_SAVED_DATA, save_area,
 								RPC_TYPE_INVALID);
+  if (save_area) {
+    if (save_area->buf)
+      NPN_MemFree(save_area->buf);
+    NPN_MemFree(save_area);
+  }
 
   rpc_connection_unref(connection);
   return error;
