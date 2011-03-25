@@ -975,13 +975,13 @@ g_NPP_New (Plugin *plugin, guint16 mode, GHashTable *attrs, guint w, guint h)
   g_ptr_array_free (arg.values, TRUE);
 
   // check if XEMBED is to be used
-  NPBool supports_XEmbed = FALSE;
+  long supports_XEmbed = FALSE;
   if (plugin->mozilla_funcs.getvalue)
     {
       NPError error = plugin->mozilla_funcs.getvalue (NULL, NPNVSupportsXEmbedBool, (void *)&supports_XEmbed);
       if (error == NPERR_NO_ERROR && plugin->plugin_funcs.getvalue)
 	{
-	  NPBool needs_XEmbed = FALSE;
+	  long needs_XEmbed = FALSE;
 	  error = plugin->plugin_funcs.getvalue (plugin->instance, NPPVpluginNeedsXEmbed, (void *)&needs_XEmbed);
 	  if (error == NPERR_NO_ERROR)
 	    plugin->use_xembed = supports_XEmbed && needs_XEmbed;

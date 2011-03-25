@@ -3421,11 +3421,14 @@ static NPError g_NPP_New(NPMIMEType plugin_type, uint32_t instance_id,
   D(bugiD("NPP_New return: %d [%s]\n", ret, string_of_NPError(ret)));
 
   // check if XEMBED is to be used
-  NPBool supports_XEmbed = FALSE;
+  long supports_XEmbed = FALSE;
   if (mozilla_funcs.getvalue) {
+	// Even though NPAPI kindly provides an NPBool typedef,
+	// NPNVSupportsXEmbedBool is documented to be a 4-byte PRBool. And
+	// Flash treats it as such.
 	NPError error = mozilla_funcs.getvalue(NULL, NPNVSupportsXEmbedBool, (void *)&supports_XEmbed);
 	if (error == NPERR_NO_ERROR && plugin_funcs.getvalue) {
-	  NPBool needs_XEmbed = FALSE;
+	  long needs_XEmbed = FALSE;
 	  error = plugin_funcs.getvalue(instance, NPPVpluginNeedsXEmbed, (void *)&needs_XEmbed);
 	  if (error == NPERR_NO_ERROR)
 		plugin->use_xembed = supports_XEmbed && needs_XEmbed;
