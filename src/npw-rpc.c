@@ -1345,11 +1345,11 @@ static int do_send_NPString(rpc_message_t *message, void *p_value)
   if (string == NULL)
 	return RPC_ERROR_MESSAGE_ARGUMENT_INVALID;
 
-  int error = rpc_message_send_uint32(message, string->utf8length);
+  int error = rpc_message_send_uint32(message, string->UTF8Length);
   if (error < 0)
 	return error;
-  if (string->utf8length && string->utf8characters)
-	return rpc_message_send_bytes(message, (unsigned char *)string->utf8characters, string->utf8length);
+  if (string->UTF8Length && string->UTF8Characters)
+	return rpc_message_send_bytes(message, (unsigned char *)string->UTF8Characters, string->UTF8Length);
   return RPC_ERROR_NO_ERROR;
 }
 
@@ -1358,20 +1358,20 @@ static int do_recv_NPString(rpc_message_t *message, void *p_value)
   NPString *string = (NPString *)p_value;
   if (string == NULL)
 	return RPC_ERROR_MESSAGE_ARGUMENT_INVALID;
-  string->utf8length = 0;
-  string->utf8characters = NULL;
+  string->UTF8Length = 0;
+  string->UTF8Characters = NULL;
 
-  int error = rpc_message_recv_uint32(message, &string->utf8length);
+  int error = rpc_message_recv_uint32(message, &string->UTF8Length);
   if (error < 0)
 	return error;
 
-  if ((string->utf8characters = NPN_MemAlloc(string->utf8length + 1)) == NULL)
+  if ((string->UTF8Characters = NPN_MemAlloc(string->UTF8Length + 1)) == NULL)
 	return RPC_ERROR_NO_MEMORY;
-  if (string->utf8length > 0) {
-	if ((error = rpc_message_recv_bytes(message, (unsigned char *)string->utf8characters, string->utf8length)) < 0)
+  if (string->UTF8Length > 0) {
+	if ((error = rpc_message_recv_bytes(message, (unsigned char *)string->UTF8Characters, string->UTF8Length)) < 0)
 	  return error;
   }
-  ((char *)string->utf8characters)[string->utf8length] = '\0';
+  ((char *)string->UTF8Characters)[string->UTF8Length] = '\0';
   
   return RPC_ERROR_NO_ERROR;
 }

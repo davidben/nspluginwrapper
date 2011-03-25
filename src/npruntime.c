@@ -978,8 +978,8 @@ npvariant_clear(NPVariant *variant)
   case NPVariantType_String:
 	{
 	  NPString *s = &NPVARIANT_TO_STRING(*variant);
-	  if (s->utf8characters)
-		NPN_MemFree((void *)s->utf8characters);
+	  if (s->UTF8Characters)
+		NPN_MemFree((void *)s->UTF8Characters);
 	  break;
 	}
   case NPVariantType_Object:
@@ -1021,8 +1021,8 @@ string_of_NPVariant(const NPVariant *arg)
 	case NPVariantType_String:
 	  g_string_append_c(str, '\'');
 	  g_string_append_len(str,
-						  arg->value.stringValue.utf8characters,
-						  arg->value.stringValue.utf8length);
+						  arg->value.stringValue.UTF8Characters,
+						  arg->value.stringValue.UTF8Length);
 	  g_string_append_c(str, '\'');
 	  break;
 	case NPVariantType_Object:

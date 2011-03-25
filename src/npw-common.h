@@ -29,7 +29,7 @@
 #define XP_UNIX 1
 #define MOZ_X11 1
 #include <npapi.h>
-#include <npupp.h>
+#include <npfunctions.h>
 #include <npruntime.h>
 #include "npruntime-impl.h"
 

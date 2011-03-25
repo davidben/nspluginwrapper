@@ -105,37 +105,37 @@ NPW_InitializeFuncs (NPNetscapeFuncs *mozilla_funcs,
 void *
 NPN_MemAlloc (uint32_t size)
 {
-  return CallNPN_MemAllocProc (g_mozilla_funcs.memalloc, size);
+  return g_mozilla_funcs.memalloc(size);
 }
 
 void
 NPN_MemFree (void *ptr)
 {
-  CallNPN_MemFreeProc (g_mozilla_funcs.memfree, ptr);
+  g_mozilla_funcs.memfree(ptr);
 }
 
 uint32_t
 NPN_MemFlush (uint32_t size)
 {
-  return CallNPN_MemFlushProc (g_mozilla_funcs.memflush, size);
+  return g_mozilla_funcs.memflush(size);
 }
 
 NPObject *
 NPN_RetainObject (NPObject *npobj)
 {
-  return CallNPN_RetainObjectProc (g_mozilla_funcs.retainobject, npobj);
+  return g_mozilla_funcs.retainobject(npobj);
 }
 
 void
 NPN_ReleaseObject (NPObject *npobj)
 {
-  CallNPN_ReleaseObjectProc (g_mozilla_funcs.releaseobject, npobj);
+  g_mozilla_funcs.releaseobject(npobj);
 }
 
 void
 NPN_ReleaseVariantValue (NPVariant *var)
 {
-  CallNPN_ReleaseVariantValueProc (g_mozilla_funcs.releasevariantvalue, var);
+  g_mozilla_funcs.releasevariantvalue(var);
 }
 
 /* ====================================================================== */

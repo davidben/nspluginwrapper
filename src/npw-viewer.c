@@ -793,7 +793,7 @@ static void xt_client_event_handler(Widget w, XtPointer client_data, XEvent *eve
 #define NS_FAILED(_nsresult) (NS_UNLIKELY((_nsresult) & 0x80000000))
 #define NS_SUCCEEDED(_nsresult) (NS_LIKELY(!((_nsresult) & 0x80000000)))
 
-typedef uint32 nsresult;
+typedef uint32_t nsresult;
 typedef struct nsIServiceManager nsIServiceManager;
 extern nsresult NS_GetServiceManager(nsIServiceManager **result);
 
@@ -1205,7 +1205,7 @@ invoke_NPN_GetValue(PluginInstance *plugin, NPNVariable variable, void *value)
 		ret = NPERR_GENERIC_ERROR;
 	  }
 	  D(bug("-> value: %s\n", b ? "true" : "false"));
-	  *((PRBool *)value) = b ? PR_TRUE : PR_FALSE;
+	  *((NPBool *)value) = b ? TRUE : FALSE;
 	  break;
 	}
   case RPC_TYPE_NP_OBJECT:
@@ -1381,7 +1381,7 @@ g_NPN_InvalidateRegion(NPP instance, NPRegion invalidRegion)
 
 // Allocates memory from the browser's memory space
 static void *
-g_NPN_MemAlloc(uint32 size)
+g_NPN_MemAlloc(uint32_t size)
 {
   D(bugiI("NPN_MemAlloc size=%d\n", size));
 
@@ -1391,8 +1391,8 @@ g_NPN_MemAlloc(uint32 size)
 }
 
 // Requests that the browser free a specified amount of memory
-static uint32
-g_NPN_MemFlush(uint32 size)
+static uint32_t
+g_NPN_MemFlush(uint32_t size)
 {
   D(bug("NPN_MemFlush size=%d\n", size));
   return 0;
@@ -1409,7 +1409,7 @@ g_NPN_MemFree(void *ptr)
 
 // Posts data to a URL
 static NPError
-invoke_NPN_PostURL(PluginInstance *plugin, const char *url, const char *target, uint32 len, const char *buf, NPBool file)
+invoke_NPN_PostURL(PluginInstance *plugin, const char *url, const char *target, uint32_t len, const char *buf, NPBool file)
 {
   npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
 						 NPERR_GENERIC_ERROR);
@@ -1440,7 +1440,7 @@ invoke_NPN_PostURL(PluginInstance *plugin, const char *url, const char *target, 
 }
 
 static NPError
-g_NPN_PostURL(NPP instance, const char *url, const char *target, uint32 len, const char *buf, NPBool file)
+g_NPN_PostURL(NPP instance, const char *url, const char *target, uint32_t len, const char *buf, NPBool file)
 {
   if (!thread_check()) {
 	npw_printf("WARNING: NPN_PostURL not called from the main thread\n");
@@ -1464,7 +1464,7 @@ g_NPN_PostURL(NPP instance, const char *url, const char *target, uint32 len, con
 
 // Posts data to a URL, and receives notification of the result
 static NPError
-invoke_NPN_PostURLNotify(PluginInstance *plugin, const char *url, const char *target, uint32 len, const char *buf, NPBool file, void *notifyData)
+invoke_NPN_PostURLNotify(PluginInstance *plugin, const char *url, const char *target, uint32_t len, const char *buf, NPBool file, void *notifyData)
 {
   npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
 						 NPERR_GENERIC_ERROR);
@@ -1496,7 +1496,7 @@ invoke_NPN_PostURLNotify(PluginInstance *plugin, const char *url, const char *ta
 }
 
 static NPError
-g_NPN_PostURLNotify(NPP instance, const char *url, const char *target, uint32 len, const char *buf, NPBool file, void *notifyData)
+g_NPN_PostURLNotify(NPP instance, const char *url, const char *target, uint32_t len, const char *buf, NPBool file, void *notifyData)
 {
   if (!thread_check()) {
 	npw_printf("WARNING: NPN_PostURLNotify not called from the main thread\n");
@@ -1528,7 +1528,7 @@ g_NPN_ReloadPlugins(NPBool reloadPages)
 }
 
 // Returns the Java execution environment
-static JRIEnv *
+static void *
 g_NPN_GetJavaEnv(void)
 {
   D(bug("NPN_GetJavaEnv\n"));
@@ -1537,7 +1537,7 @@ g_NPN_GetJavaEnv(void)
 }
 
 // Returns the Java object associated with the plug-in instance
-static jref
+static void *
 g_NPN_GetJavaPeer(NPP instance)
 {
   D(bug("NPN_GetJavaPeer instance=%p\n", instance));
@@ -1912,7 +1912,7 @@ g_NPN_DestroyStream(NPP instance, NPStream *stream, NPError reason)
 
 // Pushes data into a stream produced by the plug-in and consumed by the browser
 static int
-invoke_NPN_Write(PluginInstance *plugin, NPStream *stream, int32 len, void *buf)
+invoke_NPN_Write(PluginInstance *plugin, NPStream *stream, int32_t len, void *buf)
 {
   npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), -1);
 
@@ -1941,8 +1941,8 @@ invoke_NPN_Write(PluginInstance *plugin, NPStream *stream, int32 len, void *buf)
   return ret;
 }
 
-static int32
-g_NPN_Write(NPP instance, NPStream *stream, int32 len, void *buf)
+static int32_t
+g_NPN_Write(NPP instance, NPStream *stream, int32_t len, void *buf)
 {
   if (!thread_check()) {
 	npw_printf("WARNING: NPN_Write not called from the main thread\n");
@@ -1961,7 +1961,7 @@ g_NPN_Write(NPP instance, NPStream *stream, int32 len, void *buf)
 
   D(bugiI("NPN_Write instance=%p, stream=%p, len=%d, buf=%p\n", instance, stream, len, buf));
   npw_plugin_instance_ref(plugin);
-  int32 ret = invoke_NPN_Write(plugin, stream, len, buf);
+  int32_t ret = invoke_NPN_Write(plugin, stream, len, buf);
   npw_plugin_instance_unref(plugin);
   D(bugiD("NPN_Write return: %d\n", ret));
   return ret;
@@ -2407,7 +2407,7 @@ g_NPN_Evaluate(NPP instance, NPObject *npobj, NPString *script, NPVariant *resul
   if (!npobj)
 	return false;
 
-  if (!script || !script->utf8length || !script->utf8characters)
+  if (!script || !script->UTF8Length || !script->UTF8Characters)
 	return true; // nothing to evaluate
 
   D(bugiI("NPN_Evaluate instance=%p, npobj=%p\n", instance, npobj));
@@ -2824,7 +2824,7 @@ g_NPN_GetStringIdentifier(const NPUTF8 *name)
 
 // Returns an array of opaque identifiers for the names that are passed in
 static void
-invoke_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIdentifier *identifiers)
+invoke_NPN_GetStringIdentifiers(const NPUTF8 **names, int32_t nameCount, NPIdentifier *identifiers)
 {
   npw_return_if_fail(rpc_method_invoke_possible(g_rpc_connection));
 
@@ -2862,7 +2862,7 @@ invoke_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIden
 }
 
 static void
-cached_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIdentifier *identifiers)
+cached_NPN_GetStringIdentifiers(const NPUTF8 **names, int32_t nameCount, NPIdentifier *identifiers)
 {
   /* XXX: could be optimized further */
   invoke_NPN_GetStringIdentifiers(names, nameCount, identifiers);
@@ -2881,7 +2881,7 @@ cached_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIden
 }
 
 static void
-g_NPN_GetStringIdentifiers(const NPUTF8 **names, uint32_t nameCount, NPIdentifier *identifiers)
+g_NPN_GetStringIdentifiers(const NPUTF8 **names, int32_t nameCount, NPIdentifier *identifiers)
 {
   if (!thread_check()) {
 	npw_printf("WARNING: NPN_GetStringIdentifiers not called from the main thread\n");
@@ -3243,7 +3243,7 @@ static int handle_NP_GetValue(rpc_connection_t *connection)
 	}
   case RPC_TYPE_BOOLEAN:
 	{
-	  PRBool b = PR_FALSE;
+	  NPBool b = FALSE;
 	  ret = g_NP_GetValue(variable, (void *)&b);
 	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_BOOLEAN, b, RPC_TYPE_INVALID);
 	}
@@ -3266,51 +3266,51 @@ g_NP_Initialize(uint32_t version)
   memset(&mozilla_funcs, 0, sizeof(mozilla_funcs));
   mozilla_funcs.size = sizeof(mozilla_funcs);
   mozilla_funcs.version = version;
-  mozilla_funcs.geturl = NewNPN_GetURLProc(g_NPN_GetURL);
-  mozilla_funcs.posturl = NewNPN_PostURLProc(g_NPN_PostURL);
-  mozilla_funcs.requestread = NewNPN_RequestReadProc(g_NPN_RequestRead);
-  mozilla_funcs.newstream = NewNPN_NewStreamProc(g_NPN_NewStream);
-  mozilla_funcs.write = NewNPN_WriteProc(g_NPN_Write);
-  mozilla_funcs.destroystream = NewNPN_DestroyStreamProc(g_NPN_DestroyStream);
-  mozilla_funcs.status = NewNPN_StatusProc(g_NPN_Status);
-  mozilla_funcs.uagent = NewNPN_UserAgentProc(g_NPN_UserAgent);
-  mozilla_funcs.memalloc = NewNPN_MemAllocProc(g_NPN_MemAlloc);
-  mozilla_funcs.memfree = NewNPN_MemFreeProc(g_NPN_MemFree);
-  mozilla_funcs.memflush = NewNPN_MemFlushProc(g_NPN_MemFlush);
-  mozilla_funcs.reloadplugins = NewNPN_ReloadPluginsProc(g_NPN_ReloadPlugins);
-  mozilla_funcs.getJavaEnv = NewNPN_GetJavaEnvProc(g_NPN_GetJavaEnv);
-  mozilla_funcs.getJavaPeer = NewNPN_GetJavaPeerProc(g_NPN_GetJavaPeer);
-  mozilla_funcs.geturlnotify = NewNPN_GetURLNotifyProc(g_NPN_GetURLNotify);
-  mozilla_funcs.posturlnotify = NewNPN_PostURLNotifyProc(g_NPN_PostURLNotify);
-  mozilla_funcs.getvalue = NewNPN_GetValueProc(g_NPN_GetValue);
-  mozilla_funcs.setvalue = NewNPN_SetValueProc(g_NPN_SetValue);
-  mozilla_funcs.invalidaterect = NewNPN_InvalidateRectProc(g_NPN_InvalidateRect);
-  mozilla_funcs.invalidateregion = NewNPN_InvalidateRegionProc(g_NPN_InvalidateRegion);
-  mozilla_funcs.forceredraw = NewNPN_ForceRedrawProc(g_NPN_ForceRedraw);
-  mozilla_funcs.pushpopupsenabledstate = NewNPN_PushPopupsEnabledStateProc(g_NPN_PushPopupsEnabledState);
-  mozilla_funcs.poppopupsenabledstate = NewNPN_PopPopupsEnabledStateProc(g_NPN_PopPopupsEnabledState);
+  mozilla_funcs.geturl = g_NPN_GetURL;
+  mozilla_funcs.posturl = g_NPN_PostURL;
+  mozilla_funcs.requestread = g_NPN_RequestRead;
+  mozilla_funcs.newstream = g_NPN_NewStream;
+  mozilla_funcs.write = g_NPN_Write;
+  mozilla_funcs.destroystream = g_NPN_DestroyStream;
+  mozilla_funcs.status = g_NPN_Status;
+  mozilla_funcs.uagent = g_NPN_UserAgent;
+  mozilla_funcs.memalloc = g_NPN_MemAlloc;
+  mozilla_funcs.memfree = g_NPN_MemFree;
+  mozilla_funcs.memflush = g_NPN_MemFlush;
+  mozilla_funcs.reloadplugins = g_NPN_ReloadPlugins;
+  mozilla_funcs.getJavaEnv = g_NPN_GetJavaEnv;
+  mozilla_funcs.getJavaPeer = g_NPN_GetJavaPeer;
+  mozilla_funcs.geturlnotify = g_NPN_GetURLNotify;
+  mozilla_funcs.posturlnotify = g_NPN_PostURLNotify;
+  mozilla_funcs.getvalue = g_NPN_GetValue;
+  mozilla_funcs.setvalue = g_NPN_SetValue;
+  mozilla_funcs.invalidaterect = g_NPN_InvalidateRect;
+  mozilla_funcs.invalidateregion = g_NPN_InvalidateRegion;
+  mozilla_funcs.forceredraw = g_NPN_ForceRedraw;
+  mozilla_funcs.pushpopupsenabledstate = g_NPN_PushPopupsEnabledState;
+  mozilla_funcs.poppopupsenabledstate = g_NPN_PopPopupsEnabledState;
 
   if (NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING)) {
 	D(bug(" browser supports scripting through npruntime\n"));
-	mozilla_funcs.getstringidentifier = NewNPN_GetStringIdentifierProc(g_NPN_GetStringIdentifier);
-	mozilla_funcs.getstringidentifiers = NewNPN_GetStringIdentifiersProc(g_NPN_GetStringIdentifiers);
-	mozilla_funcs.getintidentifier = NewNPN_GetIntIdentifierProc(g_NPN_GetIntIdentifier);
-	mozilla_funcs.identifierisstring = NewNPN_IdentifierIsStringProc(g_NPN_IdentifierIsString);
-	mozilla_funcs.utf8fromidentifier = NewNPN_UTF8FromIdentifierProc(g_NPN_UTF8FromIdentifier);
-	mozilla_funcs.intfromidentifier = NewNPN_IntFromIdentifierProc(g_NPN_IntFromIdentifier);
-	mozilla_funcs.createobject = NewNPN_CreateObjectProc(g_NPN_CreateObject);
-	mozilla_funcs.retainobject = NewNPN_RetainObjectProc(g_NPN_RetainObject);
-	mozilla_funcs.releaseobject = NewNPN_ReleaseObjectProc(g_NPN_ReleaseObject);
-	mozilla_funcs.invoke = NewNPN_InvokeProc(g_NPN_Invoke);
-	mozilla_funcs.invokeDefault = NewNPN_InvokeDefaultProc(g_NPN_InvokeDefault);
-	mozilla_funcs.evaluate = NewNPN_EvaluateProc(g_NPN_Evaluate);
-	mozilla_funcs.getproperty = NewNPN_GetPropertyProc(g_NPN_GetProperty);
-	mozilla_funcs.setproperty = NewNPN_SetPropertyProc(g_NPN_SetProperty);
-	mozilla_funcs.removeproperty = NewNPN_RemovePropertyProc(g_NPN_RemoveProperty);
-	mozilla_funcs.hasproperty = NewNPN_HasPropertyProc(g_NPN_HasProperty);
-	mozilla_funcs.hasmethod = NewNPN_HasMethodProc(g_NPN_HasMethod);
-	mozilla_funcs.releasevariantvalue = NewNPN_ReleaseVariantValueProc(g_NPN_ReleaseVariantValue);
-	mozilla_funcs.setexception = NewNPN_SetExceptionProc(g_NPN_SetException);
+	mozilla_funcs.getstringidentifier = g_NPN_GetStringIdentifier;
+	mozilla_funcs.getstringidentifiers = g_NPN_GetStringIdentifiers;
+	mozilla_funcs.getintidentifier = g_NPN_GetIntIdentifier;
+	mozilla_funcs.identifierisstring = g_NPN_IdentifierIsString;
+	mozilla_funcs.utf8fromidentifier = g_NPN_UTF8FromIdentifier;
+	mozilla_funcs.intfromidentifier = g_NPN_IntFromIdentifier;
+	mozilla_funcs.createobject = g_NPN_CreateObject;
+	mozilla_funcs.retainobject = g_NPN_RetainObject;
+	mozilla_funcs.releaseobject = g_NPN_ReleaseObject;
+	mozilla_funcs.invoke = g_NPN_Invoke;
+	mozilla_funcs.invokeDefault = g_NPN_InvokeDefault;
+	mozilla_funcs.evaluate = g_NPN_Evaluate;
+	mozilla_funcs.getproperty = g_NPN_GetProperty;
+	mozilla_funcs.setproperty = g_NPN_SetProperty;
+	mozilla_funcs.removeproperty = g_NPN_RemoveProperty;
+	mozilla_funcs.hasproperty = g_NPN_HasProperty;
+	mozilla_funcs.hasmethod = g_NPN_HasMethod;
+	mozilla_funcs.releasevariantvalue = g_NPN_ReleaseVariantValue;
+	mozilla_funcs.setexception = g_NPN_SetException;
 
 	if (!npobject_bridge_new())
 	  return NPERR_OUT_OF_MEMORY_ERROR;
@@ -3421,11 +3421,11 @@ static NPError g_NPP_New(NPMIMEType plugin_type, uint32_t instance_id,
   D(bugiD("NPP_New return: %d [%s]\n", ret, string_of_NPError(ret)));
 
   // check if XEMBED is to be used
-  PRBool supports_XEmbed = PR_FALSE;
+  NPBool supports_XEmbed = FALSE;
   if (mozilla_funcs.getvalue) {
 	NPError error = mozilla_funcs.getvalue(NULL, NPNVSupportsXEmbedBool, (void *)&supports_XEmbed);
 	if (error == NPERR_NO_ERROR && plugin_funcs.getvalue) {
-	  PRBool needs_XEmbed = PR_FALSE;
+	  NPBool needs_XEmbed = FALSE;
 	  error = plugin_funcs.getvalue(instance, NPPVpluginNeedsXEmbed, (void *)&needs_XEmbed);
 	  if (error == NPERR_NO_ERROR)
 		plugin->use_xembed = supports_XEmbed && needs_XEmbed;
@@ -3713,7 +3713,7 @@ static int handle_NPP_GetValue(rpc_connection_t *connection)
 	}
   case RPC_TYPE_BOOLEAN:
 	{
-	  PRBool b = PR_FALSE;
+	  NPBool b = FALSE;
 	  ret = g_NPP_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&b);
 	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_BOOLEAN, b, RPC_TYPE_INVALID);
 	}
@@ -3776,7 +3776,7 @@ static int handle_NPP_URLNotify(rpc_connection_t *connection)
 
 // NPP_NewStream
 static NPError
-g_NPP_NewStream(NPP instance, NPMIMEType type, NPStream *stream, NPBool seekable, uint16 *stype)
+g_NPP_NewStream(NPP instance, NPMIMEType type, NPStream *stream, NPBool seekable, uint16_t *stype)
 {
   if (instance == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
@@ -3833,7 +3833,7 @@ static int handle_NPP_NewStream(rpc_connection_t *connection)
   stream_ndata->stream = stream;
   stream_ndata->is_plugin_stream = 0;
 
-  uint16 stype = NP_NORMAL;
+  uint16_t stype = NP_NORMAL;
   NPError ret = g_NPP_NewStream(PLUGIN_INSTANCE_NPP(plugin), type, stream, seekable, &stype);
 
   if (type)
@@ -3899,7 +3899,7 @@ static int handle_NPP_DestroyStream(rpc_connection_t *connection)
 }
 
 // NPP_WriteReady
-static int32
+static int32_t
 g_NPP_WriteReady(NPP instance, NPStream *stream)
 {
   if (instance == NULL)
@@ -3912,7 +3912,7 @@ g_NPP_WriteReady(NPP instance, NPStream *stream)
 	return 0;
 
   D(bugiI("NPP_WriteReady instance=%p, stream=%p\n", instance, stream));
-  int32 ret = plugin_funcs.writeready(instance, stream);
+  int32_t ret = plugin_funcs.writeready(instance, stream);
   D(bugiD("NPP_WriteReady return: %d\n", ret));
   return ret;
 }
@@ -3933,14 +3933,14 @@ static int handle_NPP_WriteReady(rpc_connection_t *connection)
 	return error;
   }
 
-  int32 ret = g_NPP_WriteReady(PLUGIN_INSTANCE_NPP(plugin), stream);
+  int32_t ret = g_NPP_WriteReady(PLUGIN_INSTANCE_NPP(plugin), stream);
 
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
 // NPP_Write
-static int32
-g_NPP_Write(NPP instance, NPStream *stream, int32 offset, int32 len, void *buf)
+static int32_t
+g_NPP_Write(NPP instance, NPStream *stream, int32_t offset, int32_t len, void *buf)
 {
   if (instance == NULL)
 	return -1;
@@ -3952,7 +3952,7 @@ g_NPP_Write(NPP instance, NPStream *stream, int32 offset, int32 len, void *buf)
 	return -1;
 
   D(bugiI("NPP_Write instance=%p, stream=%p, offset=%d, len=%d, buf=%p\n", instance, stream, offset, len, buf));
-  int32 ret = plugin_funcs.write(instance, stream, offset, len, buf);
+  int32_t ret = plugin_funcs.write(instance, stream, offset, len, buf);
   D(bugiD("NPP_Write return: %d\n", ret));
   return ret;
 }
@@ -3977,7 +3977,7 @@ static int handle_NPP_Write(rpc_connection_t *connection)
 	return error;
   }
 
-  int32 ret = g_NPP_Write(PLUGIN_INSTANCE_NPP(plugin), stream, offset, len, buf);
+  int32_t ret = g_NPP_Write(PLUGIN_INSTANCE_NPP(plugin), stream, offset, len, buf);
 
   if (buf)
 	free(buf);
@@ -4151,7 +4151,7 @@ static int handle_NPP_Print(rpc_connection_t *connection)
 }
 
 // Delivers a platform-specific window event to the instance
-static int16
+static int16_t
 g_NPP_HandleEvent(NPP instance, NPEvent *event)
 {
   if (instance == NULL)
@@ -4164,7 +4164,7 @@ g_NPP_HandleEvent(NPP instance, NPEvent *event)
 	return false;
 
   D(bugiI("NPP_HandleEvent instance=%p, event=%p [%s]\n", instance, event, string_of_NPEvent_type(event->type)));
-  int16 ret = plugin_funcs.event(instance, event);
+  int16_t ret = plugin_funcs.event(instance, event);
   D(bugiD("NPP_HandleEvent return: %d\n", ret));
 
   /* XXX: let's have a chance to commit the pixmap before it's gone */
@@ -4191,7 +4191,7 @@ static int handle_NPP_HandleEvent(rpc_connection_t *connection)
   }
 
   event.xany.display = x_display;
-  int16 ret = g_NPP_HandleEvent(PLUGIN_INSTANCE_NPP(plugin), &event);
+  int16_t ret = g_NPP_HandleEvent(PLUGIN_INSTANCE_NPP(plugin), &event);
 
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }

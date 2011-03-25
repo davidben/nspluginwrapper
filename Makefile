@@ -100,7 +100,7 @@ ifeq (ppc,$(TARGET_ARCH))
 TARGET_ELF_ARCH = elf32-powerpc
 endif
 
-MOZILLA_CFLAGS = -I$(SRC_PATH)/npapi -I$(SRC_PATH)/npapi/nspr
+MOZILLA_CFLAGS = -I$(SRC_PATH)/npapi
 
 npwrapper_LIBRARY = npwrapper.so
 npwrapper_RAWSRCS = npw-wrapper.c npw-common.c npw-malloc.c npw-rpc.c rpc.c debug.c utils.c npruntime.c
@@ -229,7 +229,7 @@ FILES		+= $(wildcard src/*.sh)
 FILES		+= $(wildcard src/*.map)
 FILES		+= $(wildcard tests/*.html)
 FILES		+= $(wildcard tests/*.c tests/*.h)
-FILES		+= $(wildcard npapi/*.h npapi/nspr/*.h npapi/nspr/obsolete/*.h)
+FILES		+= $(wildcard npapi/*.h)
 FILES		+= $(LSB_TOP_DIR)/headers/core_filelist
 FILES		+= $(addprefix $(LSB_TOP_DIR)/headers/,$(shell cat $(LSB_TOP_DIR)/headers/core_filelist))
 FILES		+= $(LSB_TOP_DIR)/headers/desktop_filelist
