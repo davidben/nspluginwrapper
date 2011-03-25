@@ -847,7 +847,8 @@ g_NP_Initialize (Plugin *plugin)
 
   memset (&plugin->mozilla_funcs, 0, sizeof (plugin->mozilla_funcs));
   plugin->mozilla_funcs.size = sizeof (plugin->mozilla_funcs);
-  plugin->mozilla_funcs.version = NP_VERSION_MINOR; /* XXX: make it the "compatible" way */
+  /* TODO: update this to wrap a more recent NPAPI version  */
+  plugin->mozilla_funcs.version = 19; /* (NP_VERSION_MAJOR << 8) | NP_VERSION_MINOR; */
   plugin->mozilla_funcs.geturl = g_NPN_GetURL;
   plugin->mozilla_funcs.posturl = g_NPN_PostURL;
   plugin->mozilla_funcs.requestread = g_NPN_RequestRead;
