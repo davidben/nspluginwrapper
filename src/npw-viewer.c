@@ -1302,6 +1302,8 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
   case NPNVSupportsXEmbedBool:
   case NPNVWindowNPObject:
   case NPNVPluginElementNPObject:
+  case NPNVprivateModeBool:
+  case NPNVsupportsAdvancedKeyHandling:
 	return g_NPN_GetValue_real(instance, variable, value);
   default:
 	switch (variable & 0xff) {

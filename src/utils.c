@@ -247,6 +247,11 @@ const char *string_of_NPPVariable(int variable)
 	_(NPPVpluginNeedsXEmbed);
 	_(NPPVpluginScriptableNPObject);
 	_(NPPVformValue);
+	_(NPPVpluginUrlRequestsDisplayedBool);
+	_(NPPVpluginWantsAllNetworkStreams);
+	_(NPPVpluginNativeAccessibleAtkPlugId);
+	_(NPPVpluginCancelSrcStream);
+	_(NPPVSupportsAdvancedKeyHandling);
 #undef _
   default:
 	switch (variable & 0xff) {
@@ -283,6 +288,8 @@ const char *string_of_NPNVariable(int variable)
 	_(NPNVWindowNPObject);
 	_(NPNVPluginElementNPObject);
 	_(NPNVSupportsWindowless);
+	_(NPNVprivateModeBool);
+	_(NPNVsupportsAdvancedKeyHandling);
 #undef _
   default:
 	switch (variable & 0xff) {
