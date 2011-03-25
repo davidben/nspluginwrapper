@@ -98,3 +98,7 @@ __libc_csu_fini (void)
 
   _fini ();
 }
+
+#ifdef TARGET_LIBC_PROVIDES_SSP
+void __stack_chk_fail_local (void) {}
+#endif

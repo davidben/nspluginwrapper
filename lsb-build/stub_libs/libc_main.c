@@ -1,8 +1,8 @@
 #include "config.h"
 
 #ifdef TARGET_LIBC_PROVIDES_SSP
+void __sprintf_chk() {} ;
 void __stack_chk_fail() {} ;
-void __stack_chk_fail_local() {} ;
 #endif
 
 void _Exit() {} ;
