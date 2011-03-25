@@ -3479,6 +3479,7 @@ static void plugin_init(int is_NP_Initialize)
 	{ RPC_METHOD_NPCLASS_GET_PROPERTY,					npclass_handle_GetProperty },
 	{ RPC_METHOD_NPCLASS_SET_PROPERTY,					npclass_handle_SetProperty },
 	{ RPC_METHOD_NPCLASS_REMOVE_PROPERTY,				npclass_handle_RemoveProperty },
+	{ RPC_METHOD_NPCLASS_ENUMERATE,						npclass_handle_Enumerate },
   };
   if (rpc_connection_add_method_descriptors(g_rpc_connection, vtable, sizeof(vtable) / sizeof(vtable[0])) < 0) {
 	npw_printf("ERROR: failed to setup NPN method callbacks\n");

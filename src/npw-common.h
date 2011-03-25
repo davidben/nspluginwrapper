@@ -35,7 +35,7 @@
 
 /* Supported NPAPI interfaces */
 #define NPW_NPAPI_VERSION		17
-#define NPW_NP_CLASS_STRUCT_VERSION	1
+#define NPW_NP_CLASS_STRUCT_VERSION	2
 #define NPW_TOOLKIT			NPNVGtk2
 
 /* What are we building? */

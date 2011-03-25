@@ -2,6 +2,7 @@
  *  npruntime.c - Scripting plugins support
  *
  *  nspluginwrapper (C) 2005-2009 Gwenole Beauchesne
+ *                  (C) 2011 David Benjamin
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -93,6 +94,7 @@ static bool g_NPClass_HasProperty(NPObject *npobj, NPIdentifier name);
 static bool g_NPClass_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *result);
 static bool g_NPClass_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *value);
 static bool g_NPClass_RemoveProperty(NPObject *npobj, NPIdentifier name);
+static bool g_NPClass_Enumerate(NPObject *npobj, NPIdentifier **value, uint32_t *count);
 
 NPClass npclass_bridge = {
   NPW_NP_CLASS_STRUCT_VERSION,
@@ -105,7 +107,8 @@ NPClass npclass_bridge = {
   g_NPClass_HasProperty,
   g_NPClass_GetProperty,
   g_NPClass_SetProperty,
-  g_NPClass_RemoveProperty
+  g_NPClass_RemoveProperty,
+  g_NPClass_Enumerate
 };
 
 static inline bool is_valid_npobject_class(NPObject *npobj)
@@ -791,6 +794,92 @@ bool g_NPClass_RemoveProperty(NPObject *npobj, NPIdentifier name)
   D(bugiI("NPClass::RemoveProperty(npobj %p, name id %p)\n", npobj, name));
   bool ret = npclass_invoke_RemoveProperty(npobj, name);
   D(bugiD("NPClass::RemoveProperty return: %d\n", ret));
+  return ret;
+}
+
+// NPClass::Enumerate
+int npclass_handle_Enumerate(rpc_connection_t *connection)
+{
+  D(bug("npclass_handle_Enumerate\n"));
+
+  NPObject *npobj;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NP_OBJECT, &npobj,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPClass::Enumerate() get args", error);
+	return error;
+  }
+
+  uint32_t ret = false;
+  NPIdentifier *idents = NULL;
+  uint32_t argCount = 0;
+  if (npobj && is_valid_npobject_class(npobj) &&
+	  NP_CLASS_STRUCT_VERSION_HAS_ENUM(npobj->_class) &&
+	  npobj->_class->enumerate) {
+	D(bugiI("NPClass::Enumerate(npobj %p)\n", npobj));
+	ret = npobj->_class->enumerate(npobj, &idents, &argCount);
+	// TODO: Print the identifiers to debug
+	D(bugiD("NPClass::Enumerate return: %d (%d identifiers)\n", ret, argCount));
+  }
+
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_ARRAY, RPC_TYPE_NP_IDENTIFIER, argCount, idents,
+									  RPC_TYPE_INVALID);
+  if (idents) NPN_MemFree(idents);
+
+  return rpc_ret;
+}
+
+static bool npclass_invoke_Enumerate(NPObject *npobj,
+									 NPIdentifier **idents, uint32_t *count)
+{
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPCLASS_ENUMERATE,
+								RPC_TYPE_NP_OBJECT, npobj,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPClass::Enumerate() invoke", error);
+	return false;
+  }
+
+  uint32_t ret;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_UINT32, &ret,
+									RPC_TYPE_ARRAY, RPC_TYPE_NP_IDENTIFIER, count, idents,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPClass::Enumerate() wait for reply", error);
+	return false;
+  }
+
+  return ret;
+}
+
+bool g_NPClass_Enumerate(NPObject *npobj,
+						 NPIdentifier **idents, uint32_t *count)
+{
+  if (count == NULL || idents == NULL)
+	return false;
+
+  if (!is_valid_npobject_class(npobj))
+	return false;
+
+  if (!thread_check()) {
+	npw_printf("WARNING: NPClass::Enumerate not called from the main thread\n");
+	return false;
+  }
+
+  D(bugiI("NPClass::Enumerate(npobj %p)\n", npobj));
+  bool ret = npclass_invoke_Enumerate(npobj, idents, count);
+  // TODO: print the identifiers to debug
+  D(bugiD("NPClass::Enumerate return: %d (%d)\n", ret, *count));
   return ret;
 }
 
