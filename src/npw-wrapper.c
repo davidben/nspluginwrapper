@@ -1257,7 +1257,7 @@ static int handle_NPN_InvokeDefault(rpc_connection_t *connection)
 								  RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPN_Invoke() get args", error);
+	npw_perror("NPN_InvokeDefault() get args", error);
 	return error;
   }
 
