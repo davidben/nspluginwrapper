@@ -1,7 +1,7 @@
 %define name	nspluginwrapper
 %define version	1.3.0
 %define release	1
-#define svndate 20090102
+#define svndate DATE
 
 # define 32-bit arch of multiarch platforms
 %define arch_32 %{nil}
