@@ -3190,6 +3190,7 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
 {
   D(bug("NP_Initialize\n"));
 
+  static NPPluginFuncs full_plugin_funcs;
   if (moz_funcs == NULL || plugin_funcs == NULL)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
 
@@ -3198,31 +3199,29 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
   // for now, we only need fields up to including forceRedraw
   if (moz_funcs->size < (offsetof(NPNetscapeFuncs, forceredraw) + sizeof(NPN_ForceRedrawProcPtr)))
     return NPERR_INVALID_FUNCTABLE_ERROR;
-  if (plugin_funcs->size < sizeof(NPPluginFuncs))
-    return NPERR_INVALID_FUNCTABLE_ERROR;
   if (g_plugin.is_wrapper)
 	return NPERR_NO_ERROR;
 
   // copy mozilla_funcs table here as plugin_init() will need it
   memcpy(&mozilla_funcs, moz_funcs, MIN(moz_funcs->size, sizeof(mozilla_funcs)));
 
-  memset(plugin_funcs, 0, sizeof(*plugin_funcs));
-  plugin_funcs->size = sizeof(NPPluginFuncs);
-  plugin_funcs->version = NPW_NPAPI_VERSION;
-  plugin_funcs->newp = g_NPP_New;
-  plugin_funcs->destroy = g_NPP_Destroy;
-  plugin_funcs->setwindow = g_NPP_SetWindow;
-  plugin_funcs->newstream = g_NPP_NewStream;
-  plugin_funcs->destroystream = g_NPP_DestroyStream;
-  plugin_funcs->asfile = g_NPP_StreamAsFile;
-  plugin_funcs->writeready = g_NPP_WriteReady;
-  plugin_funcs->write = g_NPP_Write;
-  plugin_funcs->print = g_NPP_Print;
-  plugin_funcs->event = g_NPP_HandleEvent;
-  plugin_funcs->urlnotify = g_NPP_URLNotify;
-  plugin_funcs->javaClass = NULL;
-  plugin_funcs->getvalue = g_NPP_GetValue;
-  plugin_funcs->setvalue = g_NPP_SetValue;
+  memset(&full_plugin_funcs, 0, sizeof(full_plugin_funcs));
+  full_plugin_funcs.size = sizeof(NPPluginFuncs);
+  full_plugin_funcs.version = NPW_NPAPI_VERSION;
+  full_plugin_funcs.newp = g_NPP_New;
+  full_plugin_funcs.destroy = g_NPP_Destroy;
+  full_plugin_funcs.setwindow = g_NPP_SetWindow;
+  full_plugin_funcs.newstream = g_NPP_NewStream;
+  full_plugin_funcs.destroystream = g_NPP_DestroyStream;
+  full_plugin_funcs.asfile = g_NPP_StreamAsFile;
+  full_plugin_funcs.writeready = g_NPP_WriteReady;
+  full_plugin_funcs.write = g_NPP_Write;
+  full_plugin_funcs.print = g_NPP_Print;
+  full_plugin_funcs.event = g_NPP_HandleEvent;
+  full_plugin_funcs.urlnotify = g_NPP_URLNotify;
+  full_plugin_funcs.javaClass = NULL;
+  full_plugin_funcs.getvalue = g_NPP_GetValue;
+  full_plugin_funcs.setvalue = g_NPP_SetValue;
 
   // override function table with an additional thunking layer for
   // possibly broken 64-bit Konqueror versions (NPAPI 0.11)
@@ -3230,20 +3229,27 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
     D(bug("Installing Konqueror workarounds\n"));
     // We're doing sketchy pointer casts, so just cast the function pointers to
     // make the compiler be quiet. We're doing this intentionally.
-	plugin_funcs->setwindow = (NPP_SetWindowProcPtr)g_LONG64_NPP_SetWindow;
-	plugin_funcs->newstream = (NPP_NewStreamProcPtr)g_LONG64_NPP_NewStream;
-	plugin_funcs->destroystream = (NPP_DestroyStreamProcPtr)g_LONG64_NPP_DestroyStream;
-	plugin_funcs->asfile = (NPP_StreamAsFileProcPtr)g_LONG64_NPP_StreamAsFile;
-	plugin_funcs->writeready = (NPP_WriteReadyProcPtr)g_LONG64_NPP_WriteReady;
-	plugin_funcs->write = (NPP_WriteProcPtr)g_LONG64_NPP_Write;
-	plugin_funcs->print = (NPP_PrintProcPtr)g_LONG64_NPP_Print;
-	plugin_funcs->newp = (NPP_NewProcPtr)g_LONG64_NPP_New;
-	plugin_funcs->destroy = (NPP_DestroyProcPtr)g_LONG64_NPP_Destroy;
+	full_plugin_funcs.setwindow = (NPP_SetWindowProcPtr)g_LONG64_NPP_SetWindow;
+	full_plugin_funcs.newstream = (NPP_NewStreamProcPtr)g_LONG64_NPP_NewStream;
+	full_plugin_funcs.destroystream = (NPP_DestroyStreamProcPtr)g_LONG64_NPP_DestroyStream;
+	full_plugin_funcs.asfile = (NPP_StreamAsFileProcPtr)g_LONG64_NPP_StreamAsFile;
+	full_plugin_funcs.writeready = (NPP_WriteReadyProcPtr)g_LONG64_NPP_WriteReady;
+	full_plugin_funcs.write = (NPP_WriteProcPtr)g_LONG64_NPP_Write;
+	full_plugin_funcs.print = (NPP_PrintProcPtr)g_LONG64_NPP_Print;
+	full_plugin_funcs.newp = (NPP_NewProcPtr)g_LONG64_NPP_New;
+	full_plugin_funcs.destroy = (NPP_DestroyProcPtr)g_LONG64_NPP_Destroy;
   }
+
+  // Copy only the portion of full_plugin_funcs that the browser
+  // understands.
+  uint16_t plugin_funcs_size = plugin_funcs->size;
+  memcpy(plugin_funcs, &full_plugin_funcs,
+		 MIN(plugin_funcs_size, sizeof(full_plugin_funcs)));
+  plugin_funcs->size = MIN(plugin_funcs_size, sizeof(full_plugin_funcs));
 
   // Initialize function tables
   // XXX: remove the local copies from this file
-  NPW_InitializeFuncs(moz_funcs, plugin_funcs);
+  NPW_InitializeFuncs(moz_funcs, &full_plugin_funcs);
 
   if (g_plugin.initialized == 0 || g_plugin.initialized == 1)
 	plugin_init(1);
