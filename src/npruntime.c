@@ -95,6 +95,7 @@ static bool g_NPClass_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant 
 static bool g_NPClass_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *value);
 static bool g_NPClass_RemoveProperty(NPObject *npobj, NPIdentifier name);
 static bool g_NPClass_Enumerate(NPObject *npobj, NPIdentifier **value, uint32_t *count);
+static bool g_NPClass_Construct(NPObject *npobj, const NPVariant *args, uint32_t argCount, NPVariant *result);
 
 NPClass npclass_bridge = {
   NPW_NP_CLASS_STRUCT_VERSION,
@@ -108,7 +109,8 @@ NPClass npclass_bridge = {
   g_NPClass_GetProperty,
   g_NPClass_SetProperty,
   g_NPClass_RemoveProperty,
-  g_NPClass_Enumerate
+  g_NPClass_Enumerate,
+  g_NPClass_Construct
 };
 
 static inline bool is_valid_npobject_class(NPObject *npobj)
@@ -880,6 +882,105 @@ bool g_NPClass_Enumerate(NPObject *npobj,
   bool ret = npclass_invoke_Enumerate(npobj, idents, count);
   // TODO: print the identifiers to debug
   D(bugiD("NPClass::Enumerate return: %d (%d)\n", ret, *count));
+  return ret;
+}
+
+// NPClass::Construct
+int npclass_handle_Construct(rpc_connection_t *connection)
+{
+  D(bug("npclass_handle_Construct\n"));
+
+  NPObject *npobj;
+  uint32_t argCount;
+  NPVariant *args;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NP_OBJECT, &npobj,
+								  RPC_TYPE_ARRAY, RPC_TYPE_NP_VARIANT, &argCount, &args,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPClass::Construct() get args", error);
+	return error;
+  }
+
+  uint32_t ret = false;
+  NPVariant result;
+  VOID_TO_NPVARIANT(result);
+  if (npobj && is_valid_npobject_class(npobj) && npobj->_class->construct) {
+	D(bugiI("NPClass::Construct(npobj %p)\n", npobj));
+	print_npvariant_args(args, argCount);
+	ret = npobj->_class->construct(npobj, args, argCount, &result);
+	gchar *result_str = string_of_NPVariant(&result);
+	D(bugiD("NPClass::Construct return: %d (%s)\n", ret, result_str));
+	g_free(result_str);
+  }
+
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
+
+  if (args) {
+	for (int i = 0; i < argCount; i++)
+	  NPN_ReleaseVariantValue(&args[i]);
+	free(args);
+  }
+
+  NPN_ReleaseVariantValue(&result);
+  return rpc_ret;
+}
+
+static bool npclass_invoke_Construct(NPObject *npobj, const NPVariant *args, uint32_t argCount,
+										 NPVariant *result)
+{
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPCLASS_CONSTRUCT,
+								RPC_TYPE_NP_OBJECT, npobj,
+								RPC_TYPE_ARRAY, RPC_TYPE_NP_VARIANT, argCount, args,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPClass::Construct() invoke", error);
+	return false;
+  }
+
+  uint32_t ret;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_UINT32, &ret,
+									RPC_TYPE_NP_VARIANT, result,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPClass::Construct() wait for reply", error);
+	return false;
+  }
+
+  return ret;
+}
+
+bool g_NPClass_Construct(NPObject *npobj, const NPVariant *args, uint32_t argCount,
+						 NPVariant *result)
+{
+  if (result == NULL)
+	return false;
+  VOID_TO_NPVARIANT(*result);
+
+  if (!is_valid_npobject_class(npobj))
+	return false;
+
+  if (!thread_check()) {
+	npw_printf("WARNING: NPClass::Construct not called from the main thread\n");
+	return false;
+  }
+
+  D(bugiI("NPClass::Construct(npobj %p)\n", npobj));
+  print_npvariant_args(args, argCount);
+  bool ret = npclass_invoke_Construct(npobj, args, argCount, result);
+  gchar *result_str = string_of_NPVariant(result);
+  D(bugiD("NPClass::Construct return: %d (%s)\n", ret, result_str));
+  g_free(result_str);
   return ret;
 }
 

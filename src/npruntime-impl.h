@@ -54,6 +54,7 @@ extern int npclass_handle_SetProperty(rpc_connection_t *connection) attribute_hi
 extern int npclass_handle_RemoveProperty(rpc_connection_t *connection) attribute_hidden;
 extern int npclass_handle_Invalidate(rpc_connection_t *connection) attribute_hidden;
 extern int npclass_handle_Enumerate(rpc_connection_t *connection) attribute_hidden;
+extern int npclass_handle_Construct(rpc_connection_t *connection) attribute_hidden;
 
 struct _NPVariant;
 extern void npvariant_clear(struct _NPVariant *variant) attribute_hidden;
