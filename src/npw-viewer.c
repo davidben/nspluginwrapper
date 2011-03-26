@@ -2,6 +2,7 @@
  *  npw-viewer.c - Target plugin loader and viewer
  *
  *  nspluginwrapper (C) 2005-2009 Gwenole Beauchesne
+ *                  (C) 2011 David Benjamin
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -2715,6 +2716,65 @@ g_NPN_HasMethod(NPP instance, NPObject *npobj, NPIdentifier methodName)
   return ret;
 }
 
+// Enumerate the methods and properties on a given NPObject.
+static bool
+invoke_NPN_Enumerate(PluginInstance *plugin, NPObject *npobj,
+					 NPIdentifier **identifiers, uint32_t *count)
+{
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), false);
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_ENUMERATE,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
+								RPC_TYPE_NP_OBJECT, npobj,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_Enumerate() invoke", error);
+	return false;
+  }
+
+  uint32_t ret;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_UINT32, &ret,
+									RPC_TYPE_ARRAY, RPC_TYPE_NP_IDENTIFIER, count, identifiers,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_Enumerate() wait for reply", error);
+	return false;
+  }
+
+  return ret;
+}
+
+static bool
+g_NPN_Enumerate(NPP instance, NPObject *npobj,
+				NPIdentifier **identifiers, uint32_t *count)
+{
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_HasMethod not called from the main thread\n");
+	return false;
+  }
+
+  if (instance == NULL)
+	return false;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+
+  if (!npobj || !npobj->_class || !npobj->_class->enumerate)
+	return false;
+
+  D(bugiI("NPN_Enumerate instance=%p, npobj=%p\n", instance, npobj));
+  npw_plugin_instance_ref(plugin);
+  bool ret = invoke_NPN_Enumerate(plugin, npobj, identifiers, count);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_Enumerate return: %d\n", ret));
+  return ret;
+}
+
 // Indicates that a call to one of the plugins NPObjects generated an error
 static void
 invoke_NPN_SetException(NPObject *npobj, const NPUTF8 *message)
@@ -3313,6 +3373,7 @@ g_NP_Initialize(uint32_t version)
 	mozilla_funcs.hasmethod = g_NPN_HasMethod;
 	mozilla_funcs.releasevariantvalue = g_NPN_ReleaseVariantValue;
 	mozilla_funcs.setexception = g_NPN_SetException;
+	mozilla_funcs.enumerate = g_NPN_Enumerate;
 
 	if (!npobject_bridge_new())
 	  return NPERR_OUT_OF_MEMORY_ERROR;

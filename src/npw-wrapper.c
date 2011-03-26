@@ -2,6 +2,7 @@
  *  npw-wrapper.c - Host Mozilla plugin (loads the actual viewer)
  *
  *  nspluginwrapper (C) 2005-2009 Gwenole Beauchesne
+ *                  (C) 2011 David Benjamin
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -1481,7 +1482,7 @@ static int handle_NPN_HasProperty(rpc_connection_t *connection)
 static bool
 g_NPN_HasMethod(NPP instance, NPObject *npobj, NPIdentifier methodName)
 {
-  D(bugiI("NPN_HasMethod instance=%p, npobj=%p, methodName=%p\n", methodName));
+  D(bugiI("NPN_HasMethod instance=%p, npobj=%p, methodName=%p\n", instance, npobj, methodName));
   bool ret = mozilla_funcs.hasmethod(instance, npobj, methodName);
   D(bugiD("NPN_HasMethod return: %d\n", ret));
   return ret;
@@ -1509,6 +1510,43 @@ static int handle_NPN_HasMethod(rpc_connection_t *connection)
 
   return rpc_method_send_reply(connection,
 							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_INVALID);
+}
+
+// NPN_Enumerate
+static bool
+g_NPN_Enumerate(NPP instance, NPObject *npobj, NPIdentifier **identifiers,
+				uint32_t *count)
+{
+  D(bugiI("NPN_Enumerate instance=%p, npobj=%p\n", instance, npobj));
+  bool ret = mozilla_funcs.enumerate(instance, npobj, identifiers, count);
+  D(bugiD("NPN_Enumerate return: %d\n", ret));
+  return ret;
+}
+
+static int handle_NPN_Enumerate(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_Enumerate\n"));
+
+  PluginInstance *plugin;
+  NPObject *npobj;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
+								  RPC_TYPE_NP_OBJECT, &npobj,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_Enumerate() get args", error);
+	return error;
+  }
+
+  NPIdentifier *identifiers = NULL;
+  uint32_t count = 0;
+  bool ret = g_NPN_Enumerate(PLUGIN_INSTANCE_NPP(plugin), npobj, &identifiers, &count);
+
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_ARRAY, RPC_TYPE_NP_IDENTIFIER, count, identifiers,
 							   RPC_TYPE_INVALID);
 }
 
@@ -3148,6 +3186,7 @@ invoke_NP_Initialize(uint32_t npapi_version)
 	  mozilla_funcs.hasmethod = g_NPN_HasMethod;
 	  mozilla_funcs.releasevariantvalue = g_NPN_ReleaseVariantValue;
 	  mozilla_funcs.setexception = g_NPN_SetException;
+	  mozilla_funcs.enumerate = g_NPN_Enumerate;
 	}
 	return g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
   }
@@ -3464,6 +3503,7 @@ static void plugin_init(int is_NP_Initialize)
 	{ RPC_METHOD_NPN_REMOVE_PROPERTY,					handle_NPN_RemoveProperty },
 	{ RPC_METHOD_NPN_HAS_PROPERTY,						handle_NPN_HasProperty },
 	{ RPC_METHOD_NPN_HAS_METHOD,						handle_NPN_HasMethod },
+	{ RPC_METHOD_NPN_ENUMERATE,							handle_NPN_Enumerate },
 	{ RPC_METHOD_NPN_SET_EXCEPTION,						handle_NPN_SetException },
 	{ RPC_METHOD_NPN_GET_STRING_IDENTIFIER,				handle_NPN_GetStringIdentifier },
 	{ RPC_METHOD_NPN_GET_STRING_IDENTIFIERS,			handle_NPN_GetStringIdentifiers },
