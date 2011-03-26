@@ -1550,6 +1550,57 @@ static int handle_NPN_Enumerate(rpc_connection_t *connection)
 							   RPC_TYPE_INVALID);
 }
 
+// NPN_Construct
+static bool
+g_NPN_Construct(NPP instance, NPObject *npobj, const NPVariant *args, uint32_t argCount, NPVariant *result)
+{
+  D(bugiI("NPN_Construct instance=%p, npobj=%p\n", instance, npobj));
+  print_npvariant_args(args, argCount);
+  bool ret = mozilla_funcs.construct(instance, npobj, args, argCount, result);
+  gchar *result_str = string_of_NPVariant(result);
+  D(bugiD("NPN_Construct return: %d (%s)\n", ret, result_str));
+  g_free(result_str);
+  return ret;
+}
+
+static int handle_NPN_Construct(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_Construct\n"));
+
+  PluginInstance *plugin;
+  NPObject *npobj;
+  NPVariant *args;
+  uint32_t argCount;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
+								  RPC_TYPE_NP_OBJECT, &npobj,
+								  RPC_TYPE_ARRAY, RPC_TYPE_NP_VARIANT, &argCount, &args,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_Construct() get args", error);
+	return error;
+  }
+
+  NPVariant result;
+  VOID_TO_NPVARIANT(result);
+  bool ret = g_NPN_Construct(PLUGIN_INSTANCE_NPP(plugin), npobj, args, argCount, &result);
+
+  if (args) {
+	for (int i = 0; i < argCount; i++)
+	  NPN_ReleaseVariantValue(&args[i]);
+	free(args);
+  }
+
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
+
+  NPN_ReleaseVariantValue(&result);
+  return rpc_ret;
+}
+
 // NPN_SetException
 static void
 g_NPN_SetException(NPObject *npobj, const char *message)
@@ -3187,6 +3238,7 @@ invoke_NP_Initialize(uint32_t npapi_version)
 	  mozilla_funcs.releasevariantvalue = g_NPN_ReleaseVariantValue;
 	  mozilla_funcs.setexception = g_NPN_SetException;
 	  mozilla_funcs.enumerate = g_NPN_Enumerate;
+	  mozilla_funcs.construct = g_NPN_Construct;
 	}
 	return g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
   }
@@ -3504,6 +3556,7 @@ static void plugin_init(int is_NP_Initialize)
 	{ RPC_METHOD_NPN_HAS_PROPERTY,						handle_NPN_HasProperty },
 	{ RPC_METHOD_NPN_HAS_METHOD,						handle_NPN_HasMethod },
 	{ RPC_METHOD_NPN_ENUMERATE,							handle_NPN_Enumerate },
+	{ RPC_METHOD_NPN_CONSTRUCT,							handle_NPN_Construct },
 	{ RPC_METHOD_NPN_SET_EXCEPTION,						handle_NPN_SetException },
 	{ RPC_METHOD_NPN_GET_STRING_IDENTIFIER,				handle_NPN_GetStringIdentifier },
 	{ RPC_METHOD_NPN_GET_STRING_IDENTIFIERS,			handle_NPN_GetStringIdentifiers },
