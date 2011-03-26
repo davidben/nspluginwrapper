@@ -1847,6 +1847,16 @@ g_NPN_ReleaseVariantValue(NPVariant *variant)
   D(bugiD("NPN_ReleaseVariantValue done\n"));
 }
 
+void
+g_NPN_PluginThreadAsyncCall(NPP instance,
+							void (*func)(void *),
+							void *userData)
+{
+  D(bugiI("NPP_PluginThreadAsyncCall instance=%p\n", instance));
+  mozilla_funcs.pluginthreadasynccall(instance, func, userData);
+  D(bugiD("NPP_PluginThreadAsyncCall done\n"));
+}
+
 
 /* ====================================================================== */
 /* === Plug-in side data                                              === */
@@ -3239,6 +3249,10 @@ invoke_NP_Initialize(uint32_t npapi_version)
 	  mozilla_funcs.setexception = g_NPN_SetException;
 	  mozilla_funcs.enumerate = g_NPN_Enumerate;
 	  mozilla_funcs.construct = g_NPN_Construct;
+	}
+	if ((npapi_version & 0xff) >= NPVERS_HAS_PLUGIN_THREAD_ASYNC_CALL) {
+	  // Avoid pretending we have support for this if we really don't.
+	  mozilla_funcs.pluginthreadasynccall = g_NPN_PluginThreadAsyncCall;
 	}
 	return g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
   }

@@ -3270,6 +3270,50 @@ g_NPN_IntFromIdentifier(NPIdentifier identifier)
   return ret;
 }
 
+typedef struct _AsyncCall {
+  void *plugin;
+  void (*func)(void *);
+  void *userData;
+} AsyncCall;
+
+static void
+async_call_free(gpointer data)
+{
+  AsyncCall *asyncCall = data;
+  npw_plugin_instance_unref(asyncCall->plugin);
+  free(asyncCall);
+}
+
+static gboolean
+async_call_run(gpointer data)
+{
+  AsyncCall *asyncCall = data;
+  if (npw_plugin_instance_is_valid(asyncCall->plugin))
+	asyncCall->func(asyncCall->userData);
+  return FALSE;
+}
+
+void
+g_NPN_PluginThreadAsyncCall(NPP instance,
+							void (*func)(void *),
+							void *userData)
+{
+  if (instance == NULL)
+	return;
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return;
+
+  D(bugiI("NPP_PluginThreadAsyncCall instance=%p\n", instance));
+  AsyncCall *asyncCall = malloc(sizeof(AsyncCall));
+  asyncCall->plugin = npw_plugin_instance_ref(plugin);
+  asyncCall->func = func;
+  asyncCall->userData = userData;
+  g_idle_add_full(G_PRIORITY_DEFAULT_IDLE,
+				  async_call_run, asyncCall, async_call_free);
+  D(bugiD("NPP_PluginThreadAsyncCall done\n"));
+}
+
 
 /* ====================================================================== */
 /* === Plug-in side data                                              === */
@@ -3414,6 +3458,7 @@ g_NP_Initialize(uint32_t version)
   mozilla_funcs.forceredraw = g_NPN_ForceRedraw;
   mozilla_funcs.pushpopupsenabledstate = g_NPN_PushPopupsEnabledState;
   mozilla_funcs.poppopupsenabledstate = g_NPN_PopPopupsEnabledState;
+  mozilla_funcs.pluginthreadasynccall = g_NPN_PluginThreadAsyncCall;
 
   if (NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING)) {
 	D(bug(" browser supports scripting through npruntime\n"));
