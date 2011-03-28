@@ -2735,15 +2735,32 @@ invoke_NPN_Enumerate(PluginInstance *plugin, NPObject *npobj,
   }
 
   uint32_t ret;
+  // For some inexplicably idiotic reason, rpc_method_wait_for_reply
+  // doesn't actually allocate returned data with NPN_MemAlloc.
+  uint32_t myCount = 0;
+  NPIdentifier *myIdentifiers = NULL;
   error = rpc_method_wait_for_reply(g_rpc_connection,
 									RPC_TYPE_UINT32, &ret,
-									RPC_TYPE_ARRAY, RPC_TYPE_NP_IDENTIFIER, count, identifiers,
+									RPC_TYPE_ARRAY, RPC_TYPE_NP_IDENTIFIER, &myCount, &myIdentifiers,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPN_Enumerate() wait for reply", error);
 	return false;
   }
+
+  *count = myCount;
+  if (ret && myIdentifiers) {
+	  *identifiers = NPN_MemAlloc(sizeof(**identifiers) * myCount);
+	  if (*identifiers == NULL) {
+		ret = NPERR_OUT_OF_MEMORY_ERROR;
+	  } else {
+		memcpy(*identifiers, myIdentifiers, sizeof(**identifiers) * myCount);
+	  }
+  }
+
+  if (myIdentifiers)
+	free(myIdentifiers);
 
   return ret;
 }

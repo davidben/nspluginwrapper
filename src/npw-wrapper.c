@@ -1544,10 +1544,12 @@ static int handle_NPN_Enumerate(rpc_connection_t *connection)
   uint32_t count = 0;
   bool ret = g_NPN_Enumerate(PLUGIN_INSTANCE_NPP(plugin), npobj, &identifiers, &count);
 
-  return rpc_method_send_reply(connection,
-							   RPC_TYPE_UINT32, ret,
-							   RPC_TYPE_ARRAY, RPC_TYPE_NP_IDENTIFIER, count, identifiers,
-							   RPC_TYPE_INVALID);
+  error = rpc_method_send_reply(connection,
+								RPC_TYPE_UINT32, ret,
+								RPC_TYPE_ARRAY, RPC_TYPE_NP_IDENTIFIER, count, identifiers,
+								RPC_TYPE_INVALID);
+  NPN_MemFree(identifiers);
+  return error;
 }
 
 // NPN_Construct
