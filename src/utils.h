@@ -41,6 +41,7 @@ extern const char *string_of_NPStreamType(int stype) attribute_hidden;
 extern const char *string_of_NPEvent_type(int type) attribute_hidden;
 extern const char *string_of_NPPVariable(int variable) attribute_hidden;
 extern const char *string_of_NPNVariable(int variable) attribute_hidden;
+extern const char *string_of_NPNURLVariable(int variable) attribute_hidden;
 
 // Misc utility functions
 extern void npw_perror(const char *prefix, int error) attribute_hidden;

@@ -308,6 +308,23 @@ const char *string_of_NPNVariable(int variable)
 
   return str;
 }
+
+const char *string_of_NPNURLVariable(int variable)
+{
+  const char *str;
+
+  switch (variable) {
+#define _(VAL) case VAL: str = #VAL; break;
+	_(NPNURLVCookie);
+	_(NPNURLVProxy);
+#undef _
+  default:
+	str = "<unknown variable>";
+	break;
+  }
+
+  return str;
+}
 #endif
 
 
