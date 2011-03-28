@@ -3293,7 +3293,7 @@ async_call_run(gpointer data)
   return FALSE;
 }
 
-void
+static void
 g_NPN_PluginThreadAsyncCall(NPP instance,
 							void (*func)(void *),
 							void *userData)

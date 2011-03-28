@@ -1847,7 +1847,8 @@ g_NPN_ReleaseVariantValue(NPVariant *variant)
   D(bugiD("NPN_ReleaseVariantValue done\n"));
 }
 
-void
+// NPN_PluginThreadAsyncCall
+static void
 g_NPN_PluginThreadAsyncCall(NPP instance,
 							void (*func)(void *),
 							void *userData)
