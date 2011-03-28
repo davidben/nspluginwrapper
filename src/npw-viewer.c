@@ -3331,6 +3331,146 @@ g_NPN_PluginThreadAsyncCall(NPP instance,
   D(bugiD("NPP_PluginThreadAsyncCall done\n"));
 }
 
+// Queries information about a URL
+static NPError
+invoke_NPN_GetValueForURL(PluginInstance *plugin, NPNURLVariable variable,
+						  const char *url, char **value, uint32_t *len)
+{
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_GET_VALUE_FOR_URL,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
+								RPC_TYPE_UINT32, variable,
+								RPC_TYPE_STRING, url,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_GetValueForURL() invoke", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  int32_t ret;
+  uint32_t myLen;
+  char *myValue;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_INT32, &ret,
+									RPC_TYPE_ARRAY, RPC_TYPE_CHAR, &myLen, &myValue,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_GetValueForURL() wait for reply", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  // Reallocate with NPN_MemAlloc because the RPC system wasn't clever
+  // enough to.
+  *len = myLen;
+  if (ret == NPERR_NO_ERROR) {
+	if (myValue) {
+	  *value = NPN_MemAlloc(myLen);
+	  if (*value == NULL) {
+		ret = NPERR_OUT_OF_MEMORY_ERROR;
+	  } else {
+		memcpy(*value, myValue, myLen);
+	  }
+	} else {
+	  *value = NULL;
+	}
+  }
+
+  if (myValue)
+	free(myValue);
+
+  return ret;
+}
+
+static NPError
+g_NPN_GetValueForURL(NPP instance, NPNURLVariable variable,
+					 const char *url, char **value, uint32_t *len)
+{
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_GetValueForURL not called from the main thread\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  D(bugiI("NPN_GetValueForURL instance=%p, variable=%d [%s], url=%s\n",
+		  instance, variable, string_of_NPNURLVariable(variable), url));
+  npw_plugin_instance_ref(plugin);
+  NPError ret = invoke_NPN_GetValueForURL(plugin, variable, url, value, len);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_GetValueForURL return: %d [%s] len=%d\n",
+		  ret, string_of_NPError(ret), *len));
+  return ret;
+}
+
+// Sets information about a URL
+static NPError
+invoke_NPN_SetValueForURL(PluginInstance *plugin, NPNURLVariable variable,
+						  const char *url, const char *value, uint32_t len)
+{
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_SET_VALUE_FOR_URL,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
+								RPC_TYPE_UINT32, variable,
+								RPC_TYPE_STRING, url,
+								RPC_TYPE_ARRAY, RPC_TYPE_CHAR, len, value,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_SetValueForURL() invoke", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  int32_t ret;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_INT32, &ret,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_SetValueForURL() wait for reply", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  return ret;
+}
+
+static NPError
+g_NPN_SetValueForURL(NPP instance, NPNURLVariable variable,
+					 const char *url, const char *value, uint32_t len)
+{
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_SetValueForURL not called from the main thread\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  D(bugiI("NPN_SetValueForURL instance=%p, variable=%d [%s], url=%s, len=%d\n",
+		  instance, variable, string_of_NPNURLVariable(variable), url, len));
+  npw_plugin_instance_ref(plugin);
+  NPError ret = invoke_NPN_SetValueForURL(plugin, variable, url, value, len);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_SetValueForURL return: %d [%s]\n", ret, string_of_NPError(ret)));
+  return ret;
+}
+
 
 /* ====================================================================== */
 /* === Plug-in side data                                              === */
@@ -3476,6 +3616,8 @@ g_NP_Initialize(uint32_t version)
   mozilla_funcs.pushpopupsenabledstate = g_NPN_PushPopupsEnabledState;
   mozilla_funcs.poppopupsenabledstate = g_NPN_PopPopupsEnabledState;
   mozilla_funcs.pluginthreadasynccall = g_NPN_PluginThreadAsyncCall;
+  mozilla_funcs.getvalueforurl = g_NPN_GetValueForURL;
+  mozilla_funcs.setvalueforurl = g_NPN_SetValueForURL;
 
   if (NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING)) {
 	D(bug(" browser supports scripting through npruntime\n"));

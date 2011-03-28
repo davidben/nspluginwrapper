@@ -1860,6 +1860,107 @@ g_NPN_PluginThreadAsyncCall(NPP instance,
   D(bugiD("NPP_PluginThreadAsyncCall done\n"));
 }
 
+// NPN_GetValueForURL
+static NPError
+g_NPN_GetValueForURL(NPP instance, NPNURLVariable variable,
+					 const char *url, char **value,
+					 uint32_t *len)
+{
+  if (mozilla_funcs.getvalueforurl == NULL)
+	return NPERR_INVALID_FUNCTABLE_ERROR;
+
+  D(bugiI("NPN_GetValueForURL instance=%p, variable=%d [%s], url=%s\n",
+		  instance, variable, string_of_NPNURLVariable(variable), url));
+  NPError ret = mozilla_funcs.getvalueforurl(instance, variable, url, value, len);
+  D(bugiD("NPN_GetValueForURL return: %d [%s] len=%d\n",
+		  ret, string_of_NPError(ret), *len));
+  return ret;
+}
+
+static int handle_NPN_GetValueForURL(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_GetValueForURL\n"));
+
+  PluginInstance *plugin;
+  uint32_t variable;
+  char *url;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
+								  RPC_TYPE_UINT32, &variable,
+								  RPC_TYPE_STRING, &url,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_GetValueForURL() get args", error);
+	return error;
+  }
+
+  char *value = NULL;
+  uint32_t len = 0;
+  int32_t ret = g_NPN_GetValueForURL(PLUGIN_INSTANCE_NPP(plugin), variable,
+									 url, &value, &len);
+
+  if (url)
+	free(url);
+
+  error = rpc_method_send_reply(connection,
+								RPC_TYPE_INT32, ret,
+								RPC_TYPE_ARRAY, RPC_TYPE_CHAR, len, value,
+								RPC_TYPE_INVALID);
+  NPN_MemFree(value);
+  return error;
+}
+
+// NPN_SetValueForURL
+static NPError
+g_NPN_SetValueForURL(NPP instance, NPNURLVariable variable,
+					 const char *url, const char *value,
+					 uint32_t len)
+{
+  if (mozilla_funcs.setvalueforurl == NULL)
+	return NPERR_INVALID_FUNCTABLE_ERROR;
+
+  D(bugiI("NPN_SetValueForURL instance=%p, variable=%d [%s], url=%s, len=%d\n",
+		  instance, variable, string_of_NPNURLVariable(variable), url, len));
+  NPError ret = mozilla_funcs.setvalueforurl(instance, variable, url, value, len);
+  D(bugiD("NPN_SetValueForURL return: %d [%s]\n", ret, string_of_NPError(ret)));
+  return ret;
+}
+
+static int handle_NPN_SetValueForURL(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_SetValueForURL\n"));
+
+  PluginInstance *plugin;
+  char *url;
+  uint32_t variable;
+  char *value;
+  uint32_t len;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
+								  RPC_TYPE_UINT32, &variable,
+								  RPC_TYPE_STRING, &url,
+								  RPC_TYPE_ARRAY, RPC_TYPE_CHAR, &len, &value,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_SetValueForURL() get args", error);
+	return error;
+  }
+
+  int32_t ret = g_NPN_SetValueForURL(PLUGIN_INSTANCE_NPP(plugin), variable,
+									 url, value, len);
+
+  if (url)
+	free(url);
+  if (value)
+	free(value);
+
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_INT32, ret,
+							   RPC_TYPE_INVALID);
+}
+
 
 /* ====================================================================== */
 /* === Plug-in side data                                              === */
@@ -3230,6 +3331,8 @@ invoke_NP_Initialize(uint32_t npapi_version)
 	mozilla_funcs.forceredraw = g_NPN_ForceRedraw;
 	mozilla_funcs.pushpopupsenabledstate = g_NPN_PushPopupsEnabledState;
 	mozilla_funcs.poppopupsenabledstate = g_NPN_PopPopupsEnabledState;
+	mozilla_funcs.getvalueforurl = g_NPN_GetValueForURL;
+	mozilla_funcs.setvalueforurl = g_NPN_SetValueForURL;
 	if ((npapi_version & 0xff) >= NPVERS_HAS_NPRUNTIME_SCRIPTING) {
 	  mozilla_funcs.getstringidentifier = g_NPN_GetStringIdentifier;
 	  mozilla_funcs.getstringidentifiers = g_NPN_GetStringIdentifiers;
@@ -3561,6 +3664,8 @@ static void plugin_init(int is_NP_Initialize)
 	{ RPC_METHOD_NPN_PUSH_POPUPS_ENABLED_STATE,			handle_NPN_PushPopupsEnabledState },
 	{ RPC_METHOD_NPN_POP_POPUPS_ENABLED_STATE,			handle_NPN_PopPopupsEnabledState },
 	{ RPC_METHOD_NPN_INVALIDATE_RECT,					handle_NPN_InvalidateRect },
+	{ RPC_METHOD_NPN_GET_VALUE_FOR_URL,					handle_NPN_GetValueForURL },
+	{ RPC_METHOD_NPN_SET_VALUE_FOR_URL,					handle_NPN_SetValueForURL },
 	{ RPC_METHOD_NPN_CREATE_OBJECT,						handle_NPN_CreateObject },
 	{ RPC_METHOD_NPN_RETAIN_OBJECT,						handle_NPN_RetainObject },
 	{ RPC_METHOD_NPN_RELEASE_OBJECT,					handle_NPN_ReleaseObject },
