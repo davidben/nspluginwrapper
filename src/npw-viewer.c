@@ -3368,16 +3368,7 @@ invoke_NPN_GetValueForURL(PluginInstance *plugin, NPNURLVariable variable,
   // enough to.
   *len = myLen;
   if (ret == NPERR_NO_ERROR) {
-	if (myValue) {
-	  *value = NPN_MemAlloc(myLen);
-	  if (*value == NULL) {
-		ret = NPERR_OUT_OF_MEMORY_ERROR;
-	  } else {
-		memcpy(*value, myValue, myLen);
-	  }
-	} else {
-	  *value = NULL;
-	}
+	ret = NPW_ReallocData(myValue, myLen, (void**)value);
   }
 
   if (myValue)

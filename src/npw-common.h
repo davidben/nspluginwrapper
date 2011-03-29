@@ -253,4 +253,9 @@ NPW_GetStringIdentifierValue (NPW_Identifier id)
   return NPW_IsStringIdentifier (id) ? id->value.s : 0;
 }
 
+/* Reallocates a buffer with NPN_MemAlloc. Returns
+ * NPERR_OUT_OF_MEMORY_ERROR if NPN_MemAlloc fails. */
+NPError
+NPW_ReallocData(void *ptr, uint32_t size, void **out) attribute_hidden;
+
 #endif /* NPW_COMMON_H */

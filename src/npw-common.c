@@ -138,6 +138,22 @@ NPN_ReleaseVariantValue (NPVariant *var)
   g_mozilla_funcs.releasevariantvalue(var);
 }
 
+NPError
+NPW_ReallocData(void *ptr, uint32_t size, void **out)
+{
+  if (ptr == NULL) {
+	*out = NULL;
+	return NPERR_NO_ERROR;
+  }
+  *out = NPN_MemAlloc(size);
+  if (*out == NULL) {
+	return NPERR_OUT_OF_MEMORY_ERROR;
+  }
+  memcpy(*out, ptr, size);
+  return NPERR_NO_ERROR;
+}
+
+
 /* ====================================================================== */
 /* === Identifiers                                                    === */
 /* ====================================================================== */
