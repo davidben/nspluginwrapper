@@ -1518,6 +1518,9 @@ static bool
 g_NPN_Enumerate(NPP instance, NPObject *npobj, NPIdentifier **identifiers,
 				uint32_t *count)
 {
+  if (mozilla_funcs.enumerate == NULL)
+	return false;
+
   D(bugiI("NPN_Enumerate instance=%p, npobj=%p\n", instance, npobj));
   bool ret = mozilla_funcs.enumerate(instance, npobj, identifiers, count);
   D(bugiD("NPN_Enumerate return: %d\n", ret));
@@ -1556,6 +1559,9 @@ static int handle_NPN_Enumerate(rpc_connection_t *connection)
 static bool
 g_NPN_Construct(NPP instance, NPObject *npobj, const NPVariant *args, uint32_t argCount, NPVariant *result)
 {
+  if (mozilla_funcs.construct == NULL)
+	return false;
+
   D(bugiI("NPN_Construct instance=%p, npobj=%p\n", instance, npobj));
   print_npvariant_args(args, argCount);
   bool ret = mozilla_funcs.construct(instance, npobj, args, argCount, result);
