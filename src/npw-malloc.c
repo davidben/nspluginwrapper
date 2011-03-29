@@ -20,6 +20,11 @@
 
 #include "sysdeps.h"
 
+/* Hack to workaround the NPW_MemAlloc macros. TODO: don't make macros
+ * and function names conflict. It's insane. */
+#undef ENABLE_MALLOC_CHECK
+#include "npw-malloc.h"
+
 #define DEBUG 1
 #include "debug.h"
 
