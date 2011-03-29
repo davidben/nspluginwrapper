@@ -1967,6 +1967,80 @@ static int handle_NPN_SetValueForURL(rpc_connection_t *connection)
 							   RPC_TYPE_INVALID);
 }
 
+// NPN_GetAuthenticationInfo
+static NPError
+g_NPN_GetAuthenticationInfo(NPP instance, const char *protocol,
+							const char *host, int32_t port, const char *scheme,
+							const char *realm,
+							char **username, uint32_t *ulen,
+							char **password, uint32_t *plen)
+{
+  if (mozilla_funcs.getauthenticationinfo == NULL)
+	return NPERR_INVALID_FUNCTABLE_ERROR;
+
+  D(bugiI("NPN_GetAuthenticationInfo instance=%p, protocol=%s,"
+		  " host=%s, port=%d, scheme=%s, realm=%s\n",
+		  instance, protocol, host, port, scheme, realm));
+  NPError ret = mozilla_funcs.getauthenticationinfo(instance, protocol, host,
+													port, scheme, realm,
+													username, ulen,
+													password, plen);
+  D(bugiD("NPN_GetAuthenticationInfo return: %d [%s] ulen=%d, plen=%d\n",
+		  ret, string_of_NPError(ret), *ulen, *plen));
+  return ret;
+}
+
+static int handle_NPN_GetAuthenticationInfo(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_GetAuthenticationInfo\n"));
+
+  PluginInstance *plugin;
+  char *protocol, *host;
+  int32_t port;
+  char *scheme, *realm;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
+								  RPC_TYPE_STRING, &protocol,
+								  RPC_TYPE_STRING, &host,
+								  RPC_TYPE_INT32, &port,
+								  RPC_TYPE_STRING, &scheme,
+								  RPC_TYPE_STRING, &realm,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_GetAuthenticationInfo() get args", error);
+	return error;
+  }
+
+  char *username, *password;
+  uint32_t ulen, plen;
+  int32_t ret = g_NPN_GetAuthenticationInfo(PLUGIN_INSTANCE_NPP(plugin),
+											protocol, host, port, scheme, realm,
+											&username, &ulen, &password, &plen);
+
+  if (protocol)
+	free(protocol);
+  if (host)
+	free(host);
+  if (scheme)
+	free(scheme);
+  if (realm)
+	free(realm);
+
+  error = rpc_method_send_reply(connection,
+								RPC_TYPE_INT32, ret,
+								RPC_TYPE_ARRAY, RPC_TYPE_CHAR, ulen, username,
+								RPC_TYPE_ARRAY, RPC_TYPE_CHAR, plen, password,
+								RPC_TYPE_INVALID);
+
+  if (username)
+	NPN_MemFree(username);
+  if (password)
+	NPN_MemFree(password);
+
+  return error;
+}
+
 
 /* ====================================================================== */
 /* === Plug-in side data                                              === */
@@ -3339,6 +3413,7 @@ invoke_NP_Initialize(uint32_t npapi_version)
 	mozilla_funcs.poppopupsenabledstate = g_NPN_PopPopupsEnabledState;
 	mozilla_funcs.getvalueforurl = g_NPN_GetValueForURL;
 	mozilla_funcs.setvalueforurl = g_NPN_SetValueForURL;
+	mozilla_funcs.getauthenticationinfo = g_NPN_GetAuthenticationInfo;
 	if ((npapi_version & 0xff) >= NPVERS_HAS_NPRUNTIME_SCRIPTING) {
 	  mozilla_funcs.getstringidentifier = g_NPN_GetStringIdentifier;
 	  mozilla_funcs.getstringidentifiers = g_NPN_GetStringIdentifiers;
@@ -3672,6 +3747,7 @@ static void plugin_init(int is_NP_Initialize)
 	{ RPC_METHOD_NPN_INVALIDATE_RECT,					handle_NPN_InvalidateRect },
 	{ RPC_METHOD_NPN_GET_VALUE_FOR_URL,					handle_NPN_GetValueForURL },
 	{ RPC_METHOD_NPN_SET_VALUE_FOR_URL,					handle_NPN_SetValueForURL },
+	{ RPC_METHOD_NPN_GET_AUTHENTICATION_INFO,			handle_NPN_GetAuthenticationInfo },
 	{ RPC_METHOD_NPN_CREATE_OBJECT,						handle_NPN_CreateObject },
 	{ RPC_METHOD_NPN_RETAIN_OBJECT,						handle_NPN_RetainObject },
 	{ RPC_METHOD_NPN_RELEASE_OBJECT,					handle_NPN_ReleaseObject },

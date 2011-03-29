@@ -3463,6 +3463,98 @@ g_NPN_SetValueForURL(NPP instance, NPNURLVariable variable,
 }
 
 
+// Queries authentication information for a URL
+static NPError
+invoke_NPN_GetAuthenticationInfo(PluginInstance *plugin, const char *protocol,
+								 const char *host, int32_t port,
+								 const char *scheme, const char *realm,
+								 char **username, uint32_t *ulen,
+								 char **password, uint32_t *plen)
+{
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_GET_AUTHENTICATION_INFO,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
+								RPC_TYPE_STRING, protocol,
+								RPC_TYPE_STRING, host,
+								RPC_TYPE_INT32, port,
+								RPC_TYPE_STRING, scheme,
+								RPC_TYPE_STRING, realm,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_GetAuthenticationInfo() invoke", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  int32_t ret;
+  char *myUsername, *myPassword;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_INT32, &ret,
+									RPC_TYPE_ARRAY, RPC_TYPE_CHAR, ulen, &myUsername,
+									RPC_TYPE_ARRAY, RPC_TYPE_CHAR, plen, &myPassword,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_GetValueForURL() wait for reply", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  // Reallocate with NPN_MemAlloc because the RPC system wasn't clever
+  // enough to.
+  if (ret == NPERR_NO_ERROR) {
+	ret = NPW_ReallocData(myUsername, *ulen, (void**)username);
+	if (ret == NPERR_NO_ERROR) {
+	  ret = NPW_ReallocData(myPassword, *ulen, (void**)password);
+	  if (ret == NPERR_OUT_OF_MEMORY_ERROR && *username)
+		NPN_MemFree(*username);
+	}
+  }
+
+  if (myUsername)
+	free(myUsername);
+  if (myPassword)
+	free(myPassword);
+
+  return ret;
+}
+
+static NPError
+g_NPN_GetAuthenticationInfo(NPP instance, const char *protocol,
+							const char *host, int32_t port, const char *scheme,
+							const char *realm,
+							char **username, uint32_t *ulen,
+							char **password, uint32_t *plen)
+{
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_GetAuthenticationInfo not called from the main thread\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  D(bugiI("NPN_GetAuthenticationInfo instance=%p, protocol=%s,"
+		  " host=%s, port=%d, scheme=%s, realm=%s\n",
+		  instance, protocol, host, port, scheme, realm));
+  npw_plugin_instance_ref(plugin);
+  NPError ret = invoke_NPN_GetAuthenticationInfo(plugin, protocol, host,
+												 port, scheme, realm,
+												 username, ulen,
+												 password, plen);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_GetAuthenticationInfo return: %d [%s] ulen=%d, plen=%d\n",
+		  ret, string_of_NPError(ret), *ulen, *plen));
+  return ret;
+}
+
+
 /* ====================================================================== */
 /* === Plug-in side data                                              === */
 /* ====================================================================== */
@@ -3609,6 +3701,7 @@ g_NP_Initialize(uint32_t version)
   mozilla_funcs.pluginthreadasynccall = g_NPN_PluginThreadAsyncCall;
   mozilla_funcs.getvalueforurl = g_NPN_GetValueForURL;
   mozilla_funcs.setvalueforurl = g_NPN_SetValueForURL;
+  mozilla_funcs.getauthenticationinfo = g_NPN_GetAuthenticationInfo;
 
   if (NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING)) {
 	D(bug(" browser supports scripting through npruntime\n"));
