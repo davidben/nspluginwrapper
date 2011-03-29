@@ -42,7 +42,7 @@ extern void npobject_associate(NPObject *npobj, NPObjectInfo *npobj_info) attrib
 extern bool npobject_bridge_new(void) attribute_hidden;
 extern void npobject_bridge_destroy(void) attribute_hidden;
 
-extern NPClass npclass_bridge;
+extern NPClass npclass_bridge attribute_hidden;
 
 extern int npclass_handle_Invalidate(rpc_connection_t *connection) attribute_hidden;
 extern int npclass_handle_HasMethod(rpc_connection_t *connection) attribute_hidden;

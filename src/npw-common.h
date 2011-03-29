@@ -211,19 +211,19 @@ struct _NPW_Identifier
 
 /* Create identifier from an integer */
 NPW_Identifier
-NPW_CreateIntIdentifier (int32_t value);
+NPW_CreateIntIdentifier (int32_t value) attribute_hidden;
 
 /* Create identifier from a string (that is copied) */
 NPW_Identifier
-NPW_CreateStringIdentifier (const char *str);
+NPW_CreateStringIdentifier (const char *str) attribute_hidden;
 
 /* Create identifier from a string (that is now owned by the identifier) */
 NPW_Identifier
-NPW_CreateStringIdentifierSink (char *str);
+NPW_CreateStringIdentifierSink (char *str) attribute_hidden;
 
 /* Destroy identifier */
 void
-NPW_DestroyIdentifier (NPW_Identifier id);
+NPW_DestroyIdentifier (NPW_Identifier id) attribute_hidden;
 
 /* Check whether identifier is an integer */
 static inline bool

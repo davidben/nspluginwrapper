@@ -22,28 +22,28 @@
 #define NPW_MALLOC_H
 
 void *
-NPW_MemAlloc (uint32_t size);
+NPW_MemAlloc (uint32_t size) attribute_hidden;
 
 void *
-NPW_MemAlloc0 (uint32_t size);
+NPW_MemAlloc0 (uint32_t size) attribute_hidden;
 
 void *
-NPW_MemAllocCopy (uint32_t size, const void *ptr);
+NPW_MemAllocCopy (uint32_t size, const void *ptr) attribute_hidden;
 
 void
-NPW_MemFree (void *ptr);
+NPW_MemFree (void *ptr) attribute_hidden;
 
 void *
-NPW_Debug_MemAlloc (uint32_t size, const char *file, int lineno);
+NPW_Debug_MemAlloc (uint32_t size, const char *file, int lineno) attribute_hidden;
 
 void *
-NPW_Debug_MemAlloc0 (uint32_t size, const char *file, int lineno);
+NPW_Debug_MemAlloc0 (uint32_t size, const char *file, int lineno) attribute_hidden;
 
 void *
-NPW_Debug_MemAllocCopy (uint32_t size, const void *ptr, const char *file, int lineno);
+NPW_Debug_MemAllocCopy (uint32_t size, const void *ptr, const char *file, int lineno) attribute_hidden;
 
 void
-NPW_Debug_MemFree (void *ptr, const char *file, int lineno);
+NPW_Debug_MemFree (void *ptr, const char *file, int lineno) attribute_hidden;
 
 #define NPW_MemNew(type, n) \
   ((type *) NPW_MemAlloc ((n) * sizeof (type)))

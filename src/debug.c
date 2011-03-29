@@ -138,7 +138,7 @@ static void __attribute__((destructor)) log_file_sentinel(void)
 }
 
 
-void npw_print_indent(FILE *fp)
+static void npw_print_indent(FILE *fp)
 {
   static const char blanks[] = "                ";
   const int blanks_length = sizeof(blanks) - 1;

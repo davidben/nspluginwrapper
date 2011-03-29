@@ -1791,34 +1791,6 @@ int rpc_connection_add_method_descriptors(rpc_connection_t *connection, const rp
   return RPC_ERROR_NO_ERROR;
 }
 
-// Remove a user-defined method callback (common code)
-int rpc_connection_remove_method_descriptor(rpc_connection_t *connection, int id)
-{
-  D(bug("rpc_connection_remove_method_descriptor\n"));
-
-  if (connection == NULL)
-	return RPC_ERROR_CONNECTION_NULL;
-
-  return rpc_map_remove(connection->methods, id);
-}
-
-// Remove user-defined method callbacks (server side)
-int rpc_connection_remove_method_descriptors(rpc_connection_t *connection, const rpc_method_descriptor_t *descs, int n_descs)
-{
-  D(bug("rpc_connection_remove_method_descriptors\n"));
-
-  if (connection == NULL)
-	return RPC_ERROR_CONNECTION_NULL;
-
-  while (--n_descs >= 0) {
-	int error = rpc_connection_remove_method_descriptor(connection, descs[n_descs].id);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return error;
-  }
-
-  return RPC_ERROR_NO_ERROR;
-}
-
 
 /* ====================================================================== */
 /* === Remote Procedure Call (method invocation)                      === */

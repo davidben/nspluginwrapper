@@ -102,37 +102,37 @@ NPW_InitializeFuncs (NPNetscapeFuncs *mozilla_funcs,
 	  MIN (sizeof (g_plugin_funcs), plugin_funcs->size));
 }
 
-void *
+attribute_hidden void *
 NPN_MemAlloc (uint32_t size)
 {
   return g_mozilla_funcs.memalloc(size);
 }
 
-void
+attribute_hidden void
 NPN_MemFree (void *ptr)
 {
   g_mozilla_funcs.memfree(ptr);
 }
 
-uint32_t
+attribute_hidden uint32_t
 NPN_MemFlush (uint32_t size)
 {
   return g_mozilla_funcs.memflush(size);
 }
 
-NPObject *
+attribute_hidden NPObject *
 NPN_RetainObject (NPObject *npobj)
 {
   return g_mozilla_funcs.retainobject(npobj);
 }
 
-void
+void attribute_hidden
 NPN_ReleaseObject (NPObject *npobj)
 {
   g_mozilla_funcs.releaseobject(npobj);
 }
 
-void
+void attribute_hidden
 NPN_ReleaseVariantValue (NPVariant *var)
 {
   g_mozilla_funcs.releasevariantvalue(var);

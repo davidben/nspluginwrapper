@@ -129,6 +129,6 @@ extern bool rpc_method_in_invoke(rpc_connection_t *connection) attribute_hidden;
 typedef void (*rpc_error_callback_t)(rpc_connection_t *connection, void *user_data);
 
 // Set error callback for a connection
-void rpc_connection_set_error_callback(rpc_connection_t *connection, rpc_error_callback_t callback, void *callback_data);
+void rpc_connection_set_error_callback(rpc_connection_t *connection, rpc_error_callback_t callback, void *callback_data) attribute_hidden;
 
 #endif /* RPC_H */
