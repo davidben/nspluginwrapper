@@ -54,6 +54,7 @@ enum
 
 static gboolean g_verbose     = FALSE;
 static guint g_backend        = BACKEND_GTK;
+static guint g_xid            = 0;
 static guint g_n_plugins      = 0;
 
 typedef struct _Plugin		Plugin;
@@ -2206,6 +2207,7 @@ print_help (const gchar *program_name)
   g_print ("Options:\n");
   g_print ("  -v|--verbose            enable verbose mode\n");
   g_print ("  -f|--fullscreen         start in fullscreen mode\n");
+  g_print ("  --xid N                 embed in window with xid N\n");
   g_print ("\n");
 
   g_print ("Common attributes include:\n");
@@ -2483,6 +2485,14 @@ main (int argc, char *argv[])
 	is_fullscreen = FALSE;
       else if (strcmp (arg, "--fullscreen") == 0)
 	is_fullscreen = TRUE;
+      else if (strcmp (arg, "--xid") == 0)
+        {
+	  if (++i < argc)
+	    {
+	      g_xid = atoi(argv[i]);
+	      npw_printf ("attaching to xid %d\n", g_xid);
+	    }
+        }
       else if (strcmp (arg, "--plugin") == 0)
 	{
 	  if (plugin_desc)
@@ -2574,36 +2584,37 @@ main (int argc, char *argv[])
 
       g_timeout_add (100, (GSourceFunc)player_app_run, app);
 
-      if (TRUE)
-	{
-	  GtkWidget *window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
-	  if ((app->window = window) == NULL)
-	    g_error ("could not create toplevel window");
+      GtkWidget *window;
+      if (g_xid)
+	window = gtk_plug_new ((GdkNativeWindow)g_xid);
+      else
+	window = gtk_window_new (GTK_WINDOW_TOPLEVEL);
+      if ((app->window = window) == NULL)
+	g_error ("could not create toplevel window");
 
-	  gtk_widget_set_size_request (window, display_width, display_height);
-	  gtk_window_set_title (GTK_WINDOW (window), title);
-	  if (is_fullscreen)
-	    gtk_window_fullscreen (GTK_WINDOW (window));
-	  gtk_widget_show (window);
+      gtk_widget_set_size_request (window, display_width, display_height);
+      gtk_window_set_title (GTK_WINDOW (window), title);
+      if (is_fullscreen && !g_xid)
+	gtk_window_fullscreen (GTK_WINDOW (window));
+      gtk_widget_show (window);
 
-	  /* Ensure focus window is this window not gtk's proxy for non XEMBED case */
-	  XWindowAttributes xattrs;
-	  XGetWindowAttributes (GDK_DISPLAY (), GDK_WINDOW_XWINDOW (window->window), &xattrs);
-	  XSelectInput (GDK_DISPLAY (),
-			GDK_WINDOW_XWINDOW (window->window),
-			xattrs.your_event_mask | SubstructureNotifyMask);
-	  gdk_window_add_filter (window->window, on_window_filter_cb, app);
-	  XSync (GDK_DISPLAY (), False);
+      /* Ensure focus window is this window not gtk's proxy for non XEMBED case */
+      XWindowAttributes xattrs;
+      XGetWindowAttributes (GDK_DISPLAY (), GDK_WINDOW_XWINDOW (window->window), &xattrs);
+      XSelectInput (GDK_DISPLAY (),
+		    GDK_WINDOW_XWINDOW (window->window),
+		    xattrs.your_event_mask | SubstructureNotifyMask);
+      gdk_window_add_filter (window->window, on_window_filter_cb, app);
+      XSync (GDK_DISPLAY (), False);
 
-	  g_signal_connect (window, "destroy",
-			    G_CALLBACK (on_window_destroy_cb), NULL);
-	  g_signal_connect (window, "key-press-event",
-			    G_CALLBACK (on_key_press_event_cb), app);
-	  g_signal_connect (window, "configure-event",
-			    G_CALLBACK (on_configure_event_cb), app);
-	  g_signal_connect (window, "window-state-event",
-			    G_CALLBACK (on_window_state_event_cb), app);
-	}
+      g_signal_connect (window, "destroy",
+			G_CALLBACK (on_window_destroy_cb), NULL);
+      g_signal_connect (window, "key-press-event",
+			G_CALLBACK (on_key_press_event_cb), app);
+      g_signal_connect (window, "configure-event",
+			G_CALLBACK (on_configure_event_cb), app);
+      g_signal_connect (window, "window-state-event",
+			G_CALLBACK (on_window_state_event_cb), app);
 
       if (g_backend == BACKEND_GTK)
 	{
