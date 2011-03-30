@@ -2068,6 +2068,87 @@ g_NPN_UnscheduleTimer(NPP instance, uint32_t timerID)
   D(bugiD("NPN_UnscheduleTimer done\n"));
 }
 
+// NPN_HandleEvent
+static NPBool
+g_NPN_HandleEvent(NPP instance, void *event, NPBool handled)
+{
+  if (mozilla_funcs.handleevent == NULL)
+	return false;
+
+  NPEvent *npevent = event;
+  D(bugiI("NPN_HandleEvent instance=%p, event=%p [%s], handled=%d\n",
+		  instance, npevent, string_of_NPEvent_type(npevent->type), handled));
+  NPBool ret = mozilla_funcs.handleevent(instance, event, handled);
+  D(bugiD("NPN_HandleEvent return: %d\n", ret));
+  return ret;
+}
+
+static int handle_NPN_HandleEvent(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_HandleEvent\n"));
+
+  PluginInstance *plugin;
+  NPEvent event;
+  uint32_t handled;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
+								  RPC_TYPE_NP_EVENT, &event,
+								  RPC_TYPE_UINT32, &handled,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_HandleEvent() get args", error);
+	return error;
+  }
+
+  // Fix up the Display. TODO: Save this value.
+  Display *x_display = NULL;
+  mozilla_funcs.getvalue(NULL, NPNVxDisplay, (void *)&x_display);
+  event.xany.display = x_display;
+  bool ret = g_NPN_HandleEvent(PLUGIN_INSTANCE_NPP(plugin), &event, handled);
+
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_INVALID);
+}
+
+// NPN_UnfocusInstance
+static NPBool
+g_NPN_UnfocusInstance(NPP instance, NPFocusDirection direction)
+{
+  if (mozilla_funcs.unfocusinstance == NULL)
+	return false;
+
+  D(bugiI("NPN_UnfocusInstance instance=%p, direction=%d [%s]\n",
+		  instance, direction, string_of_NPFocusDirection(direction)));
+  NPBool ret = mozilla_funcs.unfocusinstance(instance, direction);
+  D(bugiD("NPN_UnfocusInstance return: %d\n", ret));
+  return ret;
+}
+
+static int handle_NPN_UnfocusInstance(rpc_connection_t *connection)
+{
+  D(bug("handle_NPN_UnfocusInstance\n"));
+
+  PluginInstance *plugin;
+  uint32_t direction;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
+								  RPC_TYPE_UINT32, &direction,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_UnfocusInstance() get args", error);
+	return error;
+  }
+
+  bool ret = g_NPN_UnfocusInstance(PLUGIN_INSTANCE_NPP(plugin), direction);
+
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_INVALID);
+}
+
 
 /* ====================================================================== */
 /* === Plug-in side data                                              === */
@@ -2887,6 +2968,102 @@ static int16_t g_NPP_HandleEvent(NPP instance, void *event)
   return ret;
 }
 
+// Informs the plugin that the browser intends to focus an instance.
+static NPBool invoke_NPP_GotFocus(PluginInstance *plugin, NPFocusDirection direction)
+{
+  if (PLUGIN_DIRECT_EXEC) {
+	if (plugin_funcs.gotfocus)
+	  return plugin_funcs.gotfocus(plugin->native_instance, direction);
+	else
+	  return false;
+  }
+
+  npw_return_val_if_fail(rpc_method_invoke_possible(plugin->connection), false);
+
+  int error = rpc_method_invoke(plugin->connection,
+								RPC_METHOD_NPP_GOT_FOCUS,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
+								RPC_TYPE_UINT32, direction,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_GotFocus() invoke", error);
+	return false;
+  }
+
+  int32_t ret;
+  error = rpc_method_wait_for_reply(plugin->connection,
+									RPC_TYPE_INT32, &ret,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_GotFocus() wait for reply", error);
+	return false;
+  }
+
+  return ret;
+}
+
+static NPBool g_NPP_GotFocus(NPP instance, NPFocusDirection direction)
+{
+  if (instance == NULL)
+	return false;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+
+  D(bugiI("NPP_GotFocus instance=%p, direction=%d [%s]\n",
+		  instance, direction, string_of_NPFocusDirection(direction)));
+  NPBool ret = invoke_NPP_GotFocus(plugin, direction);
+  D(bugiD("NPP_GotFocus return: %d\n", ret));
+  return ret;
+}
+
+// Informs the plugin that it has just lost focus.
+static void invoke_NPP_LostFocus(PluginInstance *plugin)
+{
+  if (PLUGIN_DIRECT_EXEC) {
+	if (plugin_funcs.lostfocus)
+	  plugin_funcs.lostfocus(plugin->native_instance);
+	return;
+  }
+
+  npw_return_if_fail(rpc_method_invoke_possible(plugin->connection));
+
+  int error = rpc_method_invoke(plugin->connection,
+								RPC_METHOD_NPP_LOST_FOCUS,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_LostFocus() invoke", error);
+	return;
+  }
+
+  error = rpc_method_wait_for_reply(plugin->connection,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_LostFocus() wait for reply", error);
+	return;
+  }
+}
+
+static void g_NPP_LostFocus(NPP instance)
+{
+  if (instance == NULL)
+	return;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return;
+
+  D(bugiI("NPP_LostFocus instance=%p\n", instance));
+  invoke_NPP_LostFocus(plugin);
+  D(bugiD("NPP_LostFocus done\n"));
+}
+
 // Allows the browser to query the plug-in for information
 static NPError
 g_NP_GetValue(void *future, NPPVariable variable, void *value)
@@ -3441,6 +3618,8 @@ invoke_NP_Initialize(uint32_t npapi_version)
 	mozilla_funcs.getvalueforurl = g_NPN_GetValueForURL;
 	mozilla_funcs.setvalueforurl = g_NPN_SetValueForURL;
 	mozilla_funcs.getauthenticationinfo = g_NPN_GetAuthenticationInfo;
+	mozilla_funcs.handleevent = g_NPN_HandleEvent;
+	mozilla_funcs.unfocusinstance = g_NPN_UnfocusInstance;
 	if ((npapi_version & 0xff) >= NPVERS_HAS_NPRUNTIME_SCRIPTING) {
 	  mozilla_funcs.getstringidentifier = g_NPN_GetStringIdentifier;
 	  mozilla_funcs.getstringidentifiers = g_NPN_GetStringIdentifiers;
@@ -3546,6 +3725,8 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
   full_plugin_funcs.javaClass = NULL;
   full_plugin_funcs.getvalue = g_NPP_GetValue;
   full_plugin_funcs.setvalue = g_NPP_SetValue;
+  full_plugin_funcs.gotfocus = g_NPP_GotFocus;
+  full_plugin_funcs.lostfocus = g_NPP_LostFocus;
 
   // override function table with an additional thunking layer for
   // possibly broken 64-bit Konqueror versions (NPAPI 0.11)
@@ -3780,6 +3961,8 @@ static void plugin_init(int is_NP_Initialize)
 	{ RPC_METHOD_NPN_GET_VALUE_FOR_URL,					handle_NPN_GetValueForURL },
 	{ RPC_METHOD_NPN_SET_VALUE_FOR_URL,					handle_NPN_SetValueForURL },
 	{ RPC_METHOD_NPN_GET_AUTHENTICATION_INFO,			handle_NPN_GetAuthenticationInfo },
+	{ RPC_METHOD_NPN_HANDLE_EVENT,						handle_NPN_HandleEvent },
+	{ RPC_METHOD_NPN_UNFOCUS_INSTANCE,					handle_NPN_UnfocusInstance },
 	{ RPC_METHOD_NPN_CREATE_OBJECT,						handle_NPN_CreateObject },
 	{ RPC_METHOD_NPN_RETAIN_OBJECT,						handle_NPN_RetainObject },
 	{ RPC_METHOD_NPN_RELEASE_OBJECT,					handle_NPN_ReleaseObject },

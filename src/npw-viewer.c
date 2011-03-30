@@ -3476,7 +3476,6 @@ g_NPN_SetValueForURL(NPP instance, NPNURLVariable variable,
   return ret;
 }
 
-
 // Queries authentication information for a URL
 static NPError
 invoke_NPN_GetAuthenticationInfo(PluginInstance *plugin, const char *protocol,
@@ -3672,6 +3671,117 @@ g_NPN_UnscheduleTimer(NPP instance, uint32_t timerID)
   D(bugiD("NPN_UnscheduleTimer done\n"));
 }
 
+// Passes an event back to the browser
+static NPBool
+invoke_NPN_HandleEvent(PluginInstance *plugin, void *event, NPBool handled)
+{
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 false);
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_HANDLE_EVENT,
+								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
+								RPC_TYPE_NP_EVENT, event,
+								RPC_TYPE_UINT32, handled,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_HandleEvent() invoke", error);
+	return false;
+  }
+
+  uint32_t ret;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_UINT32, &ret,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_HandleEvent() wait for reply", error);
+	return false;
+  }
+
+  return ret;
+}
+
+static NPBool
+g_NPN_HandleEvent(NPP instance, void *event, NPBool handled)
+{
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_HandleEvent not called from the main thread\n");
+	return false;
+  }
+
+  if (instance == NULL)
+	return false;
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+  if (event == NULL)
+	return false;
+
+  NPEvent *npevent = event;
+  D(bugiI("NPN_HandleEvent instance=%p, event=%p [%s], handled=%d\n",
+		  instance, npevent, string_of_NPEvent_type(npevent->type), handled));
+  npw_plugin_instance_ref(plugin);
+  NPBool ret = invoke_NPN_HandleEvent(plugin, npevent, handled);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_HandleEvent return: %d\n", ret));
+  return ret;
+}
+
+// Gives focus back to the browser.
+static NPBool
+invoke_NPN_UnfocusInstance(PluginInstance *plugin, NPFocusDirection direction)
+{
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 false);
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPN_UNFOCUS_INSTANCE,
+								RPC_TYPE_UINT32, direction,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_UnfocusInstance() invoke", error);
+	return false;
+  }
+
+  uint32_t ret;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_UINT32, &ret,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPN_UnfocusInstance() wait for reply", error);
+	return false;
+  }
+
+  return ret;
+}
+
+static NPBool
+g_NPN_UnfocusInstance(NPP instance, NPFocusDirection direction)
+{
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_UnfocusInstance not called from the main thread\n");
+	return false;
+  }
+
+  if (instance == NULL)
+	return false;
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return false;
+
+  D(bugiI("NPN_UnfocusInstance instance=%p, direction=%d [%s]\n",
+		  instance, direction, string_of_NPFocusDirection(direction)));
+  npw_plugin_instance_ref(plugin);
+  NPBool ret = invoke_NPN_UnfocusInstance(plugin, direction);
+  npw_plugin_instance_unref(plugin);
+  D(bugiD("NPN_UnfocusInstance return: %d\n", ret));
+  return ret;
+}
+
 
 /* ====================================================================== */
 /* === Plug-in side data                                              === */
@@ -3822,6 +3932,8 @@ g_NP_Initialize(uint32_t version)
   mozilla_funcs.getauthenticationinfo = g_NPN_GetAuthenticationInfo;
   mozilla_funcs.scheduletimer = g_NPN_ScheduleTimer;
   mozilla_funcs.unscheduletimer = g_NPN_UnscheduleTimer;
+  mozilla_funcs.handleevent = g_NPN_HandleEvent;
+  mozilla_funcs.unfocusinstance = g_NPN_UnfocusInstance;
 
   if (NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING)) {
 	D(bug(" browser supports scripting through npruntime\n"));
@@ -4743,6 +4855,78 @@ static int handle_NPP_HandleEvent(rpc_connection_t *connection)
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
+// Informs the plugin that the browser intends to focus an instance.
+static NPBool
+g_NPP_GotFocus(NPP instance, NPFocusDirection direction)
+{
+  if (instance == NULL)
+	return false;
+
+  if (plugin_funcs.gotfocus == NULL)
+	return false;
+
+  D(bugiI("NPP_GotFocus instance=%p, direction=%d [%s]\n",
+		  instance, direction, string_of_NPFocusDirection(direction)));
+  NPBool ret = plugin_funcs.gotfocus(instance, direction);
+  D(bugiD("NPP_GotFocus return: %d\n", ret));
+
+  return ret;
+}
+
+static int handle_NPP_GotFocus(rpc_connection_t *connection)
+{
+  D(bug("handle_NPP_GotFocus\n"));
+
+  PluginInstance *plugin;
+  uint32_t direction;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
+								  RPC_TYPE_UINT32, &direction,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_GotFocus() get args", error);
+	return error;
+  }
+
+  NPBool ret = g_NPP_GotFocus(PLUGIN_INSTANCE_NPP(plugin), direction);
+
+  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
+}
+
+// Informs the plugin that the browser intends to focus an instance.
+static void
+g_NPP_LostFocus(NPP instance)
+{
+  if (instance == NULL)
+	return;
+
+  if (plugin_funcs.lostfocus == NULL)
+	return;
+
+  D(bugiI("NPP_LostFocus instance=%p\n", instance));
+  plugin_funcs.lostfocus(instance);
+  D(bugiD("NPP_LostFocus done\n"));
+}
+
+static int handle_NPP_LostFocus(rpc_connection_t *connection)
+{
+  D(bug("handle_NPP_LostFocus\n"));
+
+  PluginInstance *plugin;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_LostFocus() get args", error);
+	return error;
+  }
+
+  g_NPP_LostFocus(PLUGIN_INSTANCE_NPP(plugin));
+
+  return rpc_method_send_reply(connection, RPC_TYPE_INVALID);
+}
 
 /* ====================================================================== */
 /* === Events processing                                              === */
@@ -5103,7 +5287,8 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	{ RPC_METHOD_NPP_WRITE,						handle_NPP_Write },
 	{ RPC_METHOD_NPP_STREAM_AS_FILE,			handle_NPP_StreamAsFile },
 	{ RPC_METHOD_NPP_PRINT,						handle_NPP_Print },
-	{ RPC_METHOD_NPP_HANDLE_EVENT,				handle_NPP_HandleEvent },
+	{ RPC_METHOD_NPP_GOT_FOCUS,					handle_NPP_GotFocus },
+	{ RPC_METHOD_NPP_LOST_FOCUS,				handle_NPP_LostFocus },
 	{ RPC_METHOD_NPCLASS_INVALIDATE,			npclass_handle_Invalidate },
 	{ RPC_METHOD_NPCLASS_HAS_METHOD,			npclass_handle_HasMethod },
 	{ RPC_METHOD_NPCLASS_INVOKE,				npclass_handle_Invoke },
