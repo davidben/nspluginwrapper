@@ -113,7 +113,7 @@ npviewer_CFLAGS  = $(CFLAGS_32)
 npviewer_CFLAGS += -I$(LSB_INC_DIR)
 npviewer_CFLAGS += -I$(LSB_INC_DIR)/glib-2.0
 npviewer_CFLAGS += -I$(LSB_INC_DIR)/gtk-2.0
-npviewer_LDFLAGS = $(LDFLAGS_32) -L$(LSB_OBJ_DIR)
+npviewer_LDFLAGS = -L$(LSB_OBJ_DIR)
 npviewer_LDFLAGS += -lgtk-x11-2.0 -lgdk-x11-2.0 -lgobject-2.0 -ldl -lglib-2.0 -lX11 -lXt
 else
 npviewer_CFLAGS += $(GTK_CFLAGS)
@@ -151,7 +151,7 @@ libxpcom_OBJECTS = $(libxpcom_RAWSRCS:%.c=libxpcom-%.o)
 libxpcom_CFLAGS  = $(PIC_CFLAGS)
 ifeq ($(build_biarch),yes)
 libxpcom_CFLAGS += -I$(LSB_INC_DIR)
-libxpcom_LDFLAGS = $(LDFLAGS_32) -L$(LSB_OBJ_DIR)
+libxpcom_LDFLAGS = -L$(LSB_OBJ_DIR)
 endif
 
 libnoxshm_LIBRARY = libnoxshm.so
@@ -161,7 +161,7 @@ libnoxshm_OBJECTS = $(libnoxshm_RAWSRCS:%.c=libnoxshm-%.o)
 libnoxshm_CFLAGS  = $(PIC_CFLAGS)
 ifeq ($(biarch),yes)
 libnoxshm_CFLAGS += -I$(LSB_INC_DIR)
-libnoxshm_LDFLAGS = $(LDFLAGS_32) -L$(LSB_OBJ_DIR)
+libnoxshm_LDFLAGS = -L$(LSB_OBJ_DIR)
 endif
 
 npconfig_PROGRAM = npconfig
