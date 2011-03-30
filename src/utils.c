@@ -327,6 +327,23 @@ const char *string_of_NPNURLVariable(int variable)
 
   return str;
 }
+
+const char *string_of_NPFocusDirection(int direction)
+{
+  const char *str;
+
+  switch (direction) {
+#define _(VAL) case VAL: str = #VAL; break;
+	_(NPFocusNext);
+	_(NPFocusPrevious);
+#undef _
+  default:
+	str = "<unknown direction>";
+	break;
+  }
+
+  return str;
+}
 #endif
 
 
