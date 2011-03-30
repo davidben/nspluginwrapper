@@ -513,7 +513,7 @@ int main(void) {
     return 0;
 }
 EOF
-if ! $cc $CFLAGS $GLIB_CFLAGS $GLIB_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
+if ! $cc $CFLAGS $LDFLAGS $GLIB_CFLAGS $GLIB_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
     echo "GLIB 2.0 environment not usable"
     rm -f $TMPC
     exit 1
@@ -537,7 +537,7 @@ int main(void) {
     return 0;
 }
 EOF
-    if ! $cc $CFLAGS $GTK_CFLAGS $GTK_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
+    if ! $cc $CFLAGS $LDFLAGS $GTK_CFLAGS $GTK_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
 	echo "GTK+ 2.0 environment not usable"
 	rm -f $TMPC
 	exit 1
@@ -567,7 +567,7 @@ int main(void) {
     return 0;
 }
 EOF
-    if ! $cc $CFLAGS $CURL_CFLAGS $CURL_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
+    if ! $cc $CFLAGS $LDFLAGS $CURL_CFLAGS $CURL_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
 	echo "cURL environment not usable"
 	rm -f $TMPC
 	exit 1
@@ -590,7 +590,7 @@ int main(void) {
     return 0;
 }
 EOF
-if ! $cc $CFLAGS $X_CFLAGS $X_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
+if ! $cc $CFLAGS $LDFLAGS $X_CFLAGS $X_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
     echo "X11/Xt environment not usable"
     rm -f $TMPC
     exit 1
@@ -759,6 +759,7 @@ echo "COMPILER=$compiler" >> $config_mak
 echo "CC=$cc" >> $config_mak
 echo "CXX=$cxx" >> $config_mak
 echo "CFLAGS=$CFLAGS" >> $config_mak
+echo "LDFLAGS=$LDFLAGS" >> $config_mak
 echo "GLIB_CFLAGS=$GLIB_CFLAGS" >> $config_mak
 echo "GLIB_LDFLAGS=$GLIB_LDFLAGS" >> $config_mak
 echo "GTK_CFLAGS=$GTK_CFLAGS" >> $config_mak
@@ -768,7 +769,7 @@ echo "CURL_LDFLAGS=$CURL_LDFLAGS" >> $config_mak
 echo "X_CFLAGS=$X_CFLAGS" >> $config_mak
 echo "X_LDFLAGS=$X_LDFLAGS" >> $config_mak
 if test "$build_biarch" = "yes"; then
-echo "LDFLAGS_32=-m32" >> $config_mak
+echo 'LDFLAGS_32=-m32 $(LDFLAGS)' >> $config_mak
 echo "CFLAGS_32=$CFLAGS_32" >> $config_mak
 else
 echo 'CFLAGS_32=$(CFLAGS)' >> $config_mak
