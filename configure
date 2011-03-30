@@ -243,6 +243,10 @@ case "$opt" in
     print_help
     exit 0
     ;;
+*)
+    echo "Unrecognized option: $opt"
+    print_help
+    exit 1
 esac
 done
 
