@@ -128,6 +128,40 @@ esac
 echo "$os"
 }
 
+print_help() {
+cat << EOF
+
+Usage: configure [options]
+Options: [defaults in brackets after descriptions]
+
+EOF
+echo "Standard options:"
+echo "  --help                      print this message"
+echo "  --prefix=PREFIX             install in PREFIX [$prefix]"
+echo "  --pkglibdir=ROOT            install private files in ROOT [$pkglibdir]"
+echo "  --viewer-paths=PATH         allowed viewer lookup PATH [$viewer_paths]"
+echo "  --target-os=OS              build plugin support for target OS [$target_os]"
+echo "  --target-cpu=CPU            build plugin support for target CPU [$target_cpu]"
+echo "  --enable-viewer             build viewer [$build_viewer]"
+echo "  --enable-player             build player [$build_player]"
+echo ""
+echo "Advanced options (experts only):"
+echo "  --source-path=PATH          path of source code [$source_path]"
+echo "  --enable-strip              strip resulting binaries and libraries [$strip]"
+echo "  --enable-generic            build with generic APIs [$build_generic]"
+echo "  --enable-biarch             build both 32-bit and 64-bit components at once [$build_biarch]"
+echo "  --enable-thread-check       enable main thread checks (DEBUG) [$enable_thread_check]"
+echo "  --enable-malloc-check       enable memory allocation checks (DEBUG) [$enable_malloc_check]"
+echo "  --with-lib32=NAME           use NAME as the 32-bit library dir name [$lib32]"
+echo "  --with-lib64=NAME           use NAME as the 64-bit library dir name [$lib64]"
+echo "  --with-cc=CC                use C compiler CC [$cc]"
+echo "  --with-cxx=CXX              use C++ compiler CXX [$cxx]"
+echo "  --with-malloc=MALLOC        use MALLOC for memory allocation hooks [$malloc_hooks]"
+echo "  --rpc-init-timeout=VALUE    wait VALUE seconds for the plugin to connect [$rpc_init_timeout]"
+echo ""
+echo "NOTE: The object files are built at the place where configure is launched"
+}
+
 for opt do
 case "$opt" in
 --prefix=*)
@@ -204,6 +238,10 @@ case "$opt" in
     ;;
 --rpc-init-timeout=*)
     rpc_init_timeout=`echo "$opt" | cut -d '=' -f 2`
+    ;;
+-h|--help)
+    print_help
+    exit 0
     ;;
 esac
 done
@@ -685,42 +723,6 @@ done
 if test -z "$malloc_hooks"; then
     malloc_hook_default="libc"
     malloc_hooks="$malloc_hook_default"
-fi
-
-# print configure help
-if test x"$1" = x"-h" -o x"$1" = x"--help" ; then
-cat << EOF
-
-Usage: configure [options]
-Options: [defaults in brackets after descriptions]
-
-EOF
-echo "Standard options:"
-echo "  --help                      print this message"
-echo "  --prefix=PREFIX             install in PREFIX [$prefix]"
-echo "  --pkglibdir=ROOT            install private files in ROOT [$pkglibdir]"
-echo "  --viewer-paths=PATH         allowed viewer lookup PATH [$viewer_paths]"
-echo "  --target-os=OS              build plugin support for target OS [$target_os]"
-echo "  --target-cpu=CPU            build plugin support for target CPU [$target_cpu]"
-echo "  --enable-viewer             build viewer [$build_viewer]"
-echo "  --enable-player             build player [$build_player]"
-echo ""
-echo "Advanced options (experts only):"
-echo "  --source-path=PATH          path of source code [$source_path]"
-echo "  --enable-strip              strip resulting binaries and libraries [$strip]"
-echo "  --enable-generic            build with generic APIs [$build_generic]"
-echo "  --enable-biarch             build both 32-bit and 64-bit components at once [$build_biarch]"
-echo "  --enable-thread-check       enable main thread checks (DEBUG) [$enable_thread_check]"
-echo "  --enable-malloc-check       enable memory allocation checks (DEBUG) [$enable_malloc_check]"
-echo "  --with-lib32=NAME           use NAME as the 32-bit library dir name [$lib32]"
-echo "  --with-lib64=NAME           use NAME as the 64-bit library dir name [$lib64]"
-echo "  --with-cc=CC                use C compiler CC [$cc]"
-echo "  --with-cxx=CXX              use C++ compiler CXX [$cxx]"
-echo "  --with-malloc=MALLOC        use MALLOC for memory allocation hooks [$malloc_hooks]"
-echo "  --rpc-init-timeout=VALUE    wait VALUE seconds for the plugin to connect [$rpc_init_timeout]"
-echo ""
-echo "NOTE: The object files are built at the place where configure is launched"
-exit 1
 fi
 
 echo "Source path               $source_path"
