@@ -3,6 +3,7 @@
   A cross-platform NPAPI plugin viewer
 
   Copyright (C) 2005-2009 Gwenole Beauchesne
+  Copyright (C) 2011 David Benjamin
 
 
 License
@@ -51,9 +52,9 @@ systems.
 Requirements and Installation
 -----------------------------
 
-A Mozilla based browser built with GTK 2 support is currently required
-for proper operation. An alternative is Konqueror but it does not yet
-support the npruntime scripting API.
+An NPAPI-supporting browser built with GTK 2 support is currently
+required for proper operation. An alternative is Konqueror but it does
+not yet support the npruntime scripting API.
 
 On package installation, 32-bit plugins are automatically recognized
 provided they are available in the /usr/lib/mozilla/plugins directory.
@@ -63,10 +64,11 @@ You can manually install/remove/update plugins with "nspluginwrapper".
    usage: nspluginwrapper [flags] [command [plugin(s)]]
 
    -h --help               print this message
-   -a --auto               set automatic mode for plugins discovery
-   -n --native             allow native plugin(s) to be wrapped
+   -v --verbose            flag: set verbose mode
+   -a --auto               flag: set automatic mode for plugins discovery
+   -n --native             flag: allow native plugin(s) to be wrapped
    -l --list               list plugins currently installed
-   -u --update             update plugin(s) currently installed
+   -u --update [FILE(S)]   update plugin(s) currently installed
    -i --install [FILE(S)]  install plugin(s)
    -r --remove [FILE(S)]   remove plugin(s)
 
@@ -87,6 +89,7 @@ The following plugins work reasonnably well:
 - Flash Player        7.0
 - Flash Player        9.0.124
 - Flash Player        10.0.12.36
+- Flash Player        10.2.153
 - Linux J2K           0.0.2
 - Mplayerplug-in      2.80
 - Mplayerplug-in      3.25
@@ -105,8 +108,14 @@ Broken or partially working:
 History
 -------
 
+This project's history is maintained in a git repository hosted by
+Github:
+
+https://github.com/davidben/nspluginwrapper
+
 Please consult the file "NEWS" for the release history.
-An auto-generated "ChangeLog" is also available in this distribution.
+A "ChangeLog" file is also available in this distribution from before
+git.
 
 
 Author
@@ -114,3 +123,6 @@ Author
 
 Gwenole Beauchesne,
 <gb.public@free.fr>
+
+David Benjamin,
+<davidben@mit.edu>
