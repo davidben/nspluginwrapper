@@ -563,7 +563,9 @@ static bool is_plugin_viewer_ok(const char *viewer_path, const char *filename)
 	if (!g_verbose) {
 	  // don't spit out errors in non-verbose mode, we only need
 	  // to know whether there is a valid viewer or not
-	  freopen("/dev/null", "w", stderr);
+	  if (freopen("/dev/null", "w", stderr) == NULL) {
+		fprintf(stderr, "failed to silence stderr\n");
+	  }
 	}
 	execl(viewer_path, NPW_VIEWER, "--test", "--plugin", filename, NULL);
 	exit(1);
