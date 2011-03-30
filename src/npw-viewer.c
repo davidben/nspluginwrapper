@@ -3782,7 +3782,7 @@ static int handle_NP_GetValue(rpc_connection_t *connection)
 
 // NP_Initialize
 static NPError
-g_NP_Initialize(uint32_t version)
+g_NP_Initialize(uint32_t version, uint32_t *plugin_version)
 {
   if (g_plugin_NP_Initialize == NULL)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
@@ -3855,9 +3855,10 @@ g_NP_Initialize(uint32_t version)
   // XXX: remove the local copies from this file
   NPW_InitializeFuncs(&mozilla_funcs, &plugin_funcs);
 
-  D(bugiI("NP_Initialize\n"));
+  D(bugiI("NP_Initialize version=%d\n", version));
   NPError ret = g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
-  D(bugiD("NP_Initialize return: %d\n", ret));
+  *plugin_version = plugin_funcs.version;
+  D(bugiD("NP_Initialize return: %d, plugin_version=%d\n", ret, *plugin_version));
   return ret;
 }
 
@@ -3875,8 +3876,12 @@ static int handle_NP_Initialize(rpc_connection_t *connection)
 	return error;
   }
 
-  NPError ret = g_NP_Initialize(version);
-  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
+  uint32_t plugin_version = 0;
+  NPError ret = g_NP_Initialize(version, &plugin_version);
+  return rpc_method_send_reply(connection,
+                               RPC_TYPE_INT32, ret,
+                               RPC_TYPE_UINT32, plugin_version,
+                               RPC_TYPE_INVALID);
 }
 
 // NP_Shutdown

@@ -3408,7 +3408,7 @@ static bool is_konqueror(void)
 
 // Provides global initialization for a plug-in
 static NPError
-invoke_NP_Initialize(uint32_t npapi_version)
+invoke_NP_Initialize(uint32_t npapi_version, uint32_t *plugin_version)
 {
   if (PLUGIN_DIRECT_EXEC) {
 	NPNetscapeFuncs mozilla_funcs;
@@ -3473,7 +3473,9 @@ invoke_NP_Initialize(uint32_t npapi_version)
 	  mozilla_funcs.scheduletimer = g_NPN_ScheduleTimer;
 	  mozilla_funcs.unscheduletimer = g_NPN_UnscheduleTimer;
 	}
-	return g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
+	NPError error = g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
+    *plugin_version = plugin_funcs.version;
+    return error;
   }
 
   npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
@@ -3490,7 +3492,10 @@ invoke_NP_Initialize(uint32_t npapi_version)
   }
 
   int32_t ret;
-  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_INT32, &ret, RPC_TYPE_INVALID);
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+                                    RPC_TYPE_INT32, &ret,
+                                    RPC_TYPE_UINT32, plugin_version,
+                                    RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NP_Initialize() wait for reply", error);
@@ -3501,11 +3506,12 @@ invoke_NP_Initialize(uint32_t npapi_version)
 }
 
 static NPError
-g_NP_Initialize(uint32_t npapi_version)
+g_NP_Initialize(uint32_t npapi_version, uint32_t *plugin_version)
 {
   D(bugiI("NP_Initialize\n"));
-  NPError ret = invoke_NP_Initialize(npapi_version);
-  D(bugiD("NP_Initialize return: %d [%s]\n", ret, string_of_NPError(ret)));
+  NPError ret = invoke_NP_Initialize(npapi_version, plugin_version);
+  D(bugiD("NP_Initialize return: %d [%s], plugin_version=%d\n",
+          ret, string_of_NPError(ret), *plugin_version));
   return ret;
 }
 
@@ -3564,15 +3570,11 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
 	full_plugin_funcs.destroy = (NPP_DestroyProcPtr)g_LONG64_NPP_Destroy;
   }
 
-  // Copy only the portion of full_plugin_funcs that the browser
-  // understands.
-  uint16_t plugin_funcs_size = plugin_funcs->size;
-  memcpy(plugin_funcs, &full_plugin_funcs,
-		 MIN(plugin_funcs_size, sizeof(full_plugin_funcs)));
-  plugin_funcs->size = MIN(plugin_funcs_size, sizeof(full_plugin_funcs));
-
   // Initialize function tables
   // XXX: remove the local copies from this file
+  // XXX: This doesn't get the adjust plugin version number below, but don't
+  // use it and someone may try to call something in npw-common.c in the
+  // meantime.
   NPW_InitializeFuncs(moz_funcs, &full_plugin_funcs);
 
   if (g_plugin.initialized == 0 || g_plugin.initialized == 1)
@@ -3588,8 +3590,27 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
 
   // pass down common NPAPI version supported by both the underlying
   // browser and the thunking capabilities of nspluginwrapper
-  npapi_version = MIN(moz_funcs->version, plugin_funcs->version);
-  return g_NP_Initialize(npapi_version);
+  D(bug("Thunking layer supports NPAPI %d\n", NPW_NPAPI_VERSION));
+  npapi_version = MIN(moz_funcs->version, NPW_NPAPI_VERSION);
+  D(bug("Browser supports NPAPI %d, advertising version %d to plugin\n",
+        moz_funcs->version, npapi_version));
+  uint32_t plugin_version = 0;
+  NPError error = g_NP_Initialize(npapi_version, &plugin_version);
+
+  // Likewise, advertise the common NPAPI version between the plugin and our
+  // thunking capabilities.
+  full_plugin_funcs.version = MIN(plugin_version, NPW_NPAPI_VERSION);
+  D(bug("Plugin supports NPAPI %d, advertising version %d to browser\n",
+        plugin_version, full_plugin_funcs.version));
+
+  // Copy only the portion of full_plugin_funcs that the browser
+  // understands.
+  uint16_t plugin_funcs_size = plugin_funcs->size;
+  memcpy(plugin_funcs, &full_plugin_funcs,
+		 MIN(plugin_funcs_size, sizeof(full_plugin_funcs)));
+  plugin_funcs->size = MIN(plugin_funcs_size, sizeof(full_plugin_funcs));
+
+  return error;
 }
 
 // Provides global deinitialization for a plug-in
@@ -3990,7 +4011,8 @@ static NPError plugin_start(void)
   if (g_plugin.initialized <= 0)
 	return NPERR_MODULE_LOAD_FAILED_ERROR;
 
-  return g_NP_Initialize(npapi_version);
+  uint32_t plugin_version;
+  return g_NP_Initialize(npapi_version, &plugin_version);
 }
 
 static NPError plugin_start_if_needed(void)
