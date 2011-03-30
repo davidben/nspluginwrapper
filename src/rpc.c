@@ -390,19 +390,6 @@ static void *rpc_map_lookup(const rpc_map_t *map, int key)
   return entry->value;
 }
 
-static int rpc_map_remove(rpc_map_t *map, int key)
-{
-  assert(map != NULL);
-
-  rpc_map_entry_t *entry = _rpc_map_lookup(map, key);
-  if (entry) {
-	entry->key = -1;
-	entry->value = 0;
-	entry->use_count = 0;
-  }
-  return 0;
-}
-
 static int rpc_map_insert(rpc_map_t *map, int key, void *value)
 {
   assert(map != NULL);
@@ -1582,42 +1569,6 @@ static int rpc_message_recv_args(rpc_message_t *message, va_list args)
 	  return RPC_ERROR_MESSAGE_TRUNCATED;
   }
   return RPC_ERROR_NO_ERROR;
-}
-
-// Skip message argument
-static int rpc_message_skip_arg(rpc_message_t *message, int type)
-{
-  unsigned char dummy[BUFSIZ];
-  int error = RPC_ERROR_GENERIC;
-  switch (type) {
-  case RPC_TYPE_CHAR:
-	error = _rpc_message_recv_bytes(message, dummy, 1);
-	break;
-  case RPC_TYPE_BOOLEAN:
-  case RPC_TYPE_INT32:
-  case RPC_TYPE_UINT32:
-	error = _rpc_message_recv_bytes(message, dummy, 4);
-	break;
-  case RPC_TYPE_STRING: {
-	int32_t length;
-	if ((error = rpc_message_recv_int32(message, &length)) < 0)
-	  return error;
-	while (length >= sizeof(dummy)) {
-	  if ((error = _rpc_message_recv_bytes(message, dummy, sizeof(dummy))) < 0)
-		return error;
-	  length -= sizeof(dummy);
-	}
-	if (length > 0) {
-	  if ((error = _rpc_message_recv_bytes(message, dummy, length)) < 0)
-		return error;
-	}
-	break;
-  }
-  default:
-	fprintf(stderr, "unknown arg type %d to receive\n", type);
-	break;
-  }
-  return error;
 }
 
 static inline rpc_method_callback_t rpc_lookup_callback(rpc_connection_t *connection, int method)
