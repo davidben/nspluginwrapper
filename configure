@@ -71,7 +71,6 @@ fi
 prefix="/usr"
 lib32=""
 lib64=""
-x_base_dirs=""
 build_viewer="guess"
 build_player="yes"
 build_generic="guess"
@@ -193,9 +192,6 @@ case "$opt" in
     ;;
 --with-lib64=*)
     lib64=`echo "$opt" | cut -d '=' -f 2`
-    ;;
---with-x11-prefix=*)
-    x_base_dirs=`echo "$opt" | cut -d '=' -f 2`
     ;;
 --with-cc=*)
     cc=`echo "$opt" | cut -d '=' -f 2`
@@ -540,29 +536,27 @@ EOF
     rm -f $TMPC $TMPE
 fi
 
-# check for X11 base dir
-if test -z "$x_base_dirs"; then
-    x_base_dirs="
-	/usr
-	/usr/X11R6
-	/usr/local/X11R6
-	$prefix
-    "
-fi
-for dir in $x_base_dirs; do
-    x_include_dir="$dir/include"
-    if test -f $x_include_dir/X11/Intrinsic.h; then
-	x_lib_dir="$dir/$lib64"
-	if test -f $x_lib_dir/libXt.so; then
-	    x_base_dir=$dir
-	    break
-	fi
-    fi
-done
-if test -z "$x_base_dir"; then
+# check for X11 compile CFLAGS
+if $pkgconfig --exists x11 xt; then
+    X_CFLAGS=`$pkgconfig --cflags x11 xt`
+    X_LDFLAGS=`$pkgconfig --libs x11 xt`
+else
     echo "X11/Xt environment not found"
     exit 1
 fi
+cat > $TMPC << EOF
+#include <X11/Xlib.h>
+int main(void) {
+    (void) XOpenDisplay(NULL);
+    return 0;
+}
+EOF
+if ! $cc $CFLAGS $X_CFLAGS $X_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
+    echo "X11/Xt environment not usable"
+    rm -f $TMPC
+    exit 1
+fi
+rm -f $TMPC $TMPE
 
 # big/little endian test
 cat > $TMPC << EOF
@@ -720,7 +714,6 @@ echo "  --enable-thread-check       enable main thread checks (DEBUG) [$enable_t
 echo "  --enable-malloc-check       enable memory allocation checks (DEBUG) [$enable_malloc_check]"
 echo "  --with-lib32=NAME           use NAME as the 32-bit library dir name [$lib32]"
 echo "  --with-lib64=NAME           use NAME as the 64-bit library dir name [$lib64]"
-echo "  --with-x11-prefix=PREFIX    use PREFIX as the X11 base dir [autodetect]"
 echo "  --with-cc=CC                use C compiler CC [$cc]"
 echo "  --with-cxx=CXX              use C++ compiler CXX [$cxx]"
 echo "  --with-malloc=MALLOC        use MALLOC for memory allocation hooks [$malloc_hooks]"
@@ -769,6 +762,8 @@ echo "GTK_CFLAGS=$GTK_CFLAGS" >> $config_mak
 echo "GTK_LDFLAGS=$GTK_LDFLAGS" >> $config_mak
 echo "CURL_CFLAGS=$CURL_CFLAGS" >> $config_mak
 echo "CURL_LDFLAGS=$CURL_LDFLAGS" >> $config_mak
+echo "X_CFLAGS=$X_CFLAGS" >> $config_mak
+echo "X_LDFLAGS=$X_LDFLAGS" >> $config_mak
 if test "$build_biarch" = "yes"; then
 echo "LDFLAGS_32=-m32" >> $config_mak
 echo "CFLAGS_32=$CFLAGS_32" >> $config_mak
@@ -855,7 +850,6 @@ libdir="$prefix/$lib64"
 echo "libdir=$libdir" >> $config_mak
 echo "#define LIB \"$lib64\"" >> $config_h
 echo "#define LIBDIR \"$libdir\"" >> $config_h
-echo "x11prefix=$x_base_dir" >> $config_mak
 echo "ALLOW_STRIP=$strip" >> $config_mak
 
 echo "VERSION=$VERSION" >> $config_mak

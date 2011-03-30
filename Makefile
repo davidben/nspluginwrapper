@@ -70,12 +70,6 @@ PIC_CFLAGS = -qpic
 DSO_LDFLAGS = -qmkshrobj
 endif
 
-X_CFLAGS  = -I$(x11prefix)/include
-X_LDFLAGS = -L$(x11prefix)/$(lib64) -lX11 -lXt
-ifneq (,$(findstring $(OS),netbsd dragonfly))
-X_LDFLAGS += -Wl,--rpath,$(x11prefix)/$(lib64)
-endif
-
 ARCH_32 = $(ARCH)
 ifeq ($(build_biarch), yes)
 ARCH_32 = $(TARGET_ARCH)
