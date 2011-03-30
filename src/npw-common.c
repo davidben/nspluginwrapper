@@ -19,6 +19,9 @@
  */
 
 #include "sysdeps.h"
+
+#include <glib.h>
+
 #include "npw-common.h"
 #include "npw-malloc.h"
 
@@ -52,7 +55,7 @@ npw_plugin_instance_ref(void *ptr)
 {
   NPW_PluginInstance *plugin = (NPW_PluginInstance *)ptr;
   if (plugin)
-    plugin->refcount++;
+	g_atomic_int_inc(&plugin->refcount);
   return plugin;
 }
 
@@ -62,8 +65,13 @@ npw_plugin_instance_unref(void *ptr)
   NPW_PluginInstance *plugin = (NPW_PluginInstance *)ptr;
   if (plugin == NULL)
     return;
-  if (--plugin->refcount > 0)
+  if (!g_atomic_int_dec_and_test(&plugin->refcount))
     return;
+  // XXX: This MUST be called on the main thread, to avoid calling
+  // finalize on another thread. For now, this does not happen as
+  // NPN_PluginThreadAsyncCall is the only thing callable off the plugin
+  // thread. Should this change, we will need to post the destroy task
+  // elsewhere or make all finalize hooks thread-safe.
   NPW_PluginInstanceClass *klass = plugin->klass;
   if (klass && klass->finalize)
     klass->finalize (plugin);

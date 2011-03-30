@@ -57,7 +57,7 @@
 /* PluginInstance */
 #define NPW_DECL_PLUGIN_INSTANCE		\
   NPW_PluginInstanceClass *klass;		\
-  uint32_t                 refcount;		\
+  volatile int             refcount;		\
   NPP                      instance;		\
   uint32_t                 instance_id;		\
   bool                     is_valid

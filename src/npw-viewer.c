@@ -3316,6 +3316,8 @@ g_NPN_PluginThreadAsyncCall(NPP instance,
 {
   if (instance == NULL)
 	return;
+  // It's the plugin's responsibility to ensure the NPP remains valid
+  // while the function is called.
   PluginInstance *plugin = PLUGIN_INSTANCE(instance);
   if (plugin == NULL)
 	return;
