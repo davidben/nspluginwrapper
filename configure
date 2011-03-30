@@ -483,10 +483,7 @@ if test "$compiler" = "gcc"; then
 	fi
     fi
     if test "$build_biarch" = "yes" -a -z "$CFLAGS_32"; then
-	CFLAGS_32="-m32 -O2 -g"
-	if check_cc_option -mtune=generic $CFLAGS_32; then
-	    CFLAGS_32="$CFLAGS_32 -mtune=generic"
-	fi
+	CFLAGS_32="-m32 $CFLAGS"
     fi
     if check_cc_option -Wall; then
 	CFLAGS="$CFLAGS -Wall"
