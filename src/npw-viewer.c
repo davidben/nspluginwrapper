@@ -3288,15 +3288,14 @@ g_NPN_IntFromIdentifier(NPIdentifier identifier)
 }
 
 typedef struct _AsyncCall {
-  void *plugin;
+  PluginInstance *plugin;
   void (*func)(void *);
   void *userData;
 } AsyncCall;
 
 static void
-async_call_free(gpointer data)
+async_call_free(AsyncCall *asyncCall)
 {
-  AsyncCall *asyncCall = data;
   npw_plugin_instance_unref(asyncCall->plugin);
   free(asyncCall);
 }
@@ -3327,7 +3326,7 @@ g_NPN_PluginThreadAsyncCall(NPP instance,
   asyncCall->func = func;
   asyncCall->userData = userData;
   g_idle_add_full(G_PRIORITY_DEFAULT_IDLE,
-				  async_call_run, asyncCall, async_call_free);
+				  async_call_run, asyncCall, (GDestroyNotify) async_call_free);
   D(bugiD("NPP_PluginThreadAsyncCall done\n"));
 }
 
