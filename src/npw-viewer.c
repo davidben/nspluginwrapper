@@ -80,6 +80,8 @@ typedef struct _PluginInstance {
   uint32_t width, height;
   void *toolkit_data;
   GdkWindow *browser_toplevel;
+  uint32_t next_timer_id;
+  GHashTable *timers;
 } PluginInstance;
 
 #define PLUGIN_INSTANCE(instance) \
@@ -106,10 +108,18 @@ typedef struct _GtkData {
   GtkWidget *socket;
 } GtkData;
 
+// Timer information
+typedef struct _Timer {
+  bool repeat;
+  void (*func)(NPP npp, uint32_t timerID);
+  guint source_id;
+} Timer;
+
 // Prototypes
 static void destroy_window(PluginInstance *plugin);
 static int xt_source_create(void);
 static void xt_source_destroy(void);
+static void timer_free(Timer *timer);
 
 
 /* ====================================================================== */
@@ -148,6 +158,9 @@ static void plugin_instance_finalize(PluginInstance *plugin)
   if (plugin->instance) {
 	free(plugin->instance);
 	plugin->instance = NULL;
+  }
+  if (plugin->timers) {
+	g_hash_table_destroy(plugin->timers);
   }
 }
 
@@ -3555,6 +3568,110 @@ g_NPN_GetAuthenticationInfo(NPP instance, const char *protocol,
   return ret;
 }
 
+typedef struct _TimerData {
+  uint32_t timer_id;
+  PluginInstance *plugin;
+} TimerData;
+
+static gboolean
+timer_data_run(TimerData *data)
+{
+  // Check if the timer is even valid anymore.
+  if (!npw_plugin_instance_is_valid(data->plugin))
+	return FALSE;
+  Timer *timer = g_hash_table_lookup(data->plugin->timers,
+									 GINT_TO_POINTER(data->timer_id));
+  if (timer == NULL)
+	return FALSE;
+
+  timer->func(PLUGIN_INSTANCE_NPP(data->plugin), data->timer_id);
+
+  if (!timer->repeat) {
+	// Don't bother trying to detach it later.
+	timer->source_id = 0;
+	return FALSE;
+  }
+  return TRUE;
+}
+
+static void
+timer_data_free(TimerData *data)
+{
+  npw_plugin_instance_unref(data->plugin);
+  g_free(data);
+}
+
+static void
+timer_free(Timer *timer)
+{
+  if (timer->source_id) {
+	g_source_remove(timer->source_id);
+	timer->source_id = 0;
+  }
+  g_free(timer);
+}
+
+static uint32_t
+g_NPN_ScheduleTimer(NPP instance, uint32_t interval, NPBool repeat,
+					void (*timerFunc)(NPP npp, uint32_t timerID))
+{
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_ScheduleTimer not called from the main thread\n");
+	return NPERR_INVALID_INSTANCE_ERROR;
+  }
+
+  if (instance == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return NPERR_INVALID_INSTANCE_ERROR;
+
+  D(bugiI("NPN_ScheduleTimer instance=%p, interval=%d, repeat=%d\n",
+		  instance, interval, repeat));
+
+  uint32_t timer_id = plugin->next_timer_id++;
+
+  Timer *timer = g_new0(Timer, 1);
+  timer->repeat = repeat;
+  timer->func = timerFunc;
+  g_hash_table_insert(plugin->timers, GINT_TO_POINTER(timer_id), timer);
+
+  TimerData *timer_data = g_new0(TimerData, 1);
+  timer_data->timer_id = timer_id;
+  timer_data->plugin = npw_plugin_instance_ref(plugin);
+
+  timer->source_id = g_timeout_add_full(G_PRIORITY_DEFAULT,
+										interval,
+										(GSourceFunc) timer_data_run,
+										timer_data,
+										(GDestroyNotify) timer_data_free);
+
+  D(bugiD("NPN_ScheduleTimer return: %d\n", timer_id));
+
+  return timer_id;
+}
+
+static void
+g_NPN_UnscheduleTimer(NPP instance, uint32_t timerID)
+{
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_UnscheduleTimer not called from the main thread\n");
+	return;
+  }
+
+  if (instance == NULL)
+	return;
+
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+  if (plugin == NULL)
+	return;
+
+  D(bugiI("NPN_UnscheduleTimer instance=%p, timerID=%d\n", instance, timerID));
+  g_hash_table_remove(plugin->timers, GINT_TO_POINTER(timerID));
+  D(bugiD("NPN_UnscheduleTimer done\n"));
+}
+
 
 /* ====================================================================== */
 /* === Plug-in side data                                              === */
@@ -3703,6 +3820,8 @@ g_NP_Initialize(uint32_t version)
   mozilla_funcs.getvalueforurl = g_NPN_GetValueForURL;
   mozilla_funcs.setvalueforurl = g_NPN_SetValueForURL;
   mozilla_funcs.getauthenticationinfo = g_NPN_GetAuthenticationInfo;
+  mozilla_funcs.scheduletimer = g_NPN_ScheduleTimer;
+  mozilla_funcs.unscheduletimer = g_NPN_UnscheduleTimer;
 
   if (NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING)) {
 	D(bug(" browser supports scripting through npruntime\n"));
@@ -3857,6 +3976,11 @@ static NPError g_NPP_New(NPMIMEType plugin_type, uint32_t instance_id,
 	  return NPERR_GENERIC_ERROR;
   }
 
+  plugin->next_timer_id = 1;
+  plugin->timers = g_hash_table_new_full(g_direct_hash,
+										 g_direct_equal,
+										 NULL,
+										 (GDestroyNotify) timer_free);
   return ret;
 }
 

@@ -34,7 +34,7 @@
 #include "npruntime-impl.h"
 
 /* Supported NPAPI interfaces */
-#define NPW_NPAPI_VERSION		22
+#define NPW_NPAPI_VERSION		24
 #define NPW_NP_CLASS_STRUCT_VERSION	3
 #define NPW_TOOLKIT			NPNVGtk2
 

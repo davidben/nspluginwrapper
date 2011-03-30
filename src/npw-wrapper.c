@@ -2041,6 +2041,33 @@ static int handle_NPN_GetAuthenticationInfo(rpc_connection_t *connection)
   return error;
 }
 
+// NPN_ScheduleTimer
+static uint32_t
+g_NPN_ScheduleTimer(NPP instance, uint32_t interval, NPBool repeat,
+					void (*timerFunc)(NPP npp, uint32_t timerID))
+{
+  if (mozilla_funcs.scheduletimer == NULL)
+	return 0;
+
+  D(bugiI("NPN_ScheduleTimer instance=%p, interval=%d, repeat=%d\n",
+		  instance, interval, repeat));
+  uint32_t ret = mozilla_funcs.scheduletimer(instance, interval, repeat, timerFunc);
+  D(bugiD("NPN_ScheduleTimer return: %d\n", ret));
+  return ret;
+}
+
+// NPN_UnscheduleTimer
+static void
+g_NPN_UnscheduleTimer(NPP instance, uint32_t timerID)
+{
+  if (mozilla_funcs.unscheduletimer == NULL)
+	return;
+
+  D(bugiI("NPN_UnscheduleTimer instance=%p, timerID=%d\n", instance, timerID));
+  mozilla_funcs.unscheduletimer(instance, timerID);
+  D(bugiD("NPN_UnscheduleTimer done\n"));
+}
+
 
 /* ====================================================================== */
 /* === Plug-in side data                                              === */
@@ -3440,6 +3467,11 @@ invoke_NP_Initialize(uint32_t npapi_version)
 	if ((npapi_version & 0xff) >= NPVERS_HAS_PLUGIN_THREAD_ASYNC_CALL) {
 	  // Avoid pretending we have support for this if we really don't.
 	  mozilla_funcs.pluginthreadasynccall = g_NPN_PluginThreadAsyncCall;
+	}
+	if ((npapi_version & 0xff) >= NPVERS_MACOSX_HAS_COCOA_EVENTS) {
+	  // Avoid pretending we have support for this if we really don't.
+	  mozilla_funcs.scheduletimer = g_NPN_ScheduleTimer;
+	  mozilla_funcs.unscheduletimer = g_NPN_UnscheduleTimer;
 	}
 	return g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
   }
