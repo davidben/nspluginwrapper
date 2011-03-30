@@ -2012,8 +2012,8 @@ static int handle_NPN_GetAuthenticationInfo(rpc_connection_t *connection)
 	return error;
   }
 
-  char *username, *password;
-  uint32_t ulen, plen;
+  char *username = NULL, *password = NULL;
+  uint32_t ulen = 0, plen = 0;
   int32_t ret = g_NPN_GetAuthenticationInfo(PLUGIN_INSTANCE_NPP(plugin),
 											protocol, host, port, scheme, realm,
 											&username, &ulen, &password, &plen);
