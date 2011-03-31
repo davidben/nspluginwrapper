@@ -1632,10 +1632,15 @@ on_stream_close_cb (gpointer user_data)
 	continue;
 
       StreamInstance *pstream;
+      char *pstream_;
       
       CURL *handle = msg->easy_handle;
-      if (curl_easy_getinfo (handle, CURLINFO_PRIVATE, &pstream) == CURLE_OK)
+      /* We actually want to get a void* out of here, but for "for
+	 internal reasons", CURL actually returns a char* and gives a
+	 compiler warning otherwise. */
+      if (curl_easy_getinfo (handle, CURLINFO_PRIVATE, &pstream_) == CURLE_OK)
 	{
+	  pstream = (StreamInstance *) pstream_;
 	  if (!(pstream->status & STREAM_STATUS_ACTIVE))
 	    {
 	      /* Special case for JavaScript that CURL could not handle */
