@@ -4835,7 +4835,7 @@ static int get_appcontext_input_count_offset(void)
 
 #define n_inputs_max	4 /* number of refinements/input sources */
   int fd, id, n_inputs = 0;
-  struct { int fd, id; } inputs[n_inputs_max] = { 0, };
+  struct { int fd, id; } inputs[n_inputs_max] = { { 0 } };
 
   if ((fd = open("/dev/null", O_WRONLY)) < 0)
 	return 0;
