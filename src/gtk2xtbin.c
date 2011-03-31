@@ -44,12 +44,7 @@
 
 #include "xembed.h"
 #include "gtk2xtbin.h"
-#ifdef BUILD_VIEWER
 #include <gtk/gtk.h>
-#else
-#include <gtk/gtkmain.h>
-#include <gtk/gtkprivate.h>
-#endif
 #include <gdk/gdkx.h>
 #include <glib.h>
 #include <assert.h>
@@ -215,24 +210,27 @@ xt_event_polling_timer_callback(gpointer user_data)
   return TRUE;
 }
 
-GtkType
+GType
 gtk_xtbin_get_type (void)
 {
-  static GtkType xtbin_type = 0;
+  static GType xtbin_type = 0;
 
   if (!xtbin_type) {
-      static const GtkTypeInfo xtbin_info =
+      static const GTypeInfo xtbin_info =
       {
-        "GtkXtBin",
-        sizeof (GtkXtBin),
-        sizeof (GtkXtBinClass),
-        (GtkClassInitFunc) gtk_xtbin_class_init,
-        (GtkObjectInitFunc) gtk_xtbin_init,
-        /* reserved_1 */ NULL,
-        /* reserved_2 */ NULL,
-        (GtkClassInitFunc) NULL
+        sizeof (GtkXtBinClass), /* class_size */
+        NULL, /* base_init */
+        NULL, /* base_finalize */
+        (GClassInitFunc) gtk_xtbin_class_init, /* class_init */
+        NULL, /* class_finalize */
+        NULL, /* class_data */
+        sizeof (GtkXtBin), /* instance_size */
+        0, /* n_preallocs */
+        (GInstanceInitFunc) gtk_xtbin_init, /* instance_init */
+        NULL /* value_table */
       };
-      xtbin_type = gtk_type_unique (GTK_TYPE_SOCKET, &xtbin_info);
+      xtbin_type = g_type_register_static(GTK_TYPE_SOCKET, "GtkXtBin",
+        &xtbin_info, 0);
     }
   return xtbin_type;
 }
@@ -243,7 +241,7 @@ gtk_xtbin_class_init (GtkXtBinClass *klass)
   GtkWidgetClass *widget_class;
   GtkObjectClass *object_class;
 
-  parent_class = gtk_type_class (GTK_TYPE_SOCKET);
+  parent_class = g_type_class_peek_parent(klass);
 
   widget_class = GTK_WIDGET_CLASS (klass);
   widget_class->realize = gtk_xtbin_realize;
@@ -316,7 +314,7 @@ gtk_xtbin_new (GdkWindow *parent_window, String * f)
   gpointer user_data;
 
   assert(parent_window != NULL);
-  xtbin = gtk_type_new (GTK_TYPE_XTBIN);
+  xtbin = g_object_new (GTK_TYPE_XTBIN, NULL);
 
   if (!xtbin)
     return (GtkWidget*)NULL;
@@ -374,9 +372,9 @@ gtk_xtbin_new (GdkWindow *parent_window, String * f)
                              G_PRIORITY_LOW);
     /* add a timer so that we can poll and process Xt timers */
     xt_polling_timer_id =
-      gtk_timeout_add(25,
-                      (GtkFunction)xt_event_polling_timer_callback,
-                      xtdisplay);
+      g_timeout_add(25,
+                    (GtkFunction)xt_event_polling_timer_callback,
+                    xtdisplay);
   }
 
   /* Bump up our usage count */
@@ -388,6 +386,15 @@ gtk_xtbin_new (GdkWindow *parent_window, String * f)
   gdk_window_get_user_data(xtbin->parent_window, &user_data);
   if (user_data)
     gtk_container_add(GTK_CONTAINER(user_data), GTK_WIDGET(xtbin));
+
+  /* This GtkSocket has a visible window, but the Xt plug will cover this
+   * window.  Normally GtkSockets let the X server paint their background and
+   * this would happen immediately (before the plug is mapped).  Setting the
+   * background to None prevents the server from painting this window,
+   * avoiding flicker.
+   */
+  gtk_widget_realize(GTK_WIDGET(xtbin));
+  gdk_window_set_back_pixmap(GTK_WIDGET(xtbin)->window, NULL, FALSE);
 
   return GTK_WIDGET (xtbin);
 }
@@ -420,14 +427,15 @@ gtk_xtbin_resize (GtkWidget *widget,
   xtbin->height = height;
   xtbin->width  = width;
 
-  // Avoid BadValue errors in XtSetValues
+  /* Avoid BadValue errors in XtSetValues */
   if (height <= 0 || width <=0) {
     height = 1;
     width = 1;
   }
   XtSetArg(args[0], XtNheight, height);
   XtSetArg(args[1], XtNwidth,  width);
-  XtSetValues(xtbin->xtclient.top_widget, args, 2);
+  if (xtbin->xtclient.top_widget)
+    XtSetValues(xtbin->xtclient.top_widget, args, 2);
 
   /* we need to send a size allocate so the socket knows about the
      size changes */
@@ -492,7 +500,7 @@ gtk_xtbin_destroy (GtkObject *object)
       g_main_context_remove_poll((GMainContext*)NULL, &xt_event_poll_fd);
       g_source_remove(tag);
 
-      gtk_timeout_remove(xt_polling_timer_id);
+      g_source_remove(xt_polling_timer_id);
       xt_polling_timer_id = 0;
     }
   }
@@ -940,3 +948,4 @@ xt_add_focus_listener_tree ( Widget treeroot, XtPointer user_data)
 
   return;
 }
+
