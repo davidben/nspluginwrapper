@@ -159,7 +159,7 @@ libnoxshm_RAWSRCS = libnoxshm.c
 libnoxshm_SOURCES = $(libnoxshm_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 libnoxshm_OBJECTS = $(libnoxshm_RAWSRCS:%.c=libnoxshm-%.o)
 libnoxshm_CFLAGS  = $(PIC_CFLAGS)
-ifeq ($(biarch),yes)
+ifeq ($(build_biarch),yes)
 libnoxshm_CFLAGS += -I$(LSB_INC_DIR)
 libnoxshm_LDFLAGS = -L$(LSB_OBJ_DIR)
 endif
