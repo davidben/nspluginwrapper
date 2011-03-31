@@ -19,6 +19,8 @@
  */
 
 #include "sysdeps.h"
+
+#include <errno.h>
 #include <unistd.h>
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -26,6 +28,7 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 #include <gdk/gdkkeysyms.h>
+
 #include "rpc.h"
 #include "utils.h"
 #include "glibcurl.h"
@@ -1594,11 +1597,22 @@ on_stream_open_cb (gpointer user_data)
        */
       if (pstream->uri_type != URI_TYPE_FILE)
 	{
-	  /* XXX: handle errors! */
-	  /* XXX: better use tmpfile() but how to get the filename in a portable way? */
-	  pstream->temp_filename = g_malloc (L_tmpnam + 1);
-	  tmpnam (pstream->temp_filename);
-	  pstream->temp_file = fopen (pstream->temp_filename, "w");
+	  GError *error = NULL;
+	  int fd = g_file_open_tmp (NULL, &pstream->temp_filename, &error);
+	  if (fd < 0) {
+	    npw_printf ("ERROR: Could not open temporary file: %s\n",
+			error->message);
+	    g_error_free (error);
+	    return FALSE;
+	  }
+	  pstream->temp_file = fdopen (fd, "w");
+	  if (pstream->temp_file == NULL) {
+	    npw_printf ("ERROR: fdopen failed: %s\n", strerror (errno));
+	    close (fd);
+	    g_free (pstream->temp_filename);
+	    pstream->temp_filename = NULL;
+	    return FALSE;
+	  }
 	}
       break;
     default:
