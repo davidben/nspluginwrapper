@@ -21,18 +21,19 @@
 #ifndef DEBUG_H
 #define DEBUG_H
 
+#include <glib.h>
 #include <stdarg.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-extern void npw_dprintf(const char *format, ...) attribute_hidden;
+extern G_GNUC_PRINTF(1, 2) void npw_dprintf(const char *format, ...) attribute_hidden;
 
 extern void npw_indent(int inc) attribute_hidden;
-extern void npw_idprintf(int inc, const char *format, ...) attribute_hidden;
+extern G_GNUC_PRINTF(2, 3) void npw_idprintf(int inc, const char *format, ...) attribute_hidden;
 
-extern void npw_printf(const char *format, ...) attribute_hidden;
+extern G_GNUC_PRINTF(1, 2) void npw_printf(const char *format, ...) attribute_hidden;
 extern void npw_vprintf(const char *format, va_list args) attribute_hidden;
 
 #if DEBUG

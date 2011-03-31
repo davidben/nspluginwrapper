@@ -21,6 +21,8 @@
 #ifndef UTILS_H
 #define UTILS_H
 
+#include <glib.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -46,7 +48,7 @@ extern const char *string_of_NPNURLVariable(int variable) attribute_hidden;
 // Misc utility functions
 extern void npw_perror(const char *prefix, int error) attribute_hidden;
 extern const char *npw_strerror(int error) attribute_hidden;
-extern char *npw_asprintf(const char *format, ...) attribute_hidden;
+extern G_GNUC_PRINTF(1, 2) char *npw_asprintf(const char *format, ...) attribute_hidden;
 extern void npw_close_all_open_files(void) attribute_hidden;
 
 #ifdef __cplusplus

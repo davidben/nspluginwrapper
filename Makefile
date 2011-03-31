@@ -154,7 +154,10 @@ libxpcom_OBJECTS = $(libxpcom_RAWSRCS:%.c=libxpcom-%.o)
 libxpcom_CFLAGS  = $(PIC_CFLAGS)
 ifeq ($(build_biarch),yes)
 libxpcom_CFLAGS += -I$(LSB_INC_DIR)
+libxpcom_CFLAGS += -I$(LSB_INC_DIR)/glib-2.0
 libxpcom_LDFLAGS = -L$(LSB_OBJ_DIR)
+else
+libxpcom_CFLAGS += $(GLIB_CFLAGS)
 endif
 
 libnoxshm_LIBRARY = libnoxshm.so

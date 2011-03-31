@@ -4662,7 +4662,7 @@ static int handle_NPP_Print(rpc_connection_t *connection)
   // send back the printed data
   if (printer.fp) {
 	long file_size = ftell(printer.fp);
-	D(bug(" writeback data [%d bytes]\n", file_size));
+	D(bug(" writeback data [%ld bytes]\n", file_size));
 	rewind(printer.fp);
 	if (file_size > 0) {
 	  NPPrintData printData;
@@ -5066,7 +5066,7 @@ static int do_main(int argc, char **argv, const char *connection_path)
   D(bug("  Plugin viewer pid: %d\n", getpid()));
 
   thread_check_init();
-  D(bug("  Plugin main thread: %p\n", g_main_thread));
+  D(bug("  Plugin main thread: %p\n", (void*)g_main_thread));
 
   // Cleanup environment, the program may fork/exec a native shell
   // script and having 32-bit libraries in LD_PRELOAD is not right,
