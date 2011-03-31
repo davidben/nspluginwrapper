@@ -500,7 +500,7 @@ fi
 # check for Glib 2.0 compile CFLAGS
 if $pkgconfig --exists glib-2.0; then
     GLIB_CFLAGS=`$pkgconfig --cflags glib-2.0`
-    GLIB_LDFLAGS=`$pkgconfig --libs glib-2.0`
+    GLIB_LIBS=`$pkgconfig --libs glib-2.0`
     GLIB_VERSION=`$pkgconfig --modversion glib-2.0`
 else
     echo "GLIB 2.0 environment not found"
@@ -513,7 +513,7 @@ int main(void) {
     return 0;
 }
 EOF
-if ! $cc $CFLAGS $LDFLAGS $GLIB_CFLAGS $GLIB_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
+if ! $cc $CFLAGS $LDFLAGS $GLIB_CFLAGS $TMPC -o $TMPE $GLIB_LIBS > /dev/null 2>&1; then
     echo "GLIB 2.0 environment not usable"
     rm -f $TMPC
     exit 1
@@ -524,7 +524,7 @@ rm -f $TMPC $TMPE
 if test "$build_viewer" = "yes" -o "$build_player" = "yes"; then
     if $pkgconfig --exists gtk+-2.0; then
 	GTK_CFLAGS=`$pkgconfig --cflags gtk+-2.0`
-	GTK_LDFLAGS=`$pkgconfig --libs gtk+-2.0`
+	GTK_LIBS=`$pkgconfig --libs gtk+-2.0`
 	GTK_VERSION=`$pkgconfig --modversion gtk+-2.0`
     else
 	echo "GTK+ 2.0 environment not found"
@@ -537,7 +537,7 @@ int main(void) {
     return 0;
 }
 EOF
-    if ! $cc $CFLAGS $LDFLAGS $GTK_CFLAGS $GTK_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
+    if ! $cc $CFLAGS $LDFLAGS $GTK_CFLAGS $TMPC -o $TMPE $GTK_LIBS > /dev/null 2>&1; then
 	echo "GTK+ 2.0 environment not usable"
 	rm -f $TMPC
 	exit 1
@@ -549,12 +549,12 @@ fi
 if test "$build_player" = "yes"; then
     if $pkgconfig --exists libcurl; then
 	CURL_CFLAGS=`$pkgconfig --cflags libcurl`
-	CURL_LDFLAGS=`$pkgconfig --libs libcurl`
+	CURL_LIBS=`$pkgconfig --libs libcurl`
     else
 	curlconfig=`which curl-config`
 	if test -n "$curlconfig"; then
 	    CURL_CFLAGS=`$curlconfig --cflags`
-	    CURL_LDFLAGS=`$curlconfig --libs`
+	    CURL_LIBS=`$curlconfig --libs`
 	else
 	    echo "cURL environment not found"
 	    exit 1
@@ -567,7 +567,7 @@ int main(void) {
     return 0;
 }
 EOF
-    if ! $cc $CFLAGS $LDFLAGS $CURL_CFLAGS $CURL_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
+    if ! $cc $CFLAGS $LDFLAGS $CURL_CFLAGS $TMPC -o $TMPE $CURL_LIBS > /dev/null 2>&1; then
 	echo "cURL environment not usable"
 	rm -f $TMPC
 	exit 1
@@ -578,7 +578,7 @@ fi
 # check for X11 compile CFLAGS
 if $pkgconfig --exists x11 xt; then
     X_CFLAGS=`$pkgconfig --cflags x11 xt`
-    X_LDFLAGS=`$pkgconfig --libs x11 xt`
+    X_LIBS=`$pkgconfig --libs x11 xt`
 else
     echo "X11/Xt environment not found"
     exit 1
@@ -590,7 +590,7 @@ int main(void) {
     return 0;
 }
 EOF
-if ! $cc $CFLAGS $LDFLAGS $X_CFLAGS $X_LDFLAGS $TMPC -o $TMPE > /dev/null 2>&1; then
+if ! $cc $CFLAGS $LDFLAGS $X_CFLAGS $TMPC -o $TMPE $X_LIBS > /dev/null 2>&1; then
     echo "X11/Xt environment not usable"
     rm -f $TMPC
     exit 1
@@ -761,13 +761,13 @@ echo "CXX=$cxx" >> $config_mak
 echo "CFLAGS=$CFLAGS" >> $config_mak
 echo "LDFLAGS=$LDFLAGS" >> $config_mak
 echo "GLIB_CFLAGS=$GLIB_CFLAGS" >> $config_mak
-echo "GLIB_LDFLAGS=$GLIB_LDFLAGS" >> $config_mak
+echo "GLIB_LIBS=$GLIB_LIBS" >> $config_mak
 echo "GTK_CFLAGS=$GTK_CFLAGS" >> $config_mak
-echo "GTK_LDFLAGS=$GTK_LDFLAGS" >> $config_mak
+echo "GTK_LIBS=$GTK_LIBS" >> $config_mak
 echo "CURL_CFLAGS=$CURL_CFLAGS" >> $config_mak
-echo "CURL_LDFLAGS=$CURL_LDFLAGS" >> $config_mak
+echo "CURL_LIBS=$CURL_LIBS" >> $config_mak
 echo "X_CFLAGS=$X_CFLAGS" >> $config_mak
-echo "X_LDFLAGS=$X_LDFLAGS" >> $config_mak
+echo "X_LIBS=$X_LIBS" >> $config_mak
 if test "$build_biarch" = "yes"; then
 echo 'LDFLAGS_32=-m32 $(LDFLAGS)' >> $config_mak
 echo "CFLAGS_32=$CFLAGS_32" >> $config_mak
@@ -935,7 +935,7 @@ for func in g_hash_table_remove_all g_hash_table_find; do
 extern void $func(void);
 int main(void) { $func(); return 0; }
 EOF
-    if $cc $TMPC -o $TMPE $GLIB_CFLAGS $GLIB_LDFLAGS > /dev/null 2>&1; then
+    if $cc $CFLAGS $LDFLAGS $TMPC -o $TMPE $GLIB_CFLAGS $GLIB_LIBS > /dev/null 2>&1; then
         func_def=`echo "$func" | tr '[:lower:]./-' '[:upper:]___'`
         echo "#define HAVE_$func_def 1" >> $config_h
     fi
