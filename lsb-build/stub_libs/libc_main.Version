@@ -827,3 +827,6 @@ GLIBC_2.3.3 {
 GLIBC_2.3.4 {
   regexec;
 };
+GLIBC_2.4 {
+  __recv_chk;
+};
