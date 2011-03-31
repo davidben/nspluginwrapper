@@ -44,8 +44,10 @@ static RPCTest           g_test;
 static rpc_connection_t *g_connection;
 static const gchar      *g_connection_path;
 static GMainLoop        *g_main_loop;
+#ifdef BUILD_CLIENT
 static GPid              g_child_pid;
 static guint             g_child_watch_id;
+#endif
 static gint              g_exit_status;
 
 void
@@ -163,13 +165,15 @@ static gchar **
 clone_args (gchar **args)
 {
   gchar **new_args;
-  gint    i, n, rc = 0;
+#ifdef BUILD_CLIENT
+  gint    i, n = 0;
+#endif
 
   if ((new_args = g_strdupv (args)) == NULL)
     g_error ("could not duplicate the program arguments");
-  n = g_strv_length (new_args);
 
 #ifdef BUILD_CLIENT
+  n = g_strv_length (new_args);
   /* first arg was path to server program, skip it */
   RPC_TEST_ENSURE (n >= 2);
   g_free (new_args[1]);
