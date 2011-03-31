@@ -772,6 +772,7 @@ if test "$build_biarch" = "yes"; then
 echo 'LDFLAGS_32=-m32 $(LDFLAGS)' >> $config_mak
 echo "CFLAGS_32=$CFLAGS_32" >> $config_mak
 else
+echo 'LDFLAGS_32=$(LDFLAGS)' >> $config_mak
 echo 'CFLAGS_32=$(CFLAGS)' >> $config_mak
 fi
 if test "$host_os" = "linux"; then

@@ -1,5 +1,6 @@
 #
 #  nspluginwrapper Makefile (C) 2005-2009 Gwenole Beauchesne
+#                           (C) 2011 David Benjamin
 #
 -include config.mak
 
@@ -94,6 +95,23 @@ ifeq (ppc,$(TARGET_ARCH))
 TARGET_ELF_ARCH = elf32-powerpc
 endif
 
+ifeq ($(build_biarch), yes)
+CFLAGS_32     += -I$(LSB_INC_DIR)
+LDFLAGS_32    += -L$(LSB_OBJ_DIR)
+GLIB_CFLAGS_32 = -I$(LSB_INC_DIR)/glib-2.0
+GLIB_LIBS_32   = -lgobject-2.0 -lgthread-2.0 -lglib-2.0
+GTK_CFLAGS_32  = -I$(LSB_INC_DIR)/gtk-2.0
+GTK_LIBS_32    = -lgtk-x11-2.0 -lgdk-x11-2.0
+X_LIBS_32      = -lX11 -lXt
+else
+GLIB_CFLAGS_32 = $(GLIB_CFLAGS)
+GLIB_LIBS_32   = $(GLIB_LIBS)
+GTK_CFLAGS_32  = $(GTK_CFLAGS)
+GTK_LIBS_32    = $(GTK_LIBS)
+X_CFLAGS_32    = $(X_CFLAGS)
+X_LIBS_32      = $(X_LIBS)
+endif
+
 MOZILLA_CFLAGS = -I$(SRC_PATH)/npapi
 
 npwrapper_LIBRARY = npwrapper.so
@@ -101,30 +119,25 @@ npwrapper_RAWSRCS = npw-wrapper.c npw-common.c npw-malloc.c npw-rpc.c rpc.c debu
 npwrapper_SOURCES = $(npwrapper_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 npwrapper_OBJECTS = $(npwrapper_RAWSRCS:%.c=npwrapper-%.os)
 npwrapper_CFLAGS  = $(CFLAGS) $(X_CFLAGS) $(MOZILLA_CFLAGS) $(GLIB_CFLAGS)
-npwrapper_LDFLAGS = $(libpthread_LDFLAGS)
+npwrapper_LDFLAGS = $(LDFLAGS) $(libpthread_LDFLAGS)
 npwrapper_LIBS    = $(X_LIBS) $(libpthread_LIBS) $(libsocket_LIBS)
 npwrapper_LIBS   += $(GLIB_LIBS)
 
-npviewer_PROGRAM = npviewer.bin
-npviewer_RAWSRCS = npw-viewer.c npw-common.c npw-malloc.c npw-rpc.c rpc.c debug.c utils.c npruntime.c
-npviewer_SOURCES = $(npviewer_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
-npviewer_OBJECTS = $(npviewer_RAWSRCS:%.c=npviewer-%.o)
-ifeq ($(build_biarch),yes)
-npviewer_CFLAGS  = $(CFLAGS_32)
-npviewer_CFLAGS += -I$(LSB_INC_DIR)
-npviewer_CFLAGS += -I$(LSB_INC_DIR)/glib-2.0
-npviewer_CFLAGS += -I$(LSB_INC_DIR)/gtk-2.0
-npviewer_LDFLAGS = -L$(LSB_OBJ_DIR)
-npviewer_LIBS    = -lgtk-x11-2.0 -lgdk-x11-2.0 -lgobject-2.0 -ldl -lglib-2.0 -lX11 -lXt
-else
-npviewer_CFLAGS += $(GTK_CFLAGS)
-npviewer_LIBS    = $(GTK_LIBS) $(X_LIBS)
-endif
+npviewer_PROGRAM  = npviewer.bin
+npviewer_RAWSRCS  = npw-viewer.c npw-common.c npw-malloc.c npw-rpc.c rpc.c debug.c utils.c npruntime.c
+npviewer_SOURCES  = $(npviewer_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
+npviewer_OBJECTS  = $(npviewer_RAWSRCS:%.c=npviewer-%.o)
+npviewer_CFLAGS   = $(CFLAGS_32)
+npviewer_CFLAGS  += $(GTK_CFLAGS_32)
+npviewer_CFLAGS  += $(GLIB_CFLAGS_32)
+npviewer_CFLAGS  += $(X_CFLAGS_32)
 npviewer_CFLAGS  += $(MOZILLA_CFLAGS)
+npviewer_LDFLAGS  = $(LDFLAGS_32)
 npviewer_LDFLAGS += $(libpthread_LDFLAGS)
-npviewer_LIBS    += $(libdl_LIBS) $(libpthread_LIBS) -lgthread-2.0
+npviewer_LIBS     = $(GTK_LIBS_32) $(GLIB_LIBS_32) $(X_LIBS_32)
+npviewer_LIBS    += $(libdl_LIBS) $(libpthread_LIBS)
 ifeq ($(TARGET_OS):$(TARGET_ARCH),linux:i386)
-npviewer_MAPFILE = $(SRC_PATH)/src/npw-viewer.map
+npviewer_MAPFILE  = $(SRC_PATH)/src/npw-viewer.map
 endif
 ifneq ($(npviewer_MAPFILE),)
 npviewer_LDFLAGS += -Wl,--export-dynamic
@@ -142,26 +155,27 @@ endif
 npplayer_PROGRAM  = npplayer
 npplayer_SOURCES  = npw-player.c debug.c rpc.c utils.c glibcurl.c gtk2xtbin.c $(tidy_SOURCES)
 npplayer_OBJECTS  = $(npplayer_SOURCES:%.c=npplayer-%.o)
-npplayer_CFLAGS   = $(GTK_CFLAGS) $(MOZILLA_CFLAGS) $(CURL_CFLAGS) $(X_CFLAGS)
-npplayer_LDFLAGS  = $(libpthread_LDFLAGS)
-npplayer_LIBS     = $(GTK_LIBS) $(CURL_LIBS) $(X_LIBS)
-npplayer_LIBS    += -lgthread-2.0 $(libpthread_LIBS) $(libsocket_LIBS)
+npplayer_CFLAGS   = $(CFLAGS)
+npplayer_CFLAGS  += $(GTK_CFLAGS) $(GLIB_CFLAGS) $(MOZILLA_CFLAGS) $(CURL_CFLAGS) $(X_CFLAGS)
+npplayer_LDFLAGS  = $(LDFLAGS)
+npplayer_LDFLAGS += $(libpthread_LDFLAGS)
+npplayer_LIBS     = $(GTK_LIBS) $(GLIB_LIBS) $(CURL_LIBS) $(X_LIBS)
+npplayer_LIBS    += $(libpthread_LIBS) $(libsocket_LIBS)
 
 libnoxshm_LIBRARY = libnoxshm.so
 libnoxshm_RAWSRCS = libnoxshm.c
 libnoxshm_SOURCES = $(libnoxshm_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 libnoxshm_OBJECTS = $(libnoxshm_RAWSRCS:%.c=libnoxshm-%.o)
-libnoxshm_CFLAGS  = $(PIC_CFLAGS)
-ifeq ($(build_biarch),yes)
-libnoxshm_CFLAGS += -I$(LSB_INC_DIR)
-libnoxshm_LDFLAGS = -L$(LSB_OBJ_DIR)
-endif
+libnoxshm_CFLAGS  = $(CFLAGS_32) $(PIC_CFLAGS)
+libnoxshm_LDFLAGS = $(LDFLAGS_32)
 
 npconfig_PROGRAM = npconfig
 npconfig_RAWSRCS = npw-config.c
 npconfig_SOURCES = $(npconfig_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 npconfig_OBJECTS = $(npconfig_RAWSRCS:%.c=npconfig-%.o)
+npconfig_CFLAGS  = $(CFLAGS)
 npconfig_LIBS    = $(libdl_LIBS)
+npconfig_LDFLAGS = $(LDFLAGS)
 ifneq (,$(findstring $(OS),netbsd dragonfly))
 # We will try to dlopen() the native plugin library. If that lib is
 # linked against libpthread, then so must our program too.
@@ -179,8 +193,8 @@ test_rpc_client_OBJECTS	 = $(test_rpc_RAWSRCS:%.c=%-client.o)
 test_rpc_server_OBJECTS	 = $(test_rpc_RAWSRCS:%.c=%-server.o)
 test_rpc_client_CPPFLAGS = $(CPPFLAGS) -I$(SRC_PATH)/src -DBUILD_CLIENT -DNPW_COMPONENT_NAME="\"Client\""
 test_rpc_server_CPPFLAGS = $(CPPFLAGS) -I$(SRC_PATH)/src -DBUILD_SERVER -DNPW_COMPONENT_NAME="\"Server\""
-test_rpc_CFLAGS			 = -I$(SRC_PATH)/src $(GLIB_CFLAGS)
-test_rpc_LDFLAGS		 = $(libpthread_LDFLAGS)
+test_rpc_CFLAGS			 = $(CFLAGS) -I$(SRC_PATH)/src $(GLIB_CFLAGS)
+test_rpc_LDFLAGS		 = $(LDFLAGS) $(libpthread_LDFLAGS)
 test_rpc_LIBS			 = $(GLIB_LIBS) $(libpthread_LIBS) $(libsocket_LIBS)
 test_rpc_RAWPROGS		 = \
 	test-rpc-types \
@@ -351,39 +365,39 @@ changelog.commit: changelog
 	svn commit -m "Generated by svn2cl." ChangeLog
 
 $(npwrapper_LIBRARY): $(npwrapper_OBJECTS)
-	$(CC) $(LDFLAGS) $(DSO_LDFLAGS) $(npwrapper_LDFLAGS) -o $@ $(npwrapper_OBJECTS) $(npwrapper_LIBS)
+	$(CC) $(DSO_LDFLAGS) $(npwrapper_LDFLAGS) -o $@ $(npwrapper_OBJECTS) $(npwrapper_LIBS)
 
 npwrapper-%.os: $(SRC_PATH)/src/%.c
 	$(CC) -o $@ -c $< $(PIC_CFLAGS) $(CPPFLAGS) $(npwrapper_CFLAGS) -DBUILD_WRAPPER
 
 $(npviewer_PROGRAM): $(npviewer_OBJECTS) $(npviewer_MAPFILE) $(LSB_OBJ_DIR) $(LSB_LIBS)
-	$(CC) $(LDFLAGS_32) $(npviewer_LDFLAGS) -o $@ $(npviewer_OBJECTS) $(npviewer_LIBS)
+	$(CC) $(npviewer_LDFLAGS) -o $@ $(npviewer_OBJECTS) $(npviewer_LIBS)
 
 npviewer-%.o: $(SRC_PATH)/src/%.c
-	$(CC) $(CFLAGS_32) -o $@ -c $< $(CPPFLAGS) $(npviewer_CFLAGS) -DBUILD_VIEWER
+	$(CC) -o $@ -c $< $(CPPFLAGS) $(npviewer_CFLAGS) -DBUILD_VIEWER
 
 npviewer-%.o: $(SRC_PATH)/src/%.cpp
-	$(CXX) $(CFLAGS_32) -o $@ -c $< $(CPPFLAGS) $(npviewer_CFLAGS) -DBUILD_VIEWER
+	$(CXX) -o $@ -c $< $(CPPFLAGS) $(npviewer_CFLAGS) -DBUILD_VIEWER
 
 $(npplayer_PROGRAM): $(npplayer_OBJECTS) $(npplayer_MAPFILE) $(LSB_OBJ_DIR) $(LSB_LIBS)
-	$(CC) $(LDFLAGS) $(npplayer_LDFLAGS) -o $@ $(npplayer_OBJECTS) $(npplayer_LIBS)
+	$(CC) $(npplayer_LDFLAGS) -o $@ $(npplayer_OBJECTS) $(npplayer_LIBS)
 
 npplayer-%.o: $(SRC_PATH)/src/%.c
-	$(CC) $(CFLAGS) -o $@ -c $< $(CPPFLAGS) $(npplayer_CFLAGS) -DBUILD_PLAYER
+	$(CC) -o $@ -c $< $(CPPFLAGS) $(npplayer_CFLAGS) -DBUILD_PLAYER
 npplayer-%.o: $(SRC_PATH)/src/tidy/%.c
-	$(CC) $(CFLAGS) -o $@ -c $< $(CPPFLAGS) $(npplayer_CFLAGS) -DBUILD_PLAYER
+	$(CC) -o $@ -c $< $(CPPFLAGS) $(npplayer_CFLAGS) -DBUILD_PLAYER
 
 $(libnoxshm_LIBRARY): $(libnoxshm_OBJECTS) $(LSB_OBJ_DIR) $(LSB_LIBS)
-	$(CC) $(LDFLAGS_32) $(DSO_LDFLAGS) $(libnoxshm_LDFLAGS) -o $@ $(libnoxshm_OBJECTS) -Wl,$(LD_soname),libnoxshm.so
+	$(CC) $(DSO_LDFLAGS) $(libnoxshm_LDFLAGS) -o $@ $(libnoxshm_OBJECTS) -Wl,$(LD_soname),libnoxshm.so
 
 libnoxshm-%.o: $(SRC_PATH)/src/%.c
-	$(CC) $(CFLAGS_32) -o $@ -c $< $(CPPFLAGS) $(libnoxshm_CFLAGS)
+	$(CC) -o $@ -c $< $(CPPFLAGS) $(libnoxshm_CFLAGS)
 
 $(npconfig_PROGRAM): $(npconfig_OBJECTS)
-	$(CC) $(LDFLAGS) $(npconfig_LDFLAGS) -o $@ $(npconfig_OBJECTS) $(npconfig_LIBS)
+	$(CC) $(npconfig_LDFLAGS) -o $@ $(npconfig_OBJECTS) $(npconfig_LIBS)
 
 npconfig-%.o: $(SRC_PATH)/src/%.c
-	$(CC) -o $@ -c $< $(CPPFLAGS) $(CFLAGS)
+	$(CC) $(npconfig_CFLAGS) -o $@ -c $< $(CPPFLAGS)
 
 $(nploader_PROGRAM): $(nploader_SOURCES)
 	sed -e 's|%NPW_VIEWER_DIR%|$(nptargetdir_var)|' $< > $@
@@ -411,13 +425,13 @@ $(LSB_OBJ_DIR)/%.so: $(LSB_OBJ_DIR)/%.o
 		-Wl,-soname,`grep "$(patsubst $(LSB_OBJ_DIR)/%.o,%,$<) " $(LSB_SRC_DIR)/LibNameMap.txt | cut -f2 -d' '`
 
 test-rpc-%-client: test-rpc-%-client.o $(test_rpc_client_OBJECTS)
-	$(CC) $(LDFLAGS) $(test_rpc_LDFLAGS) -o $@ $< $(test_rpc_client_OBJECTS) $(test_rpc_LIBS)
+	$(CC) $(test_rpc_LDFLAGS) -o $@ $< $(test_rpc_client_OBJECTS) $(test_rpc_LIBS)
 test-rpc-%-client.o: $(SRC_PATH)/tests/test-rpc-%.c
 	$(CC) -o $@ -c $< $(test_rpc_client_CPPFLAGS) $(test_rpc_CFLAGS)
 %-client.o: $(SRC_PATH)/src/%.c
 	$(CC) -o $@ -c $< $(test_rpc_client_CPPFLAGS) $(test_rpc_CFLAGS)
 test-rpc-%-server: test-rpc-%-server.o $(test_rpc_server_OBJECTS)
-	$(CC) $(LDFLAGS) $(test_rpc_LDFLAGS) -o $@ $< $(test_rpc_server_OBJECTS) $(test_rpc_LIBS)
+	$(CC) $(test_rpc_LDFLAGS) -o $@ $< $(test_rpc_server_OBJECTS) $(test_rpc_LIBS)
 test-rpc-%-server.o: $(SRC_PATH)/tests/test-rpc-%.c
 	$(CC) -o $@ -c $< $(test_rpc_server_CPPFLAGS) $(test_rpc_CFLAGS)
 %-server.o: $(SRC_PATH)/src/%.c
