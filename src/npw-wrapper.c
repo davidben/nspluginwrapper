@@ -3701,10 +3701,6 @@ static void plugin_init(int is_NP_Initialize)
 
   static int init_count = 0;
   ++init_count;
-  char *connection_path =
-	g_strdup_printf("%s/%s/%d-%d",
-					NPW_CONNECTION_PATH, plugin_file_name,
-					getpid(), init_count);
 
   // Cache MIME info and plugin name/description
   if (g_plugin.name == NULL &&
@@ -3714,10 +3710,8 @@ static void plugin_init(int is_NP_Initialize)
 									plugin_viewer_path, plugin_path);
 	FILE *viewer_fp = popen(command, "r");
 	g_free(command);
-	if (viewer_fp == NULL) {
-	  g_free(connection_path);
+	if (viewer_fp == NULL)
 	  return;
-	}
 	char line[256];
 	while (fgets(line, sizeof(line), viewer_fp)) {
 	  // Read line
@@ -3756,10 +3750,13 @@ static void plugin_init(int is_NP_Initialize)
 	g_plugin.initialized = 1;
   }
 
-  if (!is_NP_Initialize) {
-	g_free(connection_path);
+  if (!is_NP_Initialize)
 	return;
-  }
+
+  char *connection_path =
+	g_strdup_printf("%s/%s/%d-%d/%ld",
+					NPW_CONNECTION_PATH, plugin_file_name,
+					getpid(), init_count, random());
 
   // Start plug-in viewer
   if ((g_plugin.viewer_pid = fork()) == 0) {
