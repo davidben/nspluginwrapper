@@ -32,10 +32,19 @@
 
 
 // Define to enable NPClass::HasMethod cache
-#define USE_NPCLASS_HAS_METHOD_CACHE 1
+#define USE_NPCLASS_HAS_METHOD_CACHE 0
 
 // Define to enable NPClass::HasProperty cache (derived from ::HasMethod cache)
-#define USE_NPCLASS_HAS_PROPERTY_CACHE 1
+#define USE_NPCLASS_HAS_PROPERTY_CACHE 0
+
+/* XXX: We disable both of these caches as a Javascript object's
+ * properties may change. This, in particular, caused the video in
+ * this (unrelated) bug report to display at the wrong size. The
+ * wrapper queries a setSize method on the same object twice, but only
+ * the second time does the method exist.
+ *
+ * http://code.google.com/p/chromium/issues/detail?id=29907
+ */
 
 // Defined in npw-{wrapper,viewer}.c
 extern rpc_connection_t *g_rpc_connection attribute_hidden;
