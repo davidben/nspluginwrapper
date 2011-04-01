@@ -3166,7 +3166,7 @@ g_NPN_IdentifierIsString(NPIdentifier identifier)
   }
   
   D(bugiI("NPN_IdentifierIsString identifier=%p\n", identifier));
-  bool ret = invoke_NPN_IdentifierIsString(identifier);
+  bool ret = cached_NPN_IdentifierIsString(identifier);
   D(bugiD("NPN_IdentifierIsString return: %d\n", ret));
   return ret;
 }
