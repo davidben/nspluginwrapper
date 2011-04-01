@@ -59,9 +59,7 @@ typedef struct __attribute__((packed)) {
   char viewer_path[PATH_MAX];
 } NPW_PluginInfo;
 
-#if defined(BUILD_XPCOM)
-#define NPW_COMPONENT_NAME "XPCOM  "
-#elif defined(BUILD_WRAPPER)
+#if defined(BUILD_WRAPPER)
 #define NPW_COMPONENT_NAME "Wrapper"
 #elif defined(BUILD_VIEWER)
 #define NPW_COMPONENT_NAME "Viewer "
