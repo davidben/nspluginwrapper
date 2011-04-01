@@ -3701,17 +3701,23 @@ static void plugin_init(int is_NP_Initialize)
 
   static int init_count = 0;
   ++init_count;
-  char connection_path[128];
-  sprintf(connection_path, "%s/%s/%d-%d", NPW_CONNECTION_PATH, plugin_file_name, getpid(), init_count);
+  char *connection_path =
+	g_strdup_printf("%s/%s/%d-%d",
+					NPW_CONNECTION_PATH, plugin_file_name,
+					getpid(), init_count);
 
   // Cache MIME info and plugin name/description
-  if (g_plugin.name == NULL && g_plugin.description == NULL && g_plugin.formats == NULL) {
-	char command[1024];
-	if (snprintf(command, sizeof(command), "%s --info --plugin %s", plugin_viewer_path, plugin_path) >= sizeof(command))
-	  return;
+  if (g_plugin.name == NULL &&
+	  g_plugin.description == NULL &&
+	  g_plugin.formats == NULL) {
+	char *command = g_strdup_printf("%s --info --plugin %s",
+									plugin_viewer_path, plugin_path);
 	FILE *viewer_fp = popen(command, "r");
-	if (viewer_fp == NULL)
+	g_free(command);
+	if (viewer_fp == NULL) {
+	  g_free(connection_path);
 	  return;
+	}
 	char line[256];
 	while (fgets(line, sizeof(line), viewer_fp)) {
 	  // Read line
@@ -3750,8 +3756,10 @@ static void plugin_init(int is_NP_Initialize)
 	g_plugin.initialized = 1;
   }
 
-  if (!is_NP_Initialize)
+  if (!is_NP_Initialize) {
+	g_free(connection_path);
 	return;
+  }
 
   // Start plug-in viewer
   if ((g_plugin.viewer_pid = fork()) == 0) {
@@ -3775,8 +3783,10 @@ static void plugin_init(int is_NP_Initialize)
   // Initialize browser-side RPC communication channel
   if ((g_rpc_connection = rpc_init_client(connection_path)) == NULL) {
 	npw_printf("ERROR: failed to initialize plugin-side RPC client connection\n");
+	g_free(connection_path);
 	return;
   }
+  g_free(connection_path);
   if (rpc_add_np_marshalers(g_rpc_connection) < 0) {
 	npw_printf("ERROR: failed to initialize browser-side marshalers\n");
 	return;
