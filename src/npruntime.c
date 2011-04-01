@@ -31,21 +31,6 @@
 #include "debug.h"
 
 
-// Define to enable NPClass::HasMethod cache
-#define USE_NPCLASS_HAS_METHOD_CACHE 0
-
-// Define to enable NPClass::HasProperty cache (derived from ::HasMethod cache)
-#define USE_NPCLASS_HAS_PROPERTY_CACHE 0
-
-/* XXX: We disable both of these caches as a Javascript object's
- * properties may change. This, in particular, caused the video in
- * this (unrelated) bug report to display at the wrong size. The
- * wrapper queries a setSize method on the same object twice, but only
- * the second time does the method exist.
- *
- * http://code.google.com/p/chromium/issues/detail?id=29907
- */
-
 // Defined in npw-{wrapper,viewer}.c
 extern rpc_connection_t *g_rpc_connection attribute_hidden;
 
@@ -73,21 +58,6 @@ bool npruntime_use_cache(void)
   if (G_UNLIKELY(use_cache < 0))
 	use_cache = get_use_npruntime_cache_env();
   return use_cache;
-}
-
-static inline bool use_npclass_has_method_cache(void)
-{
-#if USE_NPCLASS_HAS_METHOD_CACHE
-  return npruntime_use_cache();
-#else
-  return false;
-#endif
-}
-
-static inline bool use_npclass_has_property_cache(void)
-{
-  /* this depends on the NPClass::HasMethod cache */
-  return use_npclass_has_method_cache();
 }
 
 
@@ -250,22 +220,6 @@ static bool npclass_invoke_HasMethod(NPObject *npobj, NPIdentifier name)
   return ret;
 }
 
-static bool npclass_cached_HasMethod(NPObject *npobj, NPIdentifier name)
-{
-  NPObjectInfo *npobj_info = npobject_info_lookup(npobj);
-  if (use_npclass_has_method_cache() && npobj_info) {
-	if (G_UNLIKELY(npobj_info->hasMethod_cache == NULL))
-	  npobj_info->hasMethod_cache = g_hash_table_new(NULL, NULL);
-	gpointer hasMethod = NULL;
-	if (g_hash_table_lookup_extended(npobj_info->hasMethod_cache, name, NULL, &hasMethod))
-	  return GPOINTER_TO_UINT(hasMethod);
-  }
-  bool hasMethod = npclass_invoke_HasMethod(npobj, name);
-  if (use_npclass_has_method_cache() && npobj_info)
-	g_hash_table_insert(npobj_info->hasMethod_cache, name, GUINT_TO_POINTER(hasMethod));
-  return hasMethod;
-}
-
 bool g_NPClass_HasMethod(NPObject *npobj, NPIdentifier name)
 {
   if (!is_valid_npobject_class(npobj))
@@ -277,7 +231,7 @@ bool g_NPClass_HasMethod(NPObject *npobj, NPIdentifier name)
   }
 
   D(bugiI("NPClass::HasMethod(npobj %p, name id %p)\n", npobj, name));
-  bool ret = npclass_cached_HasMethod(npobj, name);
+  bool ret = npclass_invoke_HasMethod(npobj, name);
   D(bugiD("NPClass::HasMethod return: %d\n", ret));
   return ret;
 }
@@ -538,17 +492,6 @@ static bool npclass_invoke_HasProperty(NPObject *npobj, NPIdentifier name)
   return ret;
 }
 
-static bool npclass_cached_HasProperty(NPObject *npobj, NPIdentifier name)
-{
-  NPObjectInfo *npobj_info = npobject_info_lookup(npobj);
-  if (use_npclass_has_property_cache() && npobj_info && npobj_info->hasMethod_cache) {
-	/* If the NPIdentifier references a method, it can't be a property */
-	if (g_hash_table_lookup_extended(npobj_info->hasMethod_cache, name, NULL, NULL))
-	  return false;
-  }
-  return npclass_invoke_HasProperty(npobj, name);
-}
-
 bool g_NPClass_HasProperty(NPObject *npobj, NPIdentifier name)
 {
   if (!is_valid_npobject_class(npobj))
@@ -560,7 +503,7 @@ bool g_NPClass_HasProperty(NPObject *npobj, NPIdentifier name)
   }
 
   D(bugiI("NPClass::HasProperty(npobj %p, name id %p)\n", npobj, name));
-  bool ret = npclass_cached_HasProperty(npobj, name);
+  bool ret = npclass_invoke_HasProperty(npobj, name);
   D(bugiD("NPClass::HasProperty return: %d\n", ret));
   return ret;
 }
@@ -1007,7 +950,6 @@ NPObjectInfo *npobject_info_new(NPObject *npobj)
 	npobj_info->npobj_id = ++id;
 	npobj_info->is_valid = true;
 	npobj_info->plugin = NULL;
-	npobj_info->hasMethod_cache = NULL;
   }
   return npobj_info;
 }
@@ -1018,11 +960,6 @@ void npobject_info_destroy(NPObjectInfo *npobj_info)
 	return;
 
   npw_plugin_instance_unref(npobj_info->plugin);
-
-  if (npobj_info->hasMethod_cache) {
-	g_hash_table_destroy(npobj_info->hasMethod_cache);
-	npobj_info->hasMethod_cache = NULL;
-  }
 
   NPW_MemFree(npobj_info);
 }

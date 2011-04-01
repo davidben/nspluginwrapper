@@ -27,7 +27,6 @@ typedef struct {
   uint32_t npobj_id;
   bool is_valid;
   void *plugin;
-  void *hasMethod_cache;
 } NPObjectInfo;
 
 extern NPObjectInfo *npobject_info_new(NPObject *npobj) attribute_hidden;
