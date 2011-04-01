@@ -3555,7 +3555,7 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
 
   // override function table with an additional thunking layer for
   // possibly broken 64-bit Konqueror versions (NPAPI 0.11)
-  if (is_konqueror() && sizeof(void *) == 8 && ! NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING)) {
+  if (sizeof(void *) == 8 && ! NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING) && is_konqueror()) {
     D(bug("Installing Konqueror workarounds\n"));
     // We're doing sketchy pointer casts, so just cast the function pointers to
     // make the compiler be quiet. We're doing this intentionally.
