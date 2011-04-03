@@ -1861,9 +1861,8 @@ g_NPN_PluginThreadAsyncCall(NPP instance,
 							void (*func)(void *),
 							void *userData)
 {
-  D(bugiI("NPP_PluginThreadAsyncCall instance=%p\n", instance));
+  // No debug statements as the debug system is not thread-safe.
   mozilla_funcs.pluginthreadasynccall(instance, func, userData);
-  D(bugiD("NPP_PluginThreadAsyncCall done\n"));
 }
 
 // NPN_GetValueForURL

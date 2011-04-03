@@ -3335,14 +3335,13 @@ g_NPN_PluginThreadAsyncCall(NPP instance,
   if (plugin == NULL)
 	return;
 
-  D(bugiI("NPP_PluginThreadAsyncCall instance=%p\n", instance));
+  // No debug statements as the debug system is not thread-safe.
   AsyncCall *asyncCall = malloc(sizeof(AsyncCall));
   asyncCall->plugin = npw_plugin_instance_ref(plugin);
   asyncCall->func = func;
   asyncCall->userData = userData;
   g_idle_add_full(G_PRIORITY_DEFAULT_IDLE,
 				  async_call_run, asyncCall, (GDestroyNotify) async_call_free);
-  D(bugiD("NPP_PluginThreadAsyncCall done\n"));
 }
 
 // Queries information about a URL
