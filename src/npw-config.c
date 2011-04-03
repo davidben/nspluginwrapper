@@ -1072,6 +1072,10 @@ static int update_plugin(const char *plugin_path)
 	  printf("  nspluginwrapper ident mismatch, reinstalling plugin\n");
 	ret = install_plugin(plugin_info.path, &plugin_info);
   }
+  else {
+	if (g_verbose)
+	  printf("  wrapper ident matches and NPAPI plugin is unmodified, skipping\n");
+  }
 
   return ret;
 }
