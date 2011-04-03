@@ -24,7 +24,6 @@
     => Rearrange RPC message type descriptors
 - NPRuntime:
   * Fix memory leaks (NPIdentifier strings, NPVariant from RPC)
-  * Complete support for 0.19 API. Missing: NPN_Enumerate(), NPN_Construct()
 - Viewer:
   * Allow run-time (de)activation of windowless plugins
   * Allow run-time (de)activation of XEMBED
