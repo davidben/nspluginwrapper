@@ -21,6 +21,7 @@
 #include "sysdeps.h"
 
 #include <errno.h>
+#include <dlfcn.h>
 #include <unistd.h>
 #include <glib.h>
 #include <glib/gstdio.h>
@@ -97,12 +98,11 @@ struct _Plugin
   gchar                   *path;
   gchar                   *src;
   gchar                   *mime_type;
-  GModule                 *module;
+  void                    *module;
   GList                   *data_types;
   GtkWidget               *window;
   gboolean                 use_xembed;
 
-  rpc_connection_t *      (*get_master_connection)(void);
   NPP                       instance;
   NPWindow                  np_window;
   NP_InitializeFunc         NP_Initialize;
@@ -1801,24 +1801,20 @@ plugin_new (const gchar *path)
     return NULL;
   plugin->path = g_strdup (path);
 
-  if ((plugin->module = g_module_open (path, G_MODULE_BIND_LOCAL)) == NULL)
+  if ((plugin->module = dlopen (path, RTLD_LAZY|RTLD_LOCAL)) == NULL)
     goto error;
 
-  gpointer symbol;
-  if (!g_module_symbol (plugin->module, "NP_Initialize", &symbol))
+  if (!(plugin->NP_Initialize = dlsym (plugin->module, "NP_Initialize")))
     goto error;
-  plugin->NP_Initialize = (NP_InitializeFunc)symbol;
-  if (!g_module_symbol (plugin->module, "NP_Shutdown", &symbol))
+  if (!(plugin->NP_Shutdown = dlsym (plugin->module, "NP_Shutdown")))
     goto error;
-  plugin->NP_Shutdown = (NP_ShutdownFunc)symbol;
-  if (!g_module_symbol (plugin->module, "NP_GetMIMEDescription", &symbol))
+  if (!(plugin->NP_GetMIMEDescription =
+	dlsym (plugin->module, "NP_GetMIMEDescription")))
     goto error;
-  plugin->NP_GetMIMEDescription = (NP_GetMIMEDescriptionFunc)symbol;
-  if (g_module_symbol (plugin->module, "NP_GetValue", &symbol))
-    plugin->NP_GetValue = (NP_GetValueFunc)symbol;
-  if (g_module_symbol (plugin->module, "npw_master_connection", &symbol))
-    plugin->get_master_connection = (rpc_connection_t *(*)(void))symbol;
-  goto do_return;
+  if (!(plugin->NP_GetValue = dlsym (plugin->module, "NP_GetValue")))
+    goto error;
+
+  return plugin;
 
  error:
   if (plugin)
@@ -1826,9 +1822,7 @@ plugin_new (const gchar *path)
       g_free (plugin);
       plugin = NULL;
     }
-
-do_return:
-  return plugin;
+  return NULL;
 }
 
 static void
@@ -1850,7 +1844,7 @@ plugin_destroy (Plugin *plugin)
        *
        * http://bugreports.qt.nokia.com/browse/QTBUG-10861 */
 
-      /* g_module_close (plugin->module); */
+      /* dlclose (plugin->module); */
       plugin->module = NULL;
     }
 
@@ -2030,21 +2024,20 @@ get_plugin_dirs (void)
 static gboolean
 is_npapi_plugin (const gchar *path)
 {
-  GModule *module = g_module_open (path, G_MODULE_BIND_LOCAL);
+  void *module = dlopen (path, RTLD_LAZY|RTLD_LOCAL);
   if (module == NULL)
     {
       if (g_verbose)
-	npw_printf ("WARNING: %s\n", g_module_error ());
+	npw_printf ("WARNING: %s\n", dlerror ());
       return FALSE;
     }
 
-  gpointer symbol;
   gboolean is_valid = TRUE;
-  if (!g_module_symbol (module, "NP_Initialize", &symbol))
+  if (dlsym (module, "NP_Initialize") == NULL)
     is_valid = FALSE;
-  if (!g_module_symbol (module, "NP_Shutdown", &symbol))
+  if (dlsym (module, "NP_Shutdown") == NULL)
     is_valid = FALSE;
-  if (!g_module_symbol (module, "NP_GetMIMEDescription", &symbol))
+  if (dlsym (module, "NP_GetMIMEDescription") == NULL)
     is_valid = FALSE;
 
   /* Intentionally avoid unloading the module. This causes crashes as
@@ -2057,7 +2050,7 @@ is_npapi_plugin (const gchar *path)
    *
    * http://bugreports.qt.nokia.com/browse/QTBUG-10861 */
 
-  /* g_module_close (module); */
+  /* dlclose (module); */
   return is_valid;
 }
 
