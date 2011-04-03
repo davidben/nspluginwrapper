@@ -1839,7 +1839,18 @@ plugin_destroy (Plugin *plugin)
 
   if (plugin->module)
     {
-      g_module_close (plugin->module);
+      /* Intentionally avoid unloading the module. This causes crashes
+       * as some libraries break when you unload them. In particular,
+       * Qt has a bug where it will blow away pthread_key_t 0 on
+       * unload. (In this process, this corresponds to glib's internal
+       * thread data. Everything in glib breaks when this happens)
+       * Sadly, Kopete installs this utterly pointless
+       * "skypebuttons.so" plugin that pulls in Qt while doing almost
+       * nothing else.
+       *
+       * http://bugreports.qt.nokia.com/browse/QTBUG-10861 */
+
+      /* g_module_close (plugin->module); */
       plugin->module = NULL;
     }
 
@@ -2036,7 +2047,17 @@ is_npapi_plugin (const gchar *path)
   if (!g_module_symbol (module, "NP_GetMIMEDescription", &symbol))
     is_valid = FALSE;
 
-  g_module_close (module);
+  /* Intentionally avoid unloading the module. This causes crashes as
+   * some libraries break when you unload them. In particular, Qt has
+   * a bug where it will blow away pthread_key_t 0 on unload. (In this
+   * process, this corresponds to glib's internal thread
+   * data. Everything in glib breaks when this happens) Sadly, Kopete
+   * installs this utterly pointless "skypebuttons.so" plugin that
+   * pulls in Qt while doing almost nothing else.
+   *
+   * http://bugreports.qt.nokia.com/browse/QTBUG-10861 */
+
+  /* g_module_close (module); */
   return is_valid;
 }
 
