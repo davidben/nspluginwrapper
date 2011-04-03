@@ -475,24 +475,47 @@ static int handle_NPN_GetValue(rpc_connection_t *connection)
 	return error;
   }
 
+  // Work around a Chromium sort-of bug and check for NULL NPPs. It is
+  // only sort of a bug in that we are doing something our plugin had
+  // never requested. Unfortunately, the existing RPC system makes
+  // detecting this very difficult. So, hack in the checks Chromium
+  // was missing.
+  //
+  // TODO: Either fix bug #13 or remove this when the fix in Chromium
+  // has trickled down to the stable channel.
+  bool valid_instance = true;
+  if (PLUGIN_INSTANCE_NPP(plugin) == NULL) {
+	switch (variable) {
+	case NPNVWindowNPObject:
+	case NPNVPluginElementNPObject:
+	case NPNVprivateModeBool:
+	case NPNVnetscapeWindow:
+	  D(bug("Skipping NPN_GetValue on NULL instance to avoid possible crash.\n"));
+	  valid_instance = false;
+	}
+  }
+
   NPError ret = NPERR_GENERIC_ERROR;
   switch (rpc_type_of_NPNVariable(variable)) {
   case RPC_TYPE_UINT32:
 	{
 	  uint32_t n = 0;
-	  ret = g_NPN_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&n);
+	  if (valid_instance)
+		ret = g_NPN_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&n);
 	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_UINT32, n, RPC_TYPE_INVALID);
 	}
   case RPC_TYPE_BOOLEAN:
 	{
 	  NPBool b = FALSE;
-	  ret = g_NPN_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&b);
+	  if (valid_instance)
+		ret = g_NPN_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&b);
 	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_BOOLEAN, b, RPC_TYPE_INVALID);
 	}
   case RPC_TYPE_NP_OBJECT:
 	{
 	  NPObject *npobj = NULL;
-	  ret = g_NPN_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&npobj);
+	  if (valid_instance)
+		ret = g_NPN_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&npobj);
 	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_NP_OBJECT, npobj, RPC_TYPE_INVALID);
 	}
   }
@@ -530,7 +553,23 @@ static int handle_NPN_SetValue(rpc_connection_t *connection)
 	return error;
   }
 
-  NPError ret = g_NPN_SetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)(uintptr_t)value);
+  NPError ret = NPERR_GENERIC_ERROR;
+
+  // Work around a Chromium sort-of bug and check for NULL NPPs. It is
+  // only sort of a bug in that we are doing something our plugin had
+  // never requested. Unfortunately, the existing RPC system makes
+  // detecting this very difficult. So, hack in the checks Chromium
+  // was missing.
+  //
+  // TODO: Either fix bug #13 or remove this when the fix in Chromium
+  // has trickled down to the stable channel.
+  if (PLUGIN_INSTANCE_NPP(plugin) == NULL) {
+	D(bug("Skipping NPN_SetValue on NULL instance to avoid possible crash.\n"));
+	ret = NPERR_INVALID_INSTANCE_ERROR;
+  } else {
+	ret = g_NPN_SetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)(uintptr_t)value);
+  }
+
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
