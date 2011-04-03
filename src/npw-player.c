@@ -215,7 +215,7 @@ uri_type_from_url (const gchar *url)
 }
 
 /* Sanitize URL, e.g. translate local file names to file:// syntax */
-gchar *
+static gchar *
 sanitize_url (const gchar *uri)
 {
   /* Local contents has preference if no URI scheme is specified.
