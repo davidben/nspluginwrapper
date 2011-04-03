@@ -1793,6 +1793,8 @@ plugin_get_data_types (Plugin *plugin)
   return plugin->data_types;
 }
 
+static void plugin_destroy (Plugin *plugin);
+
 static Plugin *
 plugin_new (const gchar *path)
 {
@@ -1819,7 +1821,7 @@ plugin_new (const gchar *path)
  error:
   if (plugin)
     {
-      g_free (plugin);
+      plugin_destroy (plugin);
       plugin = NULL;
     }
   return NULL;
