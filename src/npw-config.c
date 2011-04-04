@@ -31,6 +31,7 @@
 #include <dlfcn.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <elf.h>
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -340,162 +341,11 @@ static const char **get_mozilla_plugin_dirs(void)
       (((x) & 0x0000000000ff0000) << 24)  | (((x) & 0x00000000ff000000) <<  8) \
      )
 
-/* 32-bit ELF base types. */
-typedef uint32_t	Elf32_Addr;
-typedef uint16_t   	Elf32_Half;
-typedef uint32_t	Elf32_Off;
-typedef int32_t		Elf32_Sword;
-typedef uint32_t	Elf32_Word;
-
-/* 64-bit ELF base types. */
-typedef uint64_t	Elf64_Addr;
-typedef uint16_t	Elf64_Half;
-typedef int16_t		Elf64_SHalf;
-typedef uint64_t	Elf64_Off;
-typedef int32_t		Elf64_Sword;
-typedef uint32_t	Elf64_Word;
-typedef uint64_t	Elf64_Xword;
-typedef int64_t		Elf64_Sxword;
-
-/* The ELF file header.  This appears at the start of every ELF file.  */
-#define EI_NIDENT (16)
-
-typedef struct
-{
-  unsigned char	e_ident[EI_NIDENT];	/* Magic number and other info */
-  Elf32_Half	e_type;			/* Object file type */
-  Elf32_Half	e_machine;		/* Architecture */
-  Elf32_Word	e_version;		/* Object file version */
-  Elf32_Addr	e_entry;		/* Entry point virtual address */
-  Elf32_Off	e_phoff;		/* Program header table file offset */
-  Elf32_Off	e_shoff;		/* Section header table file offset */
-  Elf32_Word	e_flags;		/* Processor-specific flags */
-  Elf32_Half	e_ehsize;		/* ELF header size in bytes */
-  Elf32_Half	e_phentsize;		/* Program header table entry size */
-  Elf32_Half	e_phnum;		/* Program header table entry count */
-  Elf32_Half	e_shentsize;		/* Section header table entry size */
-  Elf32_Half	e_shnum;		/* Section header table entry count */
-  Elf32_Half	e_shstrndx;		/* Section header string table index */
-} Elf32_Ehdr;
-
-typedef struct
-{
-  unsigned char e_ident[EI_NIDENT];     /* ELF "magic number" */
-  Elf64_Half 	e_type;
-  Elf64_Half 	e_machine;
-  Elf64_Word 	e_version;
-  Elf64_Addr 	e_entry;		/* Entry point virtual address */
-  Elf64_Off 	e_phoff;		/* Program header table file offset */
-  Elf64_Off 	e_shoff;		/* Section header table file offset */
-  Elf64_Word 	e_flags;
-  Elf64_Half 	e_ehsize;
-  Elf64_Half 	e_phentsize;
-  Elf64_Half 	e_phnum;
-  Elf64_Half 	e_shentsize;
-  Elf64_Half 	e_shnum;
-  Elf64_Half 	e_shstrndx;
-} Elf64_Ehdr;
-
 /* Base structure - used to distinguish between 32/64 bit version */
 typedef struct
 {
   unsigned char	e_ident[EI_NIDENT];	/* Magic number and other info */
 } Elf_hdr_base;
-
-#define EI_MAG0		0		/* File identification byte 0 index */
-#define ELFMAG0		0x7f		/* Magic number byte 0 */
-#define EI_MAG1		1		/* File identification byte 1 index */
-#define ELFMAG1		'E'		/* Magic number byte 1 */
-#define EI_MAG2		2		/* File identification byte 2 index */
-#define ELFMAG2		'L'		/* Magic number byte 2 */
-#define EI_MAG3		3		/* File identification byte 3 index */
-#define ELFMAG3		'F'		/* Magic number byte 3 */
-#define EI_CLASS	4		/* File class byte index */
-#define ELFCLASS32	1		/* 32-bit objects */
-#define ELFCLASS64	2		/* 64-bit objects */
-#define EI_DATA		5		/* Data encoding byte index */
-#define ELFDATA2LSB	1		/* 2's complement, little endian */
-#define ELFDATA2MSB	2		/* 2's complement, big endian */
-#define EI_OSABI	7		/* OS ABI identification */
-#define ELFOSABI_SYSV	0		/* UNIX System V ABI */
-#define ELFOSABI_NETBSD	2		/* NetBSD.  */
-#define ELFOSABI_LINUX	3		/* Linux.  */
-#define ELFOSABI_SOLARIS 6		/* Sun Solaris.  */
-#define ELFOSABI_FREEBSD 9		/* FreeBSD.  */
-#define ET_DYN		3		/* Shared object file */
-#define EM_386		3		/* Intel 80386 */
-#define EM_SPARC	2		/* SUN SPARC */
-#define EM_PPC		20		/* PowerPC */
-#define EM_PPC64	21		/* PowerPC 64-bit */
-#define EM_SPARCV9	43		/* SPARC v9 64-bit */
-#define EM_IA_64	50		/* Intel Merced */
-#define EM_X86_64	62		/* AMD x86-64 architecture */
-#define EV_CURRENT	1		/* Current version */
-
-/* Section header.  */
-typedef struct
-{
-  Elf32_Word	sh_name;		/* Section name (string tbl index) */
-  Elf32_Word	sh_type;		/* Section type */
-  Elf32_Word	sh_flags;		/* Section flags */
-  Elf32_Addr	sh_addr;		/* Section virtual addr at execution */
-  Elf32_Off	sh_offset;		/* Section file offset */
-  Elf32_Word	sh_size;		/* Section size in bytes */
-  Elf32_Word	sh_link;		/* Link to another section */
-  Elf32_Word	sh_info;		/* Additional section information */
-  Elf32_Word	sh_addralign;		/* Section alignment */
-  Elf32_Word	sh_entsize;		/* Entry size if section holds table */
-} Elf32_Shdr;
-
-typedef struct
-{
-  Elf64_Word 	sh_name;           	/* Section name, index in string tbl */
-  Elf64_Word 	sh_type;           	/* Type of section */
-  Elf64_Xword 	sh_flags;         	/* Miscellaneous section attributes */
-  Elf64_Addr 	sh_addr;           	/* Section virtual addr at execution */
-  Elf64_Off 	sh_offset;          	/* Section file offset */
-  Elf64_Xword 	sh_size;          	/* Size of section in bytes */
-  Elf64_Word 	sh_link;           	/* Index of another section */
-  Elf64_Word 	sh_info;           	/* Additional section information */
-  Elf64_Xword 	sh_addralign;     	/* Section alignment */
-  Elf64_Xword 	sh_entsize;       	/* Entry size if section holds table */
-} Elf64_Shdr;
-
-
-#define SHT_NOBITS	  8		/* Program space with no data (bss) */
-#define SHT_DYNSYM	  11		/* Dynamic linker symbol table */
-
-/* Symbol table entry.  */
-typedef struct
-{
-  Elf32_Word	st_name;		/* Symbol name (string tbl index) */
-  Elf32_Addr	st_value;		/* Symbol value */
-  Elf32_Word	st_size;		/* Symbol size */
-  unsigned char	st_info;		/* Symbol type and binding */
-  unsigned char	st_other;		/* Symbol visibility */
-  Elf32_Half	st_shndx;		/* Section index */
-} Elf32_Sym;
-
-typedef struct
-{
-  Elf64_Word 	st_name;       		/* Symbol name, index in string tbl */
-  unsigned char st_info;    	   	/* Type and binding attributes */
-  unsigned char st_other;	      	/* No defined meaning, 0 */
-  Elf64_Half 	st_shndx;         	/* Associated section index */
-  Elf64_Addr 	st_value;          	/* Value of the symbol */
-  Elf64_Xword 	st_size;          	/* Associated symbol size */
-} Elf64_Sym;
-
-#define ELF_ST_BIND(x)          ((x) >> 4)
-#define ELF_ST_TYPE(x)          (((unsigned int) x) & 0xf)
-#define ELF32_ST_BIND(x)        ELF_ST_BIND(x)
-#define ELF32_ST_TYPE(x)        ELF_ST_TYPE(x)
-#define ELF64_ST_BIND(x)        ELF_ST_BIND(x)
-#define ELF64_ST_TYPE(x)        ELF_ST_TYPE(x)
-
-#define STB_GLOBAL	1		/* Global symbol */
-#define STT_OBJECT	1		/* Symbol is a data object */
-#define STT_FUNC	2		/* Symbol is a code object */
 
 void *load_data(int fd, long offset, unsigned int size)
 {
