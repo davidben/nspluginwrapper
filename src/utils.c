@@ -325,6 +325,23 @@ const char *string_of_NPNURLVariable(int variable)
 
   return str;
 }
+
+const char *string_of_NPWindowType(int type)
+{
+  const char *str;
+
+  switch (type) {
+#define _(VAL) case VAL: str = #VAL; break;
+	_(NPWindowTypeWindow);
+	_(NPWindowTypeDrawable);
+#undef _
+  default:
+	str = "<unknown type>";
+	break;
+  }
+
+  return str;
+}
 #endif
 
 

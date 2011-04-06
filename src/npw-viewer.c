@@ -4167,7 +4167,9 @@ g_NPP_SetWindow(NPP instance, NPWindow *np_window)
 	window = &plugin->window;
   }
 
-  D(bugiI("NPP_SetWindow instance=%p, window=%p\n", instance, window ? window->window : NULL));
+  D(bugiI("NPP_SetWindow instance=%p, window=%p [%s]\n",
+		  instance, window ? window->window : NULL,
+		  window ? string_of_NPWindowType(window->type) : "<null>"));
   NPError ret = plugin_funcs.setwindow(instance, window);
   D(bugiD("NPP_SetWindow return: %d [%s]\n", ret, string_of_NPError(ret)));
 
