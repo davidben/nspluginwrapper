@@ -2038,6 +2038,67 @@ bool rpc_method_in_invoke(rpc_connection_t *connection)
 
 
 /* ====================================================================== */
+/* === Remote Procedure Call (method invocation)                      === */
+/* ====================================================================== */
+
+typedef struct _RpcSource {
+  GSource parent;
+  rpc_connection_t *connection;
+  GPollFD poll_fd;
+} RpcSource;
+
+static gboolean rpc_event_prepare(GSource *source, gint *timeout)
+{
+  *timeout = -1;
+  return FALSE;
+}
+
+static gboolean rpc_event_check(GSource *source)
+{
+  RpcSource *rsource = (RpcSource *) source;
+  return rpc_wait_dispatch(rsource->connection, 0) > 0;
+}
+
+static gboolean rpc_event_dispatch(GSource *source, GSourceFunc callback, gpointer data)
+{
+  RpcSource *rsource = (RpcSource *) source;
+  return rpc_dispatch(rsource->connection) != RPC_ERROR_CONNECTION_CLOSED;
+}
+
+static void rpc_event_finalize(GSource *source)
+{
+  RpcSource *rsource = (RpcSource *) source;
+  rpc_connection_unref(rsource->connection);
+}
+
+static GSourceFuncs rpc_event_funcs = {
+  rpc_event_prepare,
+  rpc_event_check,
+  rpc_event_dispatch,
+  rpc_event_finalize,
+  (GSourceFunc)NULL,
+  (GSourceDummyMarshal)NULL
+};
+
+GSource *rpc_event_source_new(rpc_connection_t *connection)
+{
+  GSource *source;
+  RpcSource *rsource;
+
+  source = g_source_new(&rpc_event_funcs, sizeof(RpcSource));
+  rsource = (RpcSource*)source;
+
+  rsource->connection = rpc_connection_ref(connection);
+  rsource->poll_fd.fd = rpc_socket(connection);
+  rsource->poll_fd.events = G_IO_IN;
+  rsource->poll_fd.revents = 0;
+  g_source_add_poll(source, &rsource->poll_fd);
+
+  return source;
+}
+
+
+/* ====================================================================== */
 /* === Test Program                                                   === */
 /* ====================================================================== */
 

@@ -312,25 +312,8 @@ static inline bool plugin_direct_exec(void)
 /* ====================================================================== */
 
 static GSource *g_rpc_source;
-static GPollFD g_rpc_poll_fd;
 static XtInputId xt_rpc_source_id;
 rpc_connection_t *g_rpc_connection attribute_hidden = NULL;
-
-static gboolean rpc_event_prepare(GSource *source, gint *timeout)
-{
-  *timeout = -1;
-  return FALSE;
-}
-
-static gboolean rpc_event_check(GSource *source)
-{
-  return rpc_wait_dispatch(g_rpc_connection, 0) > 0;
-}
-
-static gboolean rpc_event_dispatch(GSource *source, GSourceFunc callback, gpointer connection)
-{
-  return rpc_dispatch(connection) != RPC_ERROR_CONNECTION_CLOSED;
-}
 
 
 /* ====================================================================== */
@@ -3891,24 +3874,9 @@ static void plugin_init(int is_NP_Initialize)
   // Initialize RPC events listener, try to attach it to the main event loop
   if (toolkit == NPNVGtk12 || toolkit == NPNVGtk2) {	// GLib
 	D(bug("  trying to attach RPC listener to main GLib event loop\n"));
-	static GSourceFuncs rpc_event_funcs = {
-	  rpc_event_prepare,
-	  rpc_event_check,
-	  rpc_event_dispatch,
-	  (void (*)(GSource *))g_free,
-	  (GSourceFunc)NULL,
-	  (GSourceDummyMarshal)NULL
-	};
-	g_rpc_source = g_source_new(&rpc_event_funcs, sizeof(GSource));
-	if (g_rpc_source) {
-	  g_source_set_priority(g_rpc_source, G_PRIORITY_LOW);
-	  g_source_set_callback(g_rpc_source, (GSourceFunc)rpc_dispatch, g_rpc_connection, NULL); 
-	  g_source_attach(g_rpc_source, NULL);
-	  g_rpc_poll_fd.fd = rpc_socket(g_rpc_connection);
-	  g_rpc_poll_fd.events = G_IO_IN;
-	  g_rpc_poll_fd.revents = 0;
-	  g_source_add_poll(g_rpc_source, &g_rpc_poll_fd);
-	}
+	g_rpc_source = rpc_event_source_new(g_rpc_connection);
+	g_source_set_priority(g_rpc_source, G_PRIORITY_LOW);
+	g_source_attach(g_rpc_source, NULL);
   }
   if (g_rpc_source == NULL) {							// X11
 	D(bug("  trying to attach RPC listener to main X11 event loop\n"));

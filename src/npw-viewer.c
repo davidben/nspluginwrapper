@@ -5012,34 +5012,6 @@ static void xt_source_destroy(void)
   }
 }
 
-// RPC events
-static GPollFD rpc_event_poll_fd;
-
-static gboolean rpc_event_prepare(GSource *source, gint *timeout)
-{
-  *timeout = -1;
-  return FALSE;
-}
-
-static gboolean rpc_event_check(GSource *source)
-{
-  return rpc_wait_dispatch(g_rpc_connection, 0) > 0;
-}
-
-static gboolean rpc_event_dispatch(GSource *source, GSourceFunc callback, gpointer connection)
-{
-  return rpc_dispatch(connection) != RPC_ERROR_CONNECTION_CLOSED;
-}
-
-static GSourceFuncs rpc_event_funcs = {
-  rpc_event_prepare,
-  rpc_event_check,
-  rpc_event_dispatch,
-  (GSourceFinalizeFunc)g_free,
-  (GSourceFunc)NULL,
-  (GSourceDummyMarshal)NULL
-};
-
 // RPC error callback -- kill the plugin
 static void rpc_error_callback_cb(rpc_connection_t *connection, void *user_data)
 {
@@ -5129,18 +5101,15 @@ static int do_main(int argc, char **argv, const char *connection_path)
   id_init();
 
   // Initialize RPC events listener
-  GSource *rpc_source = g_source_new(&rpc_event_funcs, sizeof(GSource));
-  if (rpc_source == NULL) {
-	npw_printf("ERROR: failed to initialize plugin-side RPC events listener\n");
+  int ret = rpc_listen_socket(g_rpc_connection);
+  if (ret < 0) {
+	npw_perror("ERROR: Failed to listen on socket.", ret);
 	return 1;
   }
+
+  GSource *rpc_source = rpc_event_source_new(g_rpc_connection);
   g_source_set_priority(rpc_source, G_PRIORITY_LOW);
   g_source_attach(rpc_source, NULL);
-  rpc_event_poll_fd.fd = rpc_listen_socket(g_rpc_connection);
-  rpc_event_poll_fd.events = G_IO_IN;
-  rpc_event_poll_fd.revents = 0;
-  g_source_set_callback(rpc_source, (GSourceFunc)rpc_dispatch, g_rpc_connection, NULL);
-  g_source_add_poll(rpc_source, &rpc_event_poll_fd);
 
   // Set error handler - stop plugin if there's a connection error
   rpc_connection_set_error_callback(g_rpc_connection, rpc_error_callback_cb, NULL);
