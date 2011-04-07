@@ -313,6 +313,7 @@ static inline bool plugin_direct_exec(void)
 
 static GSource *g_rpc_source;
 static XtInputId xt_rpc_source_id;
+static XtBlockHookId xt_rpc_sync_id;
 rpc_connection_t *g_rpc_connection attribute_hidden = NULL;
 
 
@@ -3894,9 +3895,12 @@ static void plugin_init(int is_NP_Initialize)
 									   rpc_socket(g_rpc_connection),
 									   (XtPointer)XtInputReadMask,
 									   (XtInputCallbackProc)rpc_dispatch, g_rpc_connection);
+	  xt_rpc_sync_id = XtAppAddBlockHook(x_app_context,
+										 (XtBlockHookProc)rpc_dispatch_pending_sync,
+										 g_rpc_connection);
 	}
   }
-  if (g_rpc_source == NULL && xt_rpc_source_id == 0) {
+  if (g_rpc_source == NULL && (xt_rpc_source_id == 0 || xt_rpc_sync_id == 0)) {
 	npw_printf("ERROR: failed to initialize brower-side RPC events listener\n");
 	return;
   }
@@ -3916,6 +3920,10 @@ static void plugin_exit(void)
   if (xt_rpc_source_id) {
 	XtRemoveInput(xt_rpc_source_id);
 	xt_rpc_source_id = 0;
+  }
+  if (xt_rpc_sync_id) {
+	XtRemoveBlockHook(xt_rpc_sync_id);
+	xt_rpc_sync_id = 0;
   }
 
   if (g_rpc_source) {

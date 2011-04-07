@@ -490,8 +490,11 @@ static inline bool _rpc_connection_is_sync_mode(rpc_connection_t *connection)
 // Returns whether we are "synchronized" with the other end
 static inline bool _rpc_connection_is_sync(rpc_connection_t *connection)
 {
+  // We may be in the middle of a block of sync'd requests.
   if (connection->dispatch_depth < 1)
-	return false;
+	return connection->sync_depth > 0;
+  // XXX: Is this ever not true, assuming our handlers are not
+  // horribly broken? (Certainly dealing with those isn't SYNC's job.)
   return connection->dispatch_depth == connection->handle_depth;
 }
 
@@ -1701,6 +1704,52 @@ int rpc_dispatch(rpc_connection_t *connection)
   return method;
 }
 
+// Returns true if we have a pending SYNC or SYNC_ACK to reply to.
+bool rpc_has_pending_sync(rpc_connection_t *connection)
+{
+  return connection->sync_depth || connection->pending_sync_depth;
+}
+
+// Close any pending sync requests. This should be called from the
+// event loop. In the wrapper, if we received a SYNC, we SYNC_ACK it
+// now and wait for the SYNC_END. In the viewer, if we sent a SYNC
+// that was SYNC_ACK'd, we SYNC_END it now. This is so interleaving is
+// done at event loop iteration boudaries.
+int rpc_dispatch_pending_sync(rpc_connection_t *connection)
+{
+  D(bug("rpc_dispatch_pending_sync\n"));
+  assert(connection->invoke_depth == 0);
+
+  // send: MESSAGE_SYNC_END (done pending message)
+  if (connection->sync_depth) {
+	D(bug("sending delayed MESSAGE_SYNC_END\n"));
+	rpc_message_t message;
+	assert(connection->sync_depth == 1);
+
+	rpc_message_init(&message, connection);
+	// send: MESSAGE_SYNC_END
+	int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC_END);
+	if (error != RPC_ERROR_NO_ERROR)
+	  return rpc_error(connection, error);
+	error = rpc_message_flush(&message);
+	if (error != RPC_ERROR_NO_ERROR)
+	  return rpc_error(connection, error);
+
+	connection->sync_depth = 0;
+  }
+
+  // send: MESSAGE_SYNC_ACK (pending message)
+  if (connection->pending_sync_depth) {
+	D(bug("sending delayed MESSAGE_SYNC_ACK\n"));
+	assert(connection->pending_sync_depth == 1);
+	assert(_rpc_wait_dispatch(connection, 0) == 0);
+
+	connection->pending_sync_depth = 0;
+	return _rpc_dispatch_sync(connection);
+  }
+
+  return RPC_ERROR_NO_ERROR;
+}
 
 /* ====================================================================== */
 /* === Method Callbacks Handling                                      === */
@@ -1928,34 +1977,6 @@ static int _rpc_method_wait_for_reply_valist(rpc_connection_t *connection, va_li
   if (msg_tag != RPC_MESSAGE_END)
 	return rpc_error(connection, RPC_ERROR_MESSAGE_TYPE_INVALID);
 
-  // send: MESSAGE_SYNC_END (done pending message)
-  if (connection->sync_depth) {
-	if (connection->sync_depth == connection->invoke_depth) {
-	  assert(connection->invoke_depth == 1);
-
-	  // send: MESSAGE_SYNC_END
-	  int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC_END);
-	  if (error != RPC_ERROR_NO_ERROR)
-		return rpc_error(connection, error);
-	  error = rpc_message_flush(&message);
-	  if (error != RPC_ERROR_NO_ERROR)
-		return rpc_error(connection, error);
-
-	  connection->sync_depth = 0;
-	}
-  }
-
-  // send: MESSAGE_SYNC_ACK (pending message)
-  if (connection->pending_sync_depth) {
-	if (connection->pending_sync_depth == connection->invoke_depth) {
-	  assert(connection->invoke_depth == 1);
-	  assert(_rpc_wait_dispatch(connection, 0) == 0);
-
-	  connection->pending_sync_depth = 0;
-	  return _rpc_dispatch_sync(connection);
-	}
-  }
-
   return RPC_ERROR_NO_ERROR;
 }
 
@@ -2049,6 +2070,11 @@ typedef struct _RpcSource {
 
 static gboolean rpc_event_prepare(GSource *source, gint *timeout)
 {
+  RpcSource *rsource = (RpcSource *) source;
+  if (rpc_has_pending_sync(rsource->connection)) {
+	*timeout = 0;
+	return TRUE;
+  }
   *timeout = -1;
   return FALSE;
 }
@@ -2056,13 +2082,18 @@ static gboolean rpc_event_prepare(GSource *source, gint *timeout)
 static gboolean rpc_event_check(GSource *source)
 {
   RpcSource *rsource = (RpcSource *) source;
-  return rpc_wait_dispatch(rsource->connection, 0) > 0;
+  return rpc_has_pending_sync(rsource->connection) ||
+	rpc_wait_dispatch(rsource->connection, 0) > 0;
 }
 
 static gboolean rpc_event_dispatch(GSource *source, GSourceFunc callback, gpointer data)
 {
   RpcSource *rsource = (RpcSource *) source;
-  return rpc_dispatch(rsource->connection) != RPC_ERROR_CONNECTION_CLOSED;
+  if (rpc_has_pending_sync(rsource->connection)) {
+	return rpc_dispatch_pending_sync(rsource->connection) != RPC_ERROR_CONNECTION_CLOSED;
+  } else {
+	return rpc_dispatch(rsource->connection) != RPC_ERROR_CONNECTION_CLOSED;
+  }
 }
 
 static void rpc_event_finalize(GSource *source)
