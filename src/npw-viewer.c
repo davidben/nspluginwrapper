@@ -5111,6 +5111,10 @@ static int do_main(int argc, char **argv, const char *connection_path)
   g_source_set_priority(rpc_source, G_PRIORITY_LOW);
   g_source_attach(rpc_source, NULL);
 
+  GSource *rpc_sync_source = rpc_sync_source_new(g_rpc_connection);
+  g_source_set_priority(rpc_sync_source, G_PRIORITY_HIGH);
+  g_source_attach(rpc_sync_source, NULL);
+
   // Set error handler - stop plugin if there's a connection error
   rpc_connection_set_error_callback(g_rpc_connection, rpc_error_callback_cb, NULL);
  
@@ -5122,6 +5126,7 @@ static int do_main(int argc, char **argv, const char *connection_path)
 #endif
 
   g_source_destroy(rpc_source);
+  g_source_destroy(rpc_sync_source);
   if (xt_source)
 	g_source_destroy(xt_source);
 

@@ -2070,11 +2070,6 @@ typedef struct _RpcSource {
 
 static gboolean rpc_event_prepare(GSource *source, gint *timeout)
 {
-  RpcSource *rsource = (RpcSource *) source;
-  if (rpc_has_pending_sync(rsource->connection)) {
-	*timeout = 0;
-	return TRUE;
-  }
   *timeout = -1;
   return FALSE;
 }
@@ -2082,18 +2077,13 @@ static gboolean rpc_event_prepare(GSource *source, gint *timeout)
 static gboolean rpc_event_check(GSource *source)
 {
   RpcSource *rsource = (RpcSource *) source;
-  return rpc_has_pending_sync(rsource->connection) ||
-	rpc_wait_dispatch(rsource->connection, 0) > 0;
+  return rpc_wait_dispatch(rsource->connection, 0) > 0;
 }
 
 static gboolean rpc_event_dispatch(GSource *source, GSourceFunc callback, gpointer data)
 {
   RpcSource *rsource = (RpcSource *) source;
-  if (rpc_has_pending_sync(rsource->connection)) {
-	return rpc_dispatch_pending_sync(rsource->connection) != RPC_ERROR_CONNECTION_CLOSED;
-  } else {
-	return rpc_dispatch(rsource->connection) != RPC_ERROR_CONNECTION_CLOSED;
-  }
+  return rpc_dispatch(rsource->connection) != RPC_ERROR_CONNECTION_CLOSED;
 }
 
 static void rpc_event_finalize(GSource *source)
@@ -2124,6 +2114,61 @@ GSource *rpc_event_source_new(rpc_connection_t *connection)
   rsource->poll_fd.events = G_IO_IN;
   rsource->poll_fd.revents = 0;
   g_source_add_poll(source, &rsource->poll_fd);
+
+  return source;
+}
+
+typedef struct _RpcSyncSource {
+  GSource parent;
+  rpc_connection_t *connection;
+} RpcSyncSource;
+
+static gboolean rpc_sync_prepare(GSource *source, gint *timeout)
+{
+  RpcSyncSource *rsource = (RpcSyncSource *) source;
+  if (rpc_has_pending_sync(rsource->connection)) {
+	*timeout = 0;
+	return TRUE;
+  }
+  *timeout = -1;
+  return FALSE;
+}
+
+static gboolean rpc_sync_check(GSource *source)
+{
+  RpcSyncSource *rsource = (RpcSyncSource *) source;
+  return rpc_has_pending_sync(rsource->connection);
+}
+
+static gboolean rpc_sync_dispatch(GSource *source, GSourceFunc callback, gpointer data)
+{
+  RpcSyncSource *rsource = (RpcSyncSource *) source;
+  return rpc_dispatch_pending_sync(rsource->connection) != RPC_ERROR_CONNECTION_CLOSED;
+}
+
+static void rpc_sync_finalize(GSource *source)
+{
+  RpcSyncSource *rsource = (RpcSyncSource *) source;
+  rpc_connection_unref(rsource->connection);
+}
+
+static GSourceFuncs rpc_sync_funcs = {
+  rpc_sync_prepare,
+  rpc_sync_check,
+  rpc_sync_dispatch,
+  rpc_sync_finalize,
+  (GSourceFunc)NULL,
+  (GSourceDummyMarshal)NULL
+};
+
+GSource *rpc_sync_source_new(rpc_connection_t *connection)
+{
+  GSource *source;
+  RpcSyncSource *rsource;
+
+  source = g_source_new(&rpc_sync_funcs, sizeof(RpcSyncSource));
+  rsource = (RpcSyncSource*)source;
+  rsource->connection = rpc_connection_ref(connection);
 
   return source;
 }

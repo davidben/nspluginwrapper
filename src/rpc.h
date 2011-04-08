@@ -127,6 +127,7 @@ extern bool rpc_method_in_invoke(rpc_connection_t *connection) attribute_hidden;
 
 // Sources
 extern GSource *rpc_event_source_new(rpc_connection_t *connection) attribute_hidden;
+extern GSource *rpc_sync_source_new(rpc_connection_t *connection) attribute_hidden;
 
 #ifdef __cplusplus
 }

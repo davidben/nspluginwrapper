@@ -312,6 +312,7 @@ static inline bool plugin_direct_exec(void)
 /* ====================================================================== */
 
 static GSource *g_rpc_source;
+static GSource *g_rpc_sync_source;
 static XtInputId xt_rpc_source_id;
 static XtBlockHookId xt_rpc_sync_id;
 rpc_connection_t *g_rpc_connection attribute_hidden = NULL;
@@ -3878,8 +3879,11 @@ static void plugin_init(int is_NP_Initialize)
 	g_rpc_source = rpc_event_source_new(g_rpc_connection);
 	g_source_set_priority(g_rpc_source, G_PRIORITY_LOW);
 	g_source_attach(g_rpc_source, NULL);
-  }
-  if (g_rpc_source == NULL) {							// X11
+
+	g_rpc_sync_source = rpc_sync_source_new(g_rpc_connection);
+	g_source_set_priority(g_rpc_sync_source, G_PRIORITY_HIGH);
+	g_source_attach(g_rpc_sync_source, NULL);
+  } else {							// X11
 	D(bug("  trying to attach RPC listener to main X11 event loop\n"));
 	XtAppContext x_app_context = NULL;
 	int error = mozilla_funcs.getvalue(NULL, NPNVxtAppContext, (void *)&x_app_context);
@@ -3929,6 +3933,10 @@ static void plugin_exit(void)
   if (g_rpc_source) {
 	g_source_destroy(g_rpc_source);
 	g_rpc_source = NULL;
+  }
+  if (g_rpc_sync_source) {
+	g_source_destroy(g_rpc_sync_source);
+	g_rpc_sync_source = NULL;
   }
 
   if (g_rpc_connection) {
