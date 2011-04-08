@@ -174,6 +174,29 @@ static void toolkit_flush(NPP instance)
   }
 }
 
+static void pointer_ungrab(NPP instance, Time time)
+{
+  // Always prefer gdk_pointer_ungrab() if the master binary is linked against Gtk
+  static void (*INVALID)(uint32_t) = (void (*)(uint32_t))(intptr_t)-1;
+  static void (*lib_gdk_pointer_ungrab)(uint32_t) = NULL;
+  if (lib_gdk_pointer_ungrab == NULL) {
+	if ((lib_gdk_pointer_ungrab = dlsym(RTLD_DEFAULT, "gdk_pointer_ungrab")) == NULL)
+	  lib_gdk_pointer_ungrab = INVALID;
+  }
+  if (lib_gdk_pointer_ungrab != INVALID) {
+	lib_gdk_pointer_ungrab(time);
+	return;
+  }
+
+  // Try raw X11
+  Display *x_display = NULL;
+  int error = mozilla_funcs.getvalue(instance, NPNVxDisplay, (void *)&x_display);
+  if (error == NPERR_NO_ERROR && x_display) {
+	XUngrabPointer(x_display, time);
+	return;
+  }
+}
+
 // PluginInstance vfuncs
 static void *plugin_instance_allocate(void);
 static void plugin_instance_deallocate(PluginInstance *plugin);
@@ -2896,9 +2919,19 @@ static int16_t g_NPP_HandleEvent(NPP instance, void *event)
   if (plugin == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
-  if (((NPEvent *)event)->type == GraphicsExpose) {
+  NPEvent *npevent = event;
+  if (npevent->type == GraphicsExpose) {
 	/* XXX: flush the X output buffer so that the call to
 	   gdk_pixmap_foreign_new() in the viewer can work */
+	toolkit_flush(instance);
+  }
+
+  if (npevent->type == ButtonPress) {
+	// Release any implicit passive grabs we have so Flash can show a
+	// menu. This is only relevant if your browser does not do
+	// out-of-process plugins. Otherwise, we need the browser to do it
+	// instead.
+	pointer_ungrab(instance, npevent->xbutton.time);
 	toolkit_flush(instance);
   }
 
