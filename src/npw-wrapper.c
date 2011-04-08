@@ -151,7 +151,7 @@ static int plugin_killed = 0;
 /* ====================================================================== */
 
 // Flush the X output buffer
-static void toolkit_flush(void)
+static void toolkit_flush(NPP instance)
 {
   // Always prefer gdk_flush() if the master binary is linked against Gtk
   static void (*INVALID)(void) = (void (*)(void))(intptr_t)-1;
@@ -167,7 +167,7 @@ static void toolkit_flush(void)
 
   // Try raw X11
   Display *x_display = NULL;
-  int error = mozilla_funcs.getvalue(NULL, NPNVxDisplay, (void *)&x_display);
+  int error = mozilla_funcs.getvalue(instance, NPNVxDisplay, (void *)&x_display);
   if (error == NPERR_NO_ERROR && x_display) {
 	XSync(x_display, False);
 	return;
@@ -2899,7 +2899,7 @@ static int16_t g_NPP_HandleEvent(NPP instance, void *event)
   if (((NPEvent *)event)->type == GraphicsExpose) {
 	/* XXX: flush the X output buffer so that the call to
 	   gdk_pixmap_foreign_new() in the viewer can work */
-	toolkit_flush();
+	toolkit_flush(instance);
   }
 
   D(bugiI("NPP_HandleEvent instance=%p\n", instance));
