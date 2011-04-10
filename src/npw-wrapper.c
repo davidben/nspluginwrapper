@@ -1330,6 +1330,9 @@ static bool
 g_NPN_Evaluate(NPP instance, NPObject *npobj, NPString *script, NPVariant *result)
 {
   D(bugiI("NPN_Evaluate instance=%p, npobj=%p\n", instance, npobj));
+  gchar *script_str = g_strndup(script->UTF8Characters, script->UTF8Length);
+  D(bug("script = '%s'\n", script_str));
+  g_free(script_str);
   bool ret = mozilla_funcs.evaluate(instance, npobj, script, result);
   gchar *result_str = string_of_NPVariant(result);
   D(bugiD("NPN_Evaluate return: %d (%s)\n", ret, result_str));
