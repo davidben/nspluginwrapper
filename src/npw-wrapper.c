@@ -1363,7 +1363,7 @@ static int handle_NPN_Evaluate(rpc_connection_t *connection)
   bool ret = g_NPN_Evaluate(PLUGIN_INSTANCE_NPP(plugin), npobj, &script, &result);
 
   if (script.UTF8Characters)
-	free((void *)script.UTF8Characters);
+	NPN_MemFree((void *)script.UTF8Characters);
 
   int rpc_ret = rpc_method_send_reply(connection,
 									  RPC_TYPE_UINT32, ret,
