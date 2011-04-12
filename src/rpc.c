@@ -1707,6 +1707,13 @@ int rpc_dispatch(rpc_connection_t *connection)
 // Returns true if we have a pending SYNC or SYNC_ACK to reply to.
 bool rpc_has_pending_sync(rpc_connection_t *connection)
 {
+  // Don't run this on nested message loops. Chromium seems to pump
+  // the message loop in the plugin process when waiting for
+  // (Chromium-internal) IPC.
+  if (connection->invoke_depth > 0 || connection->handle_depth > 0) {
+	D(bug("rpc_has_pending_sync called on a nested event loop!\n"));
+	return false;
+  }
   return connection->sync_depth || connection->pending_sync_depth;
 }
 
@@ -1718,7 +1725,13 @@ bool rpc_has_pending_sync(rpc_connection_t *connection)
 int rpc_dispatch_pending_sync(rpc_connection_t *connection)
 {
   D(bug("rpc_dispatch_pending_sync\n"));
-  assert(connection->invoke_depth == 0);
+  // Don't run this on nested message loops. Chromium seems to pump
+  // the message loop in the plugin process when waiting for
+  // (Chromium-internal) IPC.
+  if (connection->invoke_depth > 0 || connection->handle_depth > 0) {
+	D(bug("rpc_dispatch_pending_sync called on a nested event loop!\n"));
+	return RPC_ERROR_NO_ERROR;
+  }
 
   // send: MESSAGE_SYNC_END (done pending message)
   if (connection->sync_depth) {
