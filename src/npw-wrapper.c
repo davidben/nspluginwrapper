@@ -587,7 +587,11 @@ static void g_NPN_InvalidateRect(NPP instance, NPRect *invalidRect)
   if (mozilla_funcs.invalidaterect == NULL)
 	return;
 
-  D(bugiI("NPN_InvalidateRect instance=%p\n", instance));
+  D(bugiI("NPN_InvalidateRect instance=%p "
+		  "rect.top=%d rect.left=%d rect.bottom=%d rect.right=%d\n",
+		  instance,
+		  invalidRect->top, invalidRect->left,
+		  invalidRect->bottom, invalidRect->right));
   mozilla_funcs.invalidaterect(instance, invalidRect);
   D(bugiD("NPN_InvalidateRect done\n"));
 }

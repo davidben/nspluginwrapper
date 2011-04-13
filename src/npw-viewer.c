@@ -1379,7 +1379,11 @@ g_NPN_InvalidateRect(NPP instance, NPRect *invalidRect)
   if (invalidRect == NULL)
 	return;
 
-  D(bugiI("NPN_InvalidateRect instance=%p\n", PLUGIN_INSTANCE_NPP(plugin)));
+  D(bugiI("NPN_InvalidateRect instance=%p "
+		  "rect.top=%d rect.left=%d rect.bottom=%d rect.right=%d\n",
+		  PLUGIN_INSTANCE_NPP(plugin),
+		  invalidRect->top, invalidRect->left,
+		  invalidRect->bottom, invalidRect->right));
   npw_plugin_instance_ref(plugin);
   invoke_NPN_InvalidateRect(plugin, invalidRect);
   npw_plugin_instance_unref(plugin);
