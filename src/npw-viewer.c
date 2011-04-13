@@ -3640,20 +3640,16 @@ g_NPN_UnscheduleTimer(NPP instance, uint32_t timerID)
 static NPPluginFuncs plugin_funcs;
 
 // Allows the browser to query the plug-in supported formats
-typedef char * (*NP_GetMIMEDescriptionUPP)(void);
-static NP_GetMIMEDescriptionUPP g_plugin_NP_GetMIMEDescription = NULL;
+static NP_GetMIMEDescriptionFunc g_plugin_NP_GetMIMEDescription = NULL;
 
 // Allows the browser to query the plug-in for information
-typedef NPError (*NP_GetValueUPP)(void *instance, NPPVariable variable, void *value);
-static NP_GetValueUPP g_plugin_NP_GetValue = NULL;
+static NP_GetValueFunc g_plugin_NP_GetValue = NULL;
 
 // Provides global initialization for a plug-in
-typedef NPError (*NP_InitializeUPP)(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs);
-static NP_InitializeUPP g_plugin_NP_Initialize = NULL;
+static NP_InitializeFunc g_plugin_NP_Initialize = NULL;
 
 // Provides global deinitialization for a plug-in
-typedef NPError (*NP_ShutdownUPP)(void);
-static NP_ShutdownUPP g_plugin_NP_Shutdown = NULL;
+static NP_ShutdownFunc g_plugin_NP_Shutdown = NULL;
 
 
 /* ====================================================================== */
@@ -3661,14 +3657,14 @@ static NP_ShutdownUPP g_plugin_NP_Shutdown = NULL;
 /* ====================================================================== */
 
 // NP_GetMIMEDescription
-static char *
+static const char *
 g_NP_GetMIMEDescription(void)
 {
   if (g_plugin_NP_GetMIMEDescription == NULL)
 	return NULL;
 
   D(bugiI("NP_GetMIMEDescription\n"));
-  char *str = g_plugin_NP_GetMIMEDescription();
+  const char *str = g_plugin_NP_GetMIMEDescription();
   D(bugiD("NP_GetMIMEDescription return: %s\n", str ? str : "<empty>"));
   return str;
 }
@@ -3683,7 +3679,7 @@ static int handle_NP_GetMIMEDescription(rpc_connection_t *connection)
 	return error;
   }
 
-  char *str = g_NP_GetMIMEDescription();
+  const char *str = g_NP_GetMIMEDescription();
   return rpc_method_send_reply(connection, RPC_TYPE_STRING, str, RPC_TYPE_INVALID);
 }
 
@@ -5232,22 +5228,22 @@ int main(int argc, char **argv)
 	}
 	handles[n_handles++] = handle;
 	dlerror();
-	g_plugin_NP_GetMIMEDescription = (NP_GetMIMEDescriptionUPP)dlsym(handle, "NP_GetMIMEDescription");
+	g_plugin_NP_GetMIMEDescription = (NP_GetMIMEDescriptionFunc)dlsym(handle, "NP_GetMIMEDescription");
 	if ((error = dlerror()) != NULL) {
 	  npw_printf("ERROR: %s\n", error);
 	  return 1;
 	}
-	g_plugin_NP_Initialize = (NP_InitializeUPP)dlsym(handle, "NP_Initialize");
+	g_plugin_NP_Initialize = (NP_InitializeFunc)dlsym(handle, "NP_Initialize");
 	if ((error = dlerror()) != NULL) {
 	  npw_printf("ERROR: %s\n", error);
 	  return 1;
 	}
-	g_plugin_NP_Shutdown = (NP_ShutdownUPP)dlsym(handle, "NP_Shutdown");
+	g_plugin_NP_Shutdown = (NP_ShutdownFunc)dlsym(handle, "NP_Shutdown");
 	if ((error = dlerror()) != NULL) {
 	  npw_printf("ERROR: %s\n", error);
 	  return 1;
 	}
-	g_plugin_NP_GetValue = (NP_GetValueUPP)dlsym(handle, "NP_GetValue");
+	g_plugin_NP_GetValue = (NP_GetValueFunc)dlsym(handle, "NP_GetValue");
   }
 
   int ret = 1;
