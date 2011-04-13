@@ -55,9 +55,6 @@
 // Define to use XEMBED hack (don't let browser kill our window)
 #define USE_XEMBED_HACK 1
 
-// Define to allow windowless plugins
-#define ALLOW_WINDOWLESS_PLUGINS 1
-
 // Define to use NPIdentifier cache
 #define USE_NPIDENTIFIER_CACHE 1
 #define NPIDENTIFIER_CACHE_SIZE 256
@@ -1271,9 +1268,7 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 	}
 	*((GdkNativeWindow *)value) = GDK_WINDOW_XWINDOW(plugin->browser_toplevel);
 	break;
-#if ALLOW_WINDOWLESS_PLUGINS
   case NPNVSupportsWindowless:
-#endif
   case NPNVSupportsXEmbedBool:
   case NPNVWindowNPObject:
   case NPNVPluginElementNPObject:
