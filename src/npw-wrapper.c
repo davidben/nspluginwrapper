@@ -151,7 +151,7 @@ static int plugin_killed = 0;
 /* ====================================================================== */
 
 // Flush the X output buffer
-static void toolkit_flush(void)
+static void toolkit_flush(NPP instance)
 {
   // Always prefer gdk_flush() if the master binary is linked against Gtk
   static void (*INVALID)(void) = (void (*)(void))(intptr_t)-1;
@@ -167,9 +167,32 @@ static void toolkit_flush(void)
 
   // Try raw X11
   Display *x_display = NULL;
-  int error = mozilla_funcs.getvalue(NULL, NPNVxDisplay, (void *)&x_display);
+  int error = mozilla_funcs.getvalue(instance, NPNVxDisplay, (void *)&x_display);
   if (error == NPERR_NO_ERROR && x_display) {
 	XSync(x_display, False);
+	return;
+  }
+}
+
+static void pointer_ungrab(NPP instance, Time time)
+{
+  // Always prefer gdk_pointer_ungrab() if the master binary is linked against Gtk
+  static void (*INVALID)(uint32_t) = (void (*)(uint32_t))(intptr_t)-1;
+  static void (*lib_gdk_pointer_ungrab)(uint32_t) = NULL;
+  if (lib_gdk_pointer_ungrab == NULL) {
+	if ((lib_gdk_pointer_ungrab = dlsym(RTLD_DEFAULT, "gdk_pointer_ungrab")) == NULL)
+	  lib_gdk_pointer_ungrab = INVALID;
+  }
+  if (lib_gdk_pointer_ungrab != INVALID) {
+	lib_gdk_pointer_ungrab(time);
+	return;
+  }
+
+  // Try raw X11
+  Display *x_display = NULL;
+  int error = mozilla_funcs.getvalue(instance, NPNVxDisplay, (void *)&x_display);
+  if (error == NPERR_NO_ERROR && x_display) {
+	XUngrabPointer(x_display, time);
 	return;
   }
 }
@@ -1309,6 +1332,9 @@ static bool
 g_NPN_Evaluate(NPP instance, NPObject *npobj, NPString *script, NPVariant *result)
 {
   D(bugiI("NPN_Evaluate instance=%p, npobj=%p\n", instance, npobj));
+  gchar *script_str = g_strndup(script->UTF8Characters, script->UTF8Length);
+  D(bug("script = '%s'\n", script_str));
+  g_free(script_str);
   bool ret = mozilla_funcs.evaluate(instance, npobj, script, result);
   gchar *result_str = string_of_NPVariant(result);
   D(bugiD("NPN_Evaluate return: %d (%s)\n", ret, result_str));
@@ -1339,7 +1365,7 @@ static int handle_NPN_Evaluate(rpc_connection_t *connection)
   bool ret = g_NPN_Evaluate(PLUGIN_INSTANCE_NPP(plugin), npobj, &script, &result);
 
   if (script.UTF8Characters)
-	free((void *)script.UTF8Characters);
+	NPN_MemFree((void *)script.UTF8Characters);
 
   int rpc_ret = rpc_method_send_reply(connection,
 									  RPC_TYPE_UINT32, ret,
@@ -2898,10 +2924,20 @@ static int16_t g_NPP_HandleEvent(NPP instance, void *event)
   if (plugin == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
-  if (((NPEvent *)event)->type == GraphicsExpose) {
+  NPEvent *npevent = event;
+  if (npevent->type == GraphicsExpose) {
 	/* XXX: flush the X output buffer so that the call to
 	   gdk_pixmap_foreign_new() in the viewer can work */
-	toolkit_flush();
+	toolkit_flush(instance);
+  }
+
+  if (npevent->type == ButtonPress) {
+	// Release any implicit passive grabs we have so Flash can show a
+	// menu. This is only relevant if your browser does not do
+	// out-of-process plugins. Otherwise, we need the browser to do it
+	// instead.
+	pointer_ungrab(instance, npevent->xbutton.time);
+	toolkit_flush(instance);
   }
 
   D(bugiI("NPP_HandleEvent instance=%p\n", instance));
