@@ -52,9 +52,6 @@
 #include "debug.h"
 
 
-// [UNIMPLEMENTED] Define to use XPCOM emulation
-#define USE_XPCOM 0
-
 // Define to use XEMBED hack (don't let browser kill our window)
 #define USE_XEMBED_HACK 1
 
@@ -793,26 +790,6 @@ static void xt_client_event_handler(Widget w, XtPointer client_data, XEvent *eve
 
 
 /* ====================================================================== */
-/* === XPCOM glue                                                     === */
-/* ====================================================================== */
-
-#if defined(__GNUC__) && (__GNUC__ > 2)
-#define NS_LIKELY(x)    (__builtin_expect((x), 1))
-#define NS_UNLIKELY(x)  (__builtin_expect((x), 0))
-#else
-#define NS_LIKELY(x)    (x)
-#define NS_UNLIKELY(x)  (x)
-#endif
-
-#define NS_FAILED(_nsresult) (NS_UNLIKELY((_nsresult) & 0x80000000))
-#define NS_SUCCEEDED(_nsresult) (NS_LIKELY(!((_nsresult) & 0x80000000)))
-
-typedef uint32_t nsresult;
-typedef struct nsIServiceManager nsIServiceManager;
-extern nsresult NS_GetServiceManager(nsIServiceManager **result);
-
-
-/* ====================================================================== */
 /* === Window utilities                                               === */
 /* ====================================================================== */
 
@@ -1276,22 +1253,6 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
   case NPNVToolkit:
 	*(NPNToolkitType *)value = NPW_TOOLKIT;
 	break;
-#if USE_XPCOM
-  case NPNVserviceManager: {
-	nsIServiceManager *sm;
-	int ret = NS_GetServiceManager(&sm);
-	if (NS_FAILED(ret)) {
-	  npw_printf("WARNING: NS_GetServiceManager failed\n");
-	  return NPERR_GENERIC_ERROR;
-	}
-	*(nsIServiceManager **)value = sm;
-	break;
-  }
-  case NPNVDOMWindow:
-  case NPNVDOMElement:
-	npw_printf("WARNING: %s is not supported by NPN_GetValue()\n", string_of_NPNVariable(variable));
-	return NPERR_INVALID_PARAM;
-#endif
   case NPNVnetscapeWindow:
 	if (plugin == NULL) {
 	  npw_printf("ERROR: NPNVnetscapeWindow requires a non NULL instance\n");
