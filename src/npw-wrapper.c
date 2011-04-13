@@ -2421,6 +2421,24 @@ invoke_NPP_GetValue(PluginInstance *plugin, NPPVariable variable, void *value)
 static NPError
 g_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
 {
+  // Firefox sometimes requests NP_GetValue values with NPP_GetValue
+  // for some reason. Notably it requests NPPVpluginDescriptionString
+  // with it when determining whether or not to apply a Flash-specific quirk.
+  //
+  // XXX: The more correct way to fix this may be to accept an NPP
+  // with NULL pdata and let the plugin decide whether to crash or
+  // not. Unfortunately, we get the connection out of the PluginInstance on
+  // the wrapper side, so it's best to avoid a NULL instance
+  // here. This way also avoids extra IPC.
+  if (variable == NPPVpluginNameString || variable == NPPVpluginDescriptionString) {
+	D(bugiI("NPP_GetValue instance=%p, variable=%d [%s]\n",
+			instance, variable, string_of_NPPVariable(variable)));
+	D(bug("WARNING: browser requested NP_GetValue variable via NPP_GetValue.\n"));
+	NPError ret = NP_GetValue(NULL, variable, value);
+	D(bugiD("NPP_GetValue return: %d [%s]\n", ret, string_of_NPError(ret)));
+	return ret;
+  }
+
   if (instance == NULL)
 	return NPERR_INVALID_INSTANCE_ERROR;
 
