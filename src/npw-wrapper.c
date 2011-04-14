@@ -2433,7 +2433,7 @@ g_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
   if (variable == NPPVpluginNameString || variable == NPPVpluginDescriptionString) {
 	D(bugiI("NPP_GetValue instance=%p, variable=%d [%s]\n",
 			instance, variable, string_of_NPPVariable(variable)));
-	D(bug("WARNING: browser requested NP_GetValue variable via NPP_GetValue.\n"));
+	npw_printf("WARNING: browser requested NP_GetValue variable via NPP_GetValue.\n");
 	NPError ret = NP_GetValue(NULL, variable, value);
 	D(bugiD("NPP_GetValue return: %d [%s]\n", ret, string_of_NPError(ret)));
 	return ret;
