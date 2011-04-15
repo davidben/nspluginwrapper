@@ -59,7 +59,6 @@ extern int rpc_listen_socket(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_listen(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_dispatch(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_wait_dispatch(rpc_connection_t *connection, int timeout) attribute_hidden;
-extern bool rpc_has_pending_sync(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_dispatch_pending_sync(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_socket(rpc_connection_t *connection) attribute_hidden;
 

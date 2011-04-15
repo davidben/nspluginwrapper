@@ -1705,7 +1705,7 @@ int rpc_dispatch(rpc_connection_t *connection)
 }
 
 // Returns true if we have a pending SYNC or SYNC_ACK to reply to.
-bool rpc_has_pending_sync(rpc_connection_t *connection)
+static bool rpc_has_pending_sync(rpc_connection_t *connection)
 {
   // Don't run this on nested message loops. Chromium seems to pump
   // the message loop in the plugin process when waiting for
