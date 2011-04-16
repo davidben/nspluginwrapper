@@ -131,6 +131,8 @@ const char *string_of_NPError(int error)
 	_(NPERR_FILE_NOT_FOUND);
 	_(NPERR_NO_DATA);
 	_(NPERR_STREAM_NOT_SEEKABLE);
+	_(NPERR_TIME_RANGE_NOT_SUPPORTED);
+	_(NPERR_MALFORMED_SITE);
 #undef _
   default:
 	str = "<unknown error>";
