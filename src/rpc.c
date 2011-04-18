@@ -1762,7 +1762,6 @@ int rpc_sync(rpc_connection_t *connection)
   if (error != RPC_ERROR_NO_ERROR)
 	return rpc_error(connection, error);
 
-  D(bug("rpc_sync done\n"));
   connection->is_sync = true;
   return RPC_ERROR_NO_ERROR;
 }
@@ -1778,8 +1777,6 @@ int rpc_end_sync(rpc_connection_t *connection)
   }
 
   // send: MESSAGE_SYNC_END (done pending message)
-  D(bug("sending delayed MESSAGE_SYNC_END\n"));
-
   rpc_message_t message;
   rpc_message_init(&message, connection);
   // send: MESSAGE_SYNC_END
@@ -1791,7 +1788,6 @@ int rpc_end_sync(rpc_connection_t *connection)
 	return rpc_error(connection, error);
 
   connection->is_sync = false;
-  D(bug("rpc_end_sync done\n"));
 
   return RPC_ERROR_NO_ERROR;
 }
