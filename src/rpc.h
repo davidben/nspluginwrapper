@@ -125,7 +125,6 @@ extern int rpc_method_invoke(rpc_connection_t *connection, int method, ...) attr
 extern int rpc_method_wait_for_reply(rpc_connection_t *connection, ...) attribute_hidden;
 extern int rpc_method_get_args(rpc_connection_t *connection, ...) attribute_hidden;
 extern int rpc_method_send_reply(rpc_connection_t *connection, ...) attribute_hidden;
-extern bool rpc_method_in_invoke(rpc_connection_t *connection) attribute_hidden;
 
 // Sources
 extern GSource *rpc_event_source_new(rpc_connection_t *connection) attribute_hidden;
