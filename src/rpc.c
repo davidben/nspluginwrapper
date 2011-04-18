@@ -1742,6 +1742,35 @@ int rpc_sync(rpc_connection_t *connection)
 {
   rpc_message_t message;
 
+  /* Strategy to synchronize the connections.
+
+	 The purpose of connection synchronization is to ensure that the
+	 other end is ready to receive our rpc_method_invoke() calls,
+	 i.e. make sure it is not already processing RPC, or has not
+	 started an rpc_method_invoke() call itself.
+
+	 More importantly, it is to ensure that, at any point, at most one
+	 of the wrapper and viewer are running at a time. NPAPI is a
+	 synchronous API and thus assumes the two threads run on the same
+	 event loop. For instance, if the browser requests two paints in a
+	 row, we must ensure the plugin does dispatch an event loop source
+	 in between.
+
+	 To that end, the viewer must ask permission of the wrapper before
+	 doing anything on the plugin thread:
+
+	 - Viewer sends MSG_SYNC, and block until we get MSG_SYNC_ACK
+	 - Process any pending wrapper calls while we are blocked
+	 - After MSG_SYNC_ACK, run an event loop iteration and send MSG_SYNC_END
+
+	 When receiving a MSG_SYNC, the wrapper responds:
+
+	 - If MSG_SYNC was received in rpc_dispatch (at the top of an
+       event loop), MSG_SYNC_ACK immediately.
+	 - Otherwise, make a note and respond when we next return to the
+       event loop.
+  */
+
   D(bug("rpc_sync\n"));
   assert(!connection->is_sync);
 
@@ -1856,25 +1885,6 @@ static int _rpc_method_invoke_valist(rpc_connection_t *connection, int method, v
 {
   rpc_message_t message;
   rpc_message_init(&message, connection);
-
-  /* Strategy to synchronize the connections.
-
-	 The purpose of connection synchronization is to ensure that the
-	 other end is ready to receive our rpc_method_invoke() calls,
-	 i.e. make sure it is not already processing RPC, or has not
-	 started an rpc_method_invoke() call itself.
-
-	 There are two locations where it is safe to process incoming RPC:
-	 - rpc_dispatch(), i.e. from the public entry-point
-	 - rpc_method_wait_for_reply(), while waiting for MESSAGE_REPLY
-
-	 Otherwise, we need to synchronize both ends:
-	 - Send MSG_SYNC, and block until we get MSG_SYNC_ACK
-	 - Process any pending calls while we are blocked
-	 - Honour MSG_SYNC in either rpc_dispatch() or at the end of
-       rpc_method_wait_for_reply(), i.e. while there is nothing else
-       to process, and until MSG_SYNC_END actually
-  */
 
   // send: <invoke> = MESSAGE_START <method-id> MESSAGE_END
   int error = rpc_message_send_int32(&message, RPC_MESSAGE_START);
