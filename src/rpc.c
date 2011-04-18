@@ -460,7 +460,7 @@ struct rpc_connection {
   int dispatch_depth;
   int invoke_depth;
   int handle_depth;
-  int sync_depth;
+  bool is_sync;
   int pending_sync_depth;
 };
 
@@ -485,17 +485,6 @@ void rpc_connection_unref(rpc_connection_t *connection)
 static inline bool _rpc_connection_is_sync_mode(rpc_connection_t *connection)
 {
   return connection->type == RPC_CONNECTION_SERVER;
-}
-
-// Returns whether we are "synchronized" with the other end
-static inline bool _rpc_connection_is_sync(rpc_connection_t *connection)
-{
-  // We may be in the middle of a block of sync'd requests.
-  if (connection->dispatch_depth < 1)
-	return connection->sync_depth > 0;
-  // XXX: Is this ever not true, assuming our handlers are not
-  // horribly broken? (Certainly dealing with those isn't SYNC's job.)
-  return connection->dispatch_depth == connection->handle_depth;
 }
 
 // Returns whether we are allowed to synchronize with the other end
@@ -679,7 +668,7 @@ static rpc_connection_t *rpc_connection_new(int type, const char *ident)
   connection->dispatch_depth = 0;
   connection->invoke_depth = 0;
   connection->handle_depth = 0;
-  connection->sync_depth = 0;
+  connection->is_sync = false;
   connection->pending_sync_depth = 0;
 
   if ((connection->types = rpc_map_new_full((free))) == NULL) {
@@ -1754,7 +1743,7 @@ int rpc_sync(rpc_connection_t *connection)
   rpc_message_t message;
 
   D(bug("rpc_sync\n"));
-  assert(connection->sync_depth == 0);
+  assert(!connection->is_sync);
 
   // send: MESSAGE_SYNC
   rpc_message_init(&message, connection);
@@ -1774,7 +1763,7 @@ int rpc_sync(rpc_connection_t *connection)
 	return rpc_error(connection, error);
 
   D(bug("rpc_sync done\n"));
-  connection->sync_depth = 1; //connection->invoke_depth;
+  connection->is_sync = true;
   return RPC_ERROR_NO_ERROR;
 }
 
@@ -1782,23 +1771,26 @@ int rpc_end_sync(rpc_connection_t *connection)
 {
   D(bug("rpc_end_sync\n"));
 
-  // send: MESSAGE_SYNC_END (done pending message)
-  if (connection->sync_depth) {
-	D(bug("sending delayed MESSAGE_SYNC_END\n"));
-	rpc_message_t message;
-	assert(connection->sync_depth == 1);
-
-	rpc_message_init(&message, connection);
-	// send: MESSAGE_SYNC_END
-	int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC_END);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-	error = rpc_message_flush(&message);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-
-	connection->sync_depth = 0;
+  if (!connection->is_sync) {
+	// This sometimes triggers when we kill the wrapper at a bad time.
+	npw_printf("ERROR: rpc_end_sync called when not in sync!\n");
+	return rpc_error(connection, RPC_ERROR_GENERIC);
   }
+
+  // send: MESSAGE_SYNC_END (done pending message)
+  D(bug("sending delayed MESSAGE_SYNC_END\n"));
+
+  rpc_message_t message;
+  rpc_message_init(&message, connection);
+  // send: MESSAGE_SYNC_END
+  int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC_END);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
+  error = rpc_message_flush(&message);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
+
+  connection->is_sync = false;
   D(bug("rpc_end_sync done\n"));
 
   return RPC_ERROR_NO_ERROR;
