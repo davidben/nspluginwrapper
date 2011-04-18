@@ -5077,11 +5077,42 @@ static int do_main(int argc, char **argv, const char *connection_path)
   // Set error handler - stop plugin if there's a connection error
   rpc_connection_set_error_callback(g_rpc_connection, rpc_error_callback_cb, NULL);
 
+  // Cache an array for the FDs to poll. We always poll one extra: the
+  // RPC fd, which is treated special.
+  int nfds = 2;
+  GPollFD *fds = g_new0(GPollFD, nfds);
+  fds[0].fd = rpc_socket(g_rpc_connection);
+  fds[0].events = G_IO_IN;
+
   g_is_running = true;
   GMainContext *context = g_main_context_default();
   while (g_is_running) {
-	g_main_context_iteration(context, TRUE);
+	/* PREPARE */
+	int max_priority;
+	g_main_context_prepare(context, &max_priority);
+
+	/* QUERY */
+	int timeout, needed_fds;
+	while ((needed_fds = g_main_context_query(context, max_priority, &timeout,
+											  fds + 1, nfds - 1)) > nfds - 1) {
+	  // Reallocate to make room
+	  g_free(fds);
+	  nfds = needed_fds + 1;
+	  fds = g_new0(GPollFD, nfds);
+	  fds[0].fd = rpc_socket(g_rpc_connection);
+	  fds[0].events = G_IO_IN;
+	}
+
+	/* POLL */
+	(g_main_context_get_poll_func(context))(fds, nfds, timeout);
+
+	/* CHECK */
+	g_main_context_check(context, max_priority, fds + 1, nfds - 1);
+
+	/* DISPATCH */
+	g_main_context_dispatch(context);
   }
+  g_free(fds);
   D(bug("--- EXIT ---\n"));
 
 #if USE_NPIDENTIFIER_CACHE
