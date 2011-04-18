@@ -65,6 +65,9 @@ rpc_connection_t *g_rpc_connection attribute_hidden = NULL;
 // Viewer main thread - make sure we call into the browser from the main thread
 static pthread_t g_main_thread = 0;
 
+// True as long as the event loop is running.
+static bool g_is_running = false;
+
 // Instance state information about the plugin
 typedef struct _PluginInstance {
   NPW_DECL_PLUGIN_INSTANCE;
@@ -3853,7 +3856,7 @@ g_NP_Shutdown(void)
   if (NPN_HAS_FEATURE(NPRUNTIME_SCRIPTING))
 	npobject_bridge_destroy();
 
-  gtk_main_quit();
+  g_is_running = false;
 
   return ret;
 }
@@ -4973,7 +4976,7 @@ static void rpc_error_callback_cb(rpc_connection_t *connection, void *user_data)
 {
   D(bug("RPC connection %p is in a bad state, closing the plugin\n",connection));
   rpc_connection_set_error_callback(connection, NULL, NULL);
-  gtk_main_quit();
+  g_is_running = false;
 }
 
 
@@ -5073,8 +5076,12 @@ static int do_main(int argc, char **argv, const char *connection_path)
 
   // Set error handler - stop plugin if there's a connection error
   rpc_connection_set_error_callback(g_rpc_connection, rpc_error_callback_cb, NULL);
- 
-  gtk_main();
+
+  g_is_running = true;
+  GMainContext *context = g_main_context_default();
+  while (g_is_running) {
+	g_main_context_iteration(context, TRUE);
+  }
   D(bug("--- EXIT ---\n"));
 
 #if USE_NPIDENTIFIER_CACHE
