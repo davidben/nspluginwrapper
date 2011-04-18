@@ -5066,14 +5066,6 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	return 1;
   }
 
-  GSource *rpc_source = rpc_event_source_new(g_rpc_connection);
-  g_source_set_priority(rpc_source, G_PRIORITY_LOW);
-  g_source_attach(rpc_source, NULL);
-
-  GSource *rpc_sync_source = rpc_sync_source_new(g_rpc_connection);
-  g_source_set_priority(rpc_sync_source, G_PRIORITY_HIGH);
-  g_source_attach(rpc_sync_source, NULL);
-
   // Set error handler - stop plugin if there's a connection error
   rpc_connection_set_error_callback(g_rpc_connection, rpc_error_callback_cb, NULL);
 
@@ -5107,10 +5099,20 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	(g_main_context_get_poll_func(context))(fds, nfds, timeout);
 
 	/* CHECK */
-	g_main_context_check(context, max_priority, fds + 1, nfds - 1);
+	bool ready = g_main_context_check(context, max_priority, fds + 1, nfds - 1);
 
 	/* DISPATCH */
-	g_main_context_dispatch(context);
+	if (ready) {
+	  // Before we dispatch, sync with the browser. We don't need to
+	  // check for RPC requests as the rpc_sync will handle them.
+	  rpc_sync(g_rpc_connection);
+	  g_main_context_dispatch(context);
+	  rpc_end_sync(g_rpc_connection);
+	} else if (fds[0].revents & fds[0].events) {
+	  // We don't have anything, but there is an incoming RPC
+	  // request. Just respond to it. No need to sync.
+	  rpc_dispatch(g_rpc_connection);
+	}
   }
   g_free(fds);
   D(bug("--- EXIT ---\n"));
@@ -5119,8 +5121,6 @@ static int do_main(int argc, char **argv, const char *connection_path)
   npidentifier_cache_destroy();
 #endif
 
-  g_source_destroy(rpc_source);
-  g_source_destroy(rpc_sync_source);
   if (xt_source)
 	g_source_destroy(xt_source);
 

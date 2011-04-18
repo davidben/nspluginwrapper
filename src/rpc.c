@@ -1679,7 +1679,11 @@ static int _rpc_dispatch_sync(rpc_connection_t *connection)
 
   // call: rpc_dispatch() (pending remote calls)
   // recv: MESSAGE_SYNC_END
-  return _rpc_dispatch_until(connection, &message, RPC_MESSAGE_SYNC_END);
+  GTimer *timer = g_timer_new();
+  error = _rpc_dispatch_until(connection, &message, RPC_MESSAGE_SYNC_END);
+  D(bug("blocked for %lf seconds for SYNC_END\n", g_timer_elapsed(timer, NULL)));
+  g_timer_destroy(timer);
+  return error;
 }
 
 // Dispatch message received in the server loop (public entry point)
@@ -1714,13 +1718,12 @@ static bool rpc_has_pending_sync(rpc_connection_t *connection)
 	D(bug("rpc_has_pending_sync called on a nested event loop!\n"));
 	return false;
   }
-  return connection->sync_depth || connection->pending_sync_depth;
+  return connection->pending_sync_depth;
 }
 
 // Close any pending sync requests. This should be called from the
 // event loop. In the wrapper, if we received a SYNC, we SYNC_ACK it
-// now and wait for the SYNC_END. In the viewer, if we sent a SYNC
-// that was SYNC_ACK'd, we SYNC_END it now. This is so interleaving is
+// now and wait for the SYNC_END. This is so interleaving is
 // done at event loop iteration boudaries.
 int rpc_dispatch_pending_sync(rpc_connection_t *connection)
 {
@@ -1732,6 +1735,52 @@ int rpc_dispatch_pending_sync(rpc_connection_t *connection)
 	D(bug("rpc_dispatch_pending_sync called on a nested event loop!\n"));
 	return RPC_ERROR_NO_ERROR;
   }
+
+  // send: MESSAGE_SYNC_ACK (pending message)
+  if (connection->pending_sync_depth) {
+	D(bug("sending delayed MESSAGE_SYNC_ACK\n"));
+	assert(connection->pending_sync_depth == 1);
+	assert(_rpc_wait_dispatch(connection, 0) == 0);
+
+	connection->pending_sync_depth = 0;
+	return _rpc_dispatch_sync(connection);
+  }
+
+  return RPC_ERROR_NO_ERROR;
+}
+
+int rpc_sync(rpc_connection_t *connection)
+{
+  rpc_message_t message;
+
+  D(bug("rpc_sync\n"));
+  assert(connection->sync_depth == 0);
+
+  // send: MESSAGE_SYNC
+  rpc_message_init(&message, connection);
+  int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
+  error = rpc_message_flush(&message);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
+
+  GTimer *timer = g_timer_new();
+  // call: rpc_dispatch() (pending remote calls)
+  error = _rpc_dispatch_until(connection, &message, RPC_MESSAGE_SYNC_ACK);
+  D(bug("blocked for %lf seconds for SYNC_ACK\n", g_timer_elapsed(timer, NULL)));
+  g_timer_destroy(timer);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
+
+  D(bug("rpc_sync done\n"));
+  connection->sync_depth = 1; //connection->invoke_depth;
+  return RPC_ERROR_NO_ERROR;
+}
+
+int rpc_end_sync(rpc_connection_t *connection)
+{
+  D(bug("rpc_end_sync\n"));
 
   // send: MESSAGE_SYNC_END (done pending message)
   if (connection->sync_depth) {
@@ -1750,19 +1799,11 @@ int rpc_dispatch_pending_sync(rpc_connection_t *connection)
 
 	connection->sync_depth = 0;
   }
-
-  // send: MESSAGE_SYNC_ACK (pending message)
-  if (connection->pending_sync_depth) {
-	D(bug("sending delayed MESSAGE_SYNC_ACK\n"));
-	assert(connection->pending_sync_depth == 1);
-	assert(_rpc_wait_dispatch(connection, 0) == 0);
-
-	connection->pending_sync_depth = 0;
-	return _rpc_dispatch_sync(connection);
-  }
+  D(bug("rpc_end_sync done\n"));
 
   return RPC_ERROR_NO_ERROR;
 }
+
 
 /* ====================================================================== */
 /* === Method Callbacks Handling                                      === */
@@ -1846,26 +1887,6 @@ static int _rpc_method_invoke_valist(rpc_connection_t *connection, int method, v
        rpc_method_wait_for_reply(), i.e. while there is nothing else
        to process, and until MSG_SYNC_END actually
   */
-  bool is_sync_mode = _rpc_connection_is_sync_mode(connection);
-  if (is_sync_mode && !_rpc_connection_is_sync(connection)) {
-	assert(connection->sync_depth == 0);
-	assert(connection->invoke_depth == 1);
-
-	// send: MESSAGE_SYNC
-	int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-	error = rpc_message_flush(&message);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-
-	// call: rpc_dispatch() (pending remote calls)
-	error = _rpc_dispatch_until(connection, &message, RPC_MESSAGE_SYNC_ACK);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-
-	connection->sync_depth = connection->invoke_depth;
-  }
 
   // send: <invoke> = MESSAGE_START <method-id> MESSAGE_END
   int error = rpc_message_send_int32(&message, RPC_MESSAGE_START);

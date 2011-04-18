@@ -62,6 +62,9 @@ extern int rpc_wait_dispatch(rpc_connection_t *connection, int timeout) attribut
 extern int rpc_dispatch_pending_sync(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_socket(rpc_connection_t *connection) attribute_hidden;
 
+extern int rpc_sync(rpc_connection_t *connection) attribute_hidden;
+extern int rpc_end_sync(rpc_connection_t *connection) attribute_hidden;
+
 enum {
   RPC_STATUS_BROKEN						= -1,
   RPC_STATUS_CLOSED						= 0,
