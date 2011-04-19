@@ -2168,6 +2168,16 @@ g_NPN_ReleaseObject(NPObject *npobj)
 	g_NPN_ReleaseObject_Now(npobj);
   }
   else {
+	/* NPVariants that get tunneled over RPC get released locally. To
+	 * counter this, they get retained when sent over RPC. However,
+	 * the corresponding local ReleaseObject means that we are likely
+	 * to call NPN_ReleaseObject when handle_depth !=
+	 * dispatch_depth. To that end, delay the release object.
+	 *
+	 * XXX: This is awful. It really should be revised, possibly by
+	 * not using the browser-provided NPN_ReleaseVariantValue if NPAPI
+	 * allows it. Or we make a copy of it, send that over instead and
+	 * NPN_ReleaseVariantValue /before/ making the call. */
 	D(bug("NPN_ReleaseObject <delayed>\n"));
 	g_NPN_ReleaseObject_Delayed(npobj);
   }
