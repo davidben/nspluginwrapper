@@ -460,7 +460,7 @@ struct rpc_connection {
   int dispatch_depth;
   int invoke_depth;
   int handle_depth;
-  int sync_depth;
+  bool is_sync;
   int pending_sync_depth;
 };
 
@@ -485,17 +485,6 @@ void rpc_connection_unref(rpc_connection_t *connection)
 static inline bool _rpc_connection_is_sync_mode(rpc_connection_t *connection)
 {
   return connection->type == RPC_CONNECTION_SERVER;
-}
-
-// Returns whether we are "synchronized" with the other end
-static inline bool _rpc_connection_is_sync(rpc_connection_t *connection)
-{
-  // We may be in the middle of a block of sync'd requests.
-  if (connection->dispatch_depth < 1)
-	return connection->sync_depth > 0;
-  // XXX: Is this ever not true, assuming our handlers are not
-  // horribly broken? (Certainly dealing with those isn't SYNC's job.)
-  return connection->dispatch_depth == connection->handle_depth;
 }
 
 // Returns whether we are allowed to synchronize with the other end
@@ -679,7 +668,7 @@ static rpc_connection_t *rpc_connection_new(int type, const char *ident)
   connection->dispatch_depth = 0;
   connection->invoke_depth = 0;
   connection->handle_depth = 0;
-  connection->sync_depth = 0;
+  connection->is_sync = false;
   connection->pending_sync_depth = 0;
 
   if ((connection->types = rpc_map_new_full((free))) == NULL) {
@@ -1679,7 +1668,11 @@ static int _rpc_dispatch_sync(rpc_connection_t *connection)
 
   // call: rpc_dispatch() (pending remote calls)
   // recv: MESSAGE_SYNC_END
-  return _rpc_dispatch_until(connection, &message, RPC_MESSAGE_SYNC_END);
+  GTimer *timer = g_timer_new();
+  error = _rpc_dispatch_until(connection, &message, RPC_MESSAGE_SYNC_END);
+  D(bug("blocked for %lf seconds for SYNC_END\n", g_timer_elapsed(timer, NULL)));
+  g_timer_destroy(timer);
+  return error;
 }
 
 // Dispatch message received in the server loop (public entry point)
@@ -1714,13 +1707,12 @@ static bool rpc_has_pending_sync(rpc_connection_t *connection)
 	D(bug("rpc_has_pending_sync called on a nested event loop!\n"));
 	return false;
   }
-  return connection->sync_depth || connection->pending_sync_depth;
+  return connection->pending_sync_depth;
 }
 
 // Close any pending sync requests. This should be called from the
 // event loop. In the wrapper, if we received a SYNC, we SYNC_ACK it
-// now and wait for the SYNC_END. In the viewer, if we sent a SYNC
-// that was SYNC_ACK'd, we SYNC_END it now. This is so interleaving is
+// now and wait for the SYNC_END. This is so interleaving is
 // done at event loop iteration boudaries.
 int rpc_dispatch_pending_sync(rpc_connection_t *connection)
 {
@@ -1731,24 +1723,6 @@ int rpc_dispatch_pending_sync(rpc_connection_t *connection)
   if (connection->invoke_depth > 0 || connection->handle_depth > 0) {
 	D(bug("rpc_dispatch_pending_sync called on a nested event loop!\n"));
 	return RPC_ERROR_NO_ERROR;
-  }
-
-  // send: MESSAGE_SYNC_END (done pending message)
-  if (connection->sync_depth) {
-	D(bug("sending delayed MESSAGE_SYNC_END\n"));
-	rpc_message_t message;
-	assert(connection->sync_depth == 1);
-
-	rpc_message_init(&message, connection);
-	// send: MESSAGE_SYNC_END
-	int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC_END);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-	error = rpc_message_flush(&message);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-
-	connection->sync_depth = 0;
   }
 
   // send: MESSAGE_SYNC_ACK (pending message)
@@ -1763,6 +1737,90 @@ int rpc_dispatch_pending_sync(rpc_connection_t *connection)
 
   return RPC_ERROR_NO_ERROR;
 }
+
+int rpc_sync(rpc_connection_t *connection)
+{
+  rpc_message_t message;
+
+  /* Strategy to synchronize the connections.
+
+	 The purpose of connection synchronization is to ensure that the
+	 other end is ready to receive our rpc_method_invoke() calls,
+	 i.e. make sure it is not already processing RPC, or has not
+	 started an rpc_method_invoke() call itself.
+
+	 More importantly, it is to ensure that, at any point, at most one
+	 of the wrapper and viewer are running at a time. NPAPI is a
+	 synchronous API and thus assumes the two threads run on the same
+	 event loop. For instance, if the browser requests two paints in a
+	 row, we must ensure the plugin does dispatch an event loop source
+	 in between.
+
+	 To that end, the viewer must ask permission of the wrapper before
+	 doing anything on the plugin thread:
+
+	 - Viewer sends MSG_SYNC, and block until we get MSG_SYNC_ACK
+	 - Process any pending wrapper calls while we are blocked
+	 - After MSG_SYNC_ACK, run an event loop iteration and send MSG_SYNC_END
+
+	 When receiving a MSG_SYNC, the wrapper responds:
+
+	 - If MSG_SYNC was received in rpc_dispatch (at the top of an
+       event loop), MSG_SYNC_ACK immediately.
+	 - Otherwise, make a note and respond when we next return to the
+       event loop.
+  */
+
+  D(bug("rpc_sync\n"));
+  assert(!connection->is_sync);
+
+  // send: MESSAGE_SYNC
+  rpc_message_init(&message, connection);
+  int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
+  error = rpc_message_flush(&message);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
+
+  GTimer *timer = g_timer_new();
+  // call: rpc_dispatch() (pending remote calls)
+  error = _rpc_dispatch_until(connection, &message, RPC_MESSAGE_SYNC_ACK);
+  D(bug("blocked for %lf seconds for SYNC_ACK\n", g_timer_elapsed(timer, NULL)));
+  g_timer_destroy(timer);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
+
+  connection->is_sync = true;
+  return RPC_ERROR_NO_ERROR;
+}
+
+int rpc_end_sync(rpc_connection_t *connection)
+{
+  D(bug("rpc_end_sync\n"));
+
+  if (!connection->is_sync) {
+	// This sometimes triggers when we kill the wrapper at a bad time.
+	npw_printf("ERROR: rpc_end_sync called when not in sync!\n");
+	return rpc_error(connection, RPC_ERROR_GENERIC);
+  }
+
+  // send: MESSAGE_SYNC_END (done pending message)
+  rpc_message_t message;
+  rpc_message_init(&message, connection);
+  // send: MESSAGE_SYNC_END
+  int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC_END);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
+  error = rpc_message_flush(&message);
+  if (error != RPC_ERROR_NO_ERROR)
+	return rpc_error(connection, error);
+
+  connection->is_sync = false;
+
+  return RPC_ERROR_NO_ERROR;
+}
+
 
 /* ====================================================================== */
 /* === Method Callbacks Handling                                      === */
@@ -1827,45 +1885,6 @@ static int _rpc_method_invoke_valist(rpc_connection_t *connection, int method, v
 {
   rpc_message_t message;
   rpc_message_init(&message, connection);
-
-  /* Strategy to synchronize the connections.
-
-	 The purpose of connection synchronization is to ensure that the
-	 other end is ready to receive our rpc_method_invoke() calls,
-	 i.e. make sure it is not already processing RPC, or has not
-	 started an rpc_method_invoke() call itself.
-
-	 There are two locations where it is safe to process incoming RPC:
-	 - rpc_dispatch(), i.e. from the public entry-point
-	 - rpc_method_wait_for_reply(), while waiting for MESSAGE_REPLY
-
-	 Otherwise, we need to synchronize both ends:
-	 - Send MSG_SYNC, and block until we get MSG_SYNC_ACK
-	 - Process any pending calls while we are blocked
-	 - Honour MSG_SYNC in either rpc_dispatch() or at the end of
-       rpc_method_wait_for_reply(), i.e. while there is nothing else
-       to process, and until MSG_SYNC_END actually
-  */
-  bool is_sync_mode = _rpc_connection_is_sync_mode(connection);
-  if (is_sync_mode && !_rpc_connection_is_sync(connection)) {
-	assert(connection->sync_depth == 0);
-	assert(connection->invoke_depth == 1);
-
-	// send: MESSAGE_SYNC
-	int error = rpc_message_send_int32(&message, RPC_MESSAGE_SYNC);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-	error = rpc_message_flush(&message);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-
-	// call: rpc_dispatch() (pending remote calls)
-	error = _rpc_dispatch_until(connection, &message, RPC_MESSAGE_SYNC_ACK);
-	if (error != RPC_ERROR_NO_ERROR)
-	  return rpc_error(connection, error);
-
-	connection->sync_depth = connection->invoke_depth;
-  }
 
   // send: <invoke> = MESSAGE_START <method-id> MESSAGE_END
   int error = rpc_message_send_int32(&message, RPC_MESSAGE_START);
@@ -2052,22 +2071,6 @@ int rpc_method_send_reply(rpc_connection_t *connection, ...)
   --connection->handle_depth;
 
   return ret;
-}
-
-bool rpc_method_in_invoke(rpc_connection_t *connection)
-{
-  D(bug("rpc_method_in_invoke\n"));
-  if (connection == NULL)
-	return false;
-  // Our stack should alternate between handle/dispatch and
-  // invokes. Some calls are only safe to handle called from an event
-  // loop. In this case, we should have values invoke_depth = 0;
-  // handle_depth = 1; dispatch_depth = 1
-  D(bug("invoke_depth = %d; dispatch_depth = %d; handle_depth = %d\n",
-		connection->invoke_depth,
-		connection->dispatch_depth,
-		connection->handle_depth));
-  return connection->invoke_depth > 0;
 }
 
 
