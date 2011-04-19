@@ -82,7 +82,8 @@ int rpc_type_of_NPPVariable(int variable)
   case NPPVpluginUrlRequestsDisplayedBool:
   case NPPVpluginWantsAllNetworkStreams:
   case NPPVpluginCancelSrcStream:
-  case NPPVSupportsAdvancedKeyHandling:
+  case NPPVsupportsAdvancedKeyHandling:
+  case NPPVpluginUsesDOMForCursorBool:
 	type = RPC_TYPE_BOOLEAN;
 	break;
   case NPPVpluginScriptableNPObject:

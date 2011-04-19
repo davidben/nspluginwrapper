@@ -253,7 +253,8 @@ const char *string_of_NPPVariable(int variable)
 	_(NPPVpluginWantsAllNetworkStreams);
 	_(NPPVpluginNativeAccessibleAtkPlugId);
 	_(NPPVpluginCancelSrcStream);
-	_(NPPVSupportsAdvancedKeyHandling);
+	_(NPPVsupportsAdvancedKeyHandling);
+	_(NPPVpluginUsesDOMForCursorBool);
 #undef _
   default:
 	switch (variable & 0xff) {
