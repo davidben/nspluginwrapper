@@ -3909,19 +3909,13 @@ static void plugin_init(int is_NP_Initialize)
 	{ RPC_METHOD_NPN_IDENTIFIER_IS_STRING,				handle_NPN_IdentifierIsString },
 	{ RPC_METHOD_NPN_UTF8_FROM_IDENTIFIER,				handle_NPN_UTF8FromIdentifier },
 	{ RPC_METHOD_NPN_INT_FROM_IDENTIFIER,				handle_NPN_IntFromIdentifier },
-	{ RPC_METHOD_NPCLASS_INVALIDATE,					npclass_handle_Invalidate },
-	{ RPC_METHOD_NPCLASS_HAS_METHOD,					npclass_handle_HasMethod },
-	{ RPC_METHOD_NPCLASS_INVOKE,						npclass_handle_Invoke },
-	{ RPC_METHOD_NPCLASS_INVOKE_DEFAULT,				npclass_handle_InvokeDefault },
-	{ RPC_METHOD_NPCLASS_HAS_PROPERTY,					npclass_handle_HasProperty },
-	{ RPC_METHOD_NPCLASS_GET_PROPERTY,					npclass_handle_GetProperty },
-	{ RPC_METHOD_NPCLASS_SET_PROPERTY,					npclass_handle_SetProperty },
-	{ RPC_METHOD_NPCLASS_REMOVE_PROPERTY,				npclass_handle_RemoveProperty },
-	{ RPC_METHOD_NPCLASS_ENUMERATE,						npclass_handle_Enumerate },
-	{ RPC_METHOD_NPCLASS_CONSTRUCT,						npclass_handle_Construct },
   };
   if (rpc_connection_add_method_descriptors(g_rpc_connection, vtable, sizeof(vtable) / sizeof(vtable[0])) < 0) {
 	npw_printf("ERROR: failed to setup NPN method callbacks\n");
+	return;
+  }
+  if (npclass_add_method_descriptors(g_rpc_connection) < 0) {
+	npw_printf("ERROR: failed to setup NPClass method callbacks\n");
 	return;
   }
 

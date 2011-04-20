@@ -936,6 +936,24 @@ bool g_NPClass_Construct(NPObject *npobj, const NPVariant *args, uint32_t argCou
   return ret;
 }
 
+int npclass_add_method_descriptors(rpc_connection_t *connection)
+{
+  static const rpc_method_descriptor_t vtable[] = {
+	{ RPC_METHOD_NPCLASS_INVALIDATE,		npclass_handle_Invalidate },
+	{ RPC_METHOD_NPCLASS_HAS_METHOD,		npclass_handle_HasMethod },
+	{ RPC_METHOD_NPCLASS_INVOKE,			npclass_handle_Invoke },
+	{ RPC_METHOD_NPCLASS_INVOKE_DEFAULT,	npclass_handle_InvokeDefault },
+	{ RPC_METHOD_NPCLASS_HAS_PROPERTY,		npclass_handle_HasProperty },
+	{ RPC_METHOD_NPCLASS_GET_PROPERTY,		npclass_handle_GetProperty },
+	{ RPC_METHOD_NPCLASS_SET_PROPERTY,		npclass_handle_SetProperty },
+	{ RPC_METHOD_NPCLASS_REMOVE_PROPERTY,	npclass_handle_RemoveProperty },
+	{ RPC_METHOD_NPCLASS_ENUMERATE,			npclass_handle_Enumerate },
+	{ RPC_METHOD_NPCLASS_CONSTRUCT,			npclass_handle_Construct },
+  };
+  return rpc_connection_add_method_descriptors(g_rpc_connection,
+											   vtable, sizeof(vtable));
+}
+
 
 /* ====================================================================== */
 /* === NPObjectInfo                                                   === */

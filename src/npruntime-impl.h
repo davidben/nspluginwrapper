@@ -43,17 +43,7 @@ extern void npobject_bridge_destroy(void) attribute_hidden;
 
 extern NPClass npclass_bridge attribute_hidden;
 
-extern int npclass_handle_Invalidate(rpc_connection_t *connection) attribute_hidden;
-extern int npclass_handle_HasMethod(rpc_connection_t *connection) attribute_hidden;
-extern int npclass_handle_Invoke(rpc_connection_t *connection) attribute_hidden;
-extern int npclass_handle_InvokeDefault(rpc_connection_t *connection) attribute_hidden;
-extern int npclass_handle_HasProperty(rpc_connection_t *connection) attribute_hidden;
-extern int npclass_handle_GetProperty(rpc_connection_t *connection) attribute_hidden;
-extern int npclass_handle_SetProperty(rpc_connection_t *connection) attribute_hidden;
-extern int npclass_handle_RemoveProperty(rpc_connection_t *connection) attribute_hidden;
-extern int npclass_handle_Invalidate(rpc_connection_t *connection) attribute_hidden;
-extern int npclass_handle_Enumerate(rpc_connection_t *connection) attribute_hidden;
-extern int npclass_handle_Construct(rpc_connection_t *connection) attribute_hidden;
+extern int npclass_add_method_descriptors(rpc_connection_t *connection) attribute_hidden;
 
 struct _NPVariant;
 extern void npvariant_clear(struct _NPVariant *variant) attribute_hidden;

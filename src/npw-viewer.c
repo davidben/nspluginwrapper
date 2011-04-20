@@ -4969,19 +4969,13 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	{ RPC_METHOD_NPP_STREAM_AS_FILE,			handle_NPP_StreamAsFile },
 	{ RPC_METHOD_NPP_PRINT,						handle_NPP_Print },
 	{ RPC_METHOD_NPP_HANDLE_EVENT,				handle_NPP_HandleEvent },
-	{ RPC_METHOD_NPCLASS_INVALIDATE,			npclass_handle_Invalidate },
-	{ RPC_METHOD_NPCLASS_HAS_METHOD,			npclass_handle_HasMethod },
-	{ RPC_METHOD_NPCLASS_INVOKE,				npclass_handle_Invoke },
-	{ RPC_METHOD_NPCLASS_INVOKE_DEFAULT,		npclass_handle_InvokeDefault },
-	{ RPC_METHOD_NPCLASS_HAS_PROPERTY,			npclass_handle_HasProperty },
-	{ RPC_METHOD_NPCLASS_GET_PROPERTY,			npclass_handle_GetProperty },
-	{ RPC_METHOD_NPCLASS_SET_PROPERTY,			npclass_handle_SetProperty },
-	{ RPC_METHOD_NPCLASS_REMOVE_PROPERTY,		npclass_handle_RemoveProperty },
-	{ RPC_METHOD_NPCLASS_ENUMERATE,				npclass_handle_Enumerate },
-	{ RPC_METHOD_NPCLASS_CONSTRUCT,				npclass_handle_Construct },
   };
   if (rpc_connection_add_method_descriptors(g_rpc_connection, vtable, sizeof(vtable) / sizeof(vtable[0])) < 0) {
 	npw_printf("ERROR: failed to setup NPP method callbacks\n");
+	return 1;
+  }
+  if (npclass_add_method_descriptors(g_rpc_connection) < 0) {
+	npw_printf("ERROR: failed to setup NPClass method callbacks\n");
 	return 1;
   }
 
