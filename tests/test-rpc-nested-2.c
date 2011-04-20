@@ -138,8 +138,6 @@ handle_f3 (rpc_connection_t *connection)
   error = rpc_method_send_reply (connection, RPC_TYPE_INVALID);
   RPC_TEST_ENSURE_NO_ERROR (error);
 
-  f (RPC_TEST_METHOD_F5);
-
   return error;
 }
 
