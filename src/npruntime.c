@@ -184,8 +184,8 @@ void npobject_destroy_proxy(NPObject *npobj, bool release_stub)
   assert(proxy != NULL);
   if (release_stub && proxy->is_valid) {
 	npclass_invoke_Deallocate(proxy);
-	g_hash_table_remove(g_proxies, GINT_TO_POINTER(proxy->id));
   }
+  g_hash_table_remove(g_proxies, GINT_TO_POINTER(proxy->id));
   free(npobj);
   D(bugiD("npobject_destroy_proxy done\n"));
 }
