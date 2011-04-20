@@ -299,52 +299,6 @@ void g_NPClass_Deallocate(NPObject *npobj)
   npobject_destroy_proxy(npobj, true);
 }
 
-// NPClass::Invalidate
-int npclass_handle_Invalidate(rpc_connection_t *connection)
-{
-  D(bug("npclass_handle_Invalidate\n"));
-
-  NPObject *npobj;
-  int error = rpc_method_get_args(connection,
-								  RPC_TYPE_NP_OBJECT, &npobj,
-								  RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPClass::Invalidate() get args", error);
-	return error;
-  }
-
-  if (npobj && is_valid_npobject_class(npobj) && npobj->_class->invalidate) {
-	D(bugiI("NPClass::Invalidate(npobj %p)\n", npobj));
-	npobj->_class->invalidate(npobj);
-	D(bugiD("NPClass::Invalidate done\n"));
-  }
-
-  return rpc_method_send_reply(connection, RPC_TYPE_INVALID);
-}
-
-static void npclass_invoke_Invalidate(NPObject *npobj)
-{
-  npw_return_if_fail(rpc_method_invoke_possible(g_rpc_connection));
-
-  int error = rpc_method_invoke(g_rpc_connection,
-								RPC_METHOD_NPCLASS_INVALIDATE,
-								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPClass::Invalidate() invoke", error);
-	return;
-  }
-
-  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPClass::Invalidate() wait for reply", error);
-	return;
-  }
-}
-
 void g_NPClass_Invalidate(NPObject *npobj)
 {
   if (!is_valid_npobject_proxy(npobj))
@@ -356,7 +310,10 @@ void g_NPClass_Invalidate(NPObject *npobj)
   }
 
   D(bugiI("NPClass::Invalidate(npobj %p)\n", npobj));
-  npclass_invoke_Invalidate(npobj);
+  // Just invalidate the proxy itself. There may be multiple proxies
+  // for a plugin-side NPObject. We'll invalidate them viewer-side.
+  NPObjectProxy *proxy = npobject_get_proxy(npobj);
+  proxy->is_valid = false;
   D(bugiD("NPClass::Invalidate done\n"));
 }
 
@@ -1121,7 +1078,6 @@ bool g_NPClass_Construct(NPObject *npobj, const NPVariant *args, uint32_t argCou
 int npclass_add_method_descriptors(rpc_connection_t *connection)
 {
   static const rpc_method_descriptor_t vtable[] = {
-	{ RPC_METHOD_NPCLASS_INVALIDATE,		npclass_handle_Invalidate },
 	{ RPC_METHOD_NPCLASS_HAS_METHOD,		npclass_handle_HasMethod },
 	{ RPC_METHOD_NPCLASS_INVOKE,			npclass_handle_Invoke },
 	{ RPC_METHOD_NPCLASS_INVOKE_DEFAULT,	npclass_handle_InvokeDefault },
