@@ -103,12 +103,19 @@ NPObject *npobject_lookup_local(uint32_t id)
   return stub ? stub->npobject : NULL;
 }
 
-static void npobject_destroy_stub(NPObjectStub *stub)
+static void npobject_destroy_stub_obj(NPObjectStub *stub)
 {
-  D(bug("npobject_stub: id=0x%x\n", stub->id));
+  D(bug("npobject_destroy_stub: id=0x%x\n", stub->id));
   g_hash_table_remove(g_stubs, GINT_TO_POINTER(stub->id));
   NPN_ReleaseObject(stub->npobject);
   g_free(stub);
+}
+
+void npobject_destroy_stub(uint32_t id)
+{
+  NPObjectStub *stub = npobject_lookup_stub(id);
+  assert(stub != NULL);
+  npobject_destroy_stub_obj(stub);
 }
 
 /* ====================================================================== */
@@ -152,6 +159,23 @@ uint32_t npobject_get_proxy_id(NPObject *npobj)
   if (proxy == NULL)
 	return 0;
   return proxy->id;
+}
+
+static void npclass_invoke_Deallocate(NPObjectProxy *proxy);
+
+void npobject_destroy_proxy(NPObject *npobj, bool release_stub)
+{
+  // Unregister the proxy.
+  D(bugiI("npobject_destroy_proxy: npobj=%p, release_stub=%d\n",
+		  npobj, release_stub));
+  NPObjectProxy *proxy = npobject_get_proxy(npobj);
+  assert(proxy != NULL);
+  if (release_stub && proxy->is_valid) {
+	npclass_invoke_Deallocate(proxy);
+	g_hash_table_remove(g_proxies, GINT_TO_POINTER(proxy->id));
+  }
+  free(npobj);
+  D(bugiD("npobject_destroy_proxy done\n"));
 }
 
 static inline bool is_valid_npobject_proxy(NPObject *npobj)
@@ -228,7 +252,7 @@ int npclass_handle_Deallocate(rpc_connection_t *connection)
   D(bugiI("NPClass:Deallocate: id=0x%x\n", id));
   NPObjectStub *stub = npobject_lookup_stub(id);
   if (stub != NULL) {
-	npobject_destroy_stub(stub);
+	npobject_destroy_stub_obj(stub);
   }
   D(bugiD("NPClass:Deallocate done\n"));
 
@@ -260,15 +284,7 @@ static void npclass_invoke_Deallocate(NPObjectProxy *proxy)
 
 void g_NPClass_Deallocate(NPObject *npobj)
 {
-  // Unregister the proxy.
-  D(bugiI("NPClass::Deallocate: npobj=%p\n", npobj));
-  NPObjectProxy *proxy = npobject_get_proxy(npobj);
-  if (proxy && proxy->is_valid) {
-	npclass_invoke_Deallocate(proxy);
-	g_hash_table_remove(g_proxies, GINT_TO_POINTER(proxy->id));
-  }
-  D(bugiD("NPClass::Deallocate done\n"));
-  free(npobj);
+  npobject_destroy_proxy(npobj, true);
 }
 
 // NPClass::Invalidate
@@ -1155,7 +1171,7 @@ static void proxy_deactivate_func(gpointer key, gpointer value, gpointer user_da
 static void stub_destroy_func(gpointer key, gpointer value, gpointer user_data)
 {
   NPObjectStub *stub = (NPObjectStub *)value;
-  npobject_destroy_stub(stub);
+  npobject_destroy_stub_obj(stub);
 }
 
 void npruntime_deactivate(void)

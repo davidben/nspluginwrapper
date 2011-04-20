@@ -33,6 +33,7 @@ extern int npclass_add_method_descriptors(rpc_connection_t *connection) attribut
 // Management of stubs, objects which live on the side that owns the
 // NPObject and holds a reference to it on behalf of a proxy.
 extern uint32_t npobject_create_stub(NPObject *npobj) attribute_hidden;
+extern void npobject_destroy_stub(uint32_t id) attribute_hidden;
 extern NPObject *npobject_lookup_local(uint32_t id) attribute_hidden;
 
 // Create a proxy object. The received id must correspond to a live
@@ -41,6 +42,7 @@ extern NPObject *npobject_lookup_local(uint32_t id) attribute_hidden;
 // its stub.
 extern NPObject *npobject_create_proxy(uint32_t id) attribute_hidden;
 extern uint32_t npobject_get_proxy_id(NPObject *npobj) attribute_hidden;
+extern void npobject_destroy_proxy(NPObject *npobj, bool release_stub);
 
 struct _NPVariant;
 extern void npvariant_clear(struct _NPVariant *variant) attribute_hidden;

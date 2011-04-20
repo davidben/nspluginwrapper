@@ -1178,19 +1178,38 @@ static int do_recv_NPPrintData(rpc_message_t *message, void *p_value)
  *  Process NPObject objects
  */
 
-static int do_send_NPObject(rpc_message_t *message, void *p_value)
+static int do_send_NPObject_helper(rpc_message_t *message, void *p_value,
+								   bool pass_ref)
 {
   uint32_t npobj_id = 0;
   NPObject *npobj = (NPObject *)p_value;
+  bool release_stub = false;
   if (npobj) {
 	npobj_id = npobject_get_proxy_id(npobj);
 	if (npobj_id == 0) {
 	  // Sending an object on our side. Allocate a stub so the other
 	  // side can make a proxy.
 	  npobj_id = npobject_create_stub(npobj);
+	  if (pass_ref) {
+		// Release our reference; the stub protects the object from
+		// deallocation.
+		NPN_ReleaseObject(npobj);
+	  }
 	} else {
 	  // This is a proxy for the object on the other side. Just pass
 	  // the id along.
+	  if (pass_ref) {
+		// As above, we release out reference. If this is not the last
+		// reference, we may just do so. Otherwise, we destroy it, but
+		// do /not/ send the corresponding RPC. That gets merged into
+		// this one.
+		if (npobj->referenceCount == 1) {
+		  npobject_destroy_proxy(npobj, false);
+		  release_stub = true;
+		} else {
+		  NPN_ReleaseObject(npobj);
+		}
+	  }
 	}
 	D(bug("sending id 0x%x\n", npobj_id));
 	assert(npobj_id != 0);
@@ -1198,17 +1217,28 @@ static int do_send_NPObject(rpc_message_t *message, void *p_value)
   int error = rpc_message_send_uint32(message, npobj_id);
   if (error < 0)
 	return error;
+  // Tell the other side whether or not to destroy the stub.
+  if (pass_ref) {
+	if ((error = rpc_message_send_uint32(message, release_stub)) < 0)
+	  return error;
+  }
 
   return RPC_ERROR_NO_ERROR;
 }
 
-static int do_recv_NPObject(rpc_message_t *message, void *p_value)
+static int do_recv_NPObject_helper(rpc_message_t *message, void *p_value,
+								   bool pass_ref)
 {
   int error;
   uint32_t npobj_id;
+  uint32_t release_stub = 0;
 
   if ((error = rpc_message_recv_uint32(message, &npobj_id)) < 0)
 	return error;
+  if (pass_ref) {
+	if ((error = rpc_message_recv_uint32(message, &release_stub)) < 0)
+	  return error;
+  }
 
   NPObject *npobj = NULL;
   if (npobj_id) {
@@ -1217,11 +1247,17 @@ static int do_recv_NPObject(rpc_message_t *message, void *p_value)
 	  // We got an id of a newly created remote stub. Create a proxy
 	  // for it.
 	  npobj = npobject_create_proxy(npobj_id);
+	  if (release_stub)
+		npw_printf("ERROR: received release_stub for proxy NPObject.\n");
 	} else {
 	  // This is an object on our side. Retain it; receiver must
 	  // release all received NPObjects.
 	  D(bug("local\n"));
 	  NPN_RetainObject(npobj);
+	  if (release_stub) {
+		// We just retained the object, so it won't be destroyed.
+		npobject_destroy_stub(npobj_id);
+	  }
 	}
 	D(bug("recv id 0x%x, obj %p\n", npobj_id, npobj));
 	assert(npobj != NULL);
@@ -1229,6 +1265,26 @@ static int do_recv_NPObject(rpc_message_t *message, void *p_value)
 
   *((NPObject **)p_value) = npobj;
   return RPC_ERROR_NO_ERROR;
+}
+
+static int do_send_NPObject(rpc_message_t *message, void *p_value)
+{
+  return do_send_NPObject_helper(message, p_value, false);
+}
+
+static int do_recv_NPObject(rpc_message_t *message, void *p_value)
+{
+  return do_recv_NPObject_helper(message, p_value, false);
+}
+
+static int do_send_NPObject_pass_ref(rpc_message_t *message, void *p_value)
+{
+  return do_send_NPObject_helper(message, p_value, true);
+}
+
+static int do_recv_NPObject_pass_ref(rpc_message_t *message, void *p_value)
+{
+  return do_recv_NPObject_helper(message, p_value, true);
 }
 
 
@@ -1371,7 +1427,8 @@ static int do_recv_NPString(rpc_message_t *message, void *p_value)
  *  Process NPVariant objects
  */
 
-static int do_send_NPVariant(rpc_message_t *message, void *p_value)
+static int do_send_NPVariant_helper(rpc_message_t *message, void *p_value,
+									bool pass_ref)
 {
   NPVariant *variant = (NPVariant *)p_value;
   if (variant == NULL)
@@ -1403,15 +1460,23 @@ static int do_send_NPVariant(rpc_message_t *message, void *p_value)
 	  return error;
 	break;
   case NPVariantType_Object:
-	if ((error = do_send_NPObject(message, variant->value.objectValue)) < 0)
+	if ((error = do_send_NPObject_helper(message, variant->value.objectValue,
+										 pass_ref)) < 0)
 	  return error;
 	break;
+  }
+
+  // Clean up local data. If we had an NPObject,
+  // do_send_NPObject_pass_ref took care of it.
+  if (pass_ref && variant->type != NPVariantType_Object) {
+	NPN_ReleaseVariantValue(variant);
   }
 
   return RPC_ERROR_NO_ERROR;
 }
 
-static int do_recv_NPVariant(rpc_message_t *message, void *p_value)
+static int do_recv_NPVariant_helper(rpc_message_t *message, void *p_value,
+									bool pass_ref)
 {
   NPVariant *variant = (NPVariant *)p_value;
   if (variant)
@@ -1451,9 +1516,10 @@ static int do_recv_NPVariant(rpc_message_t *message, void *p_value)
 	  return error;
 	break;
   case NPVariantType_Object:
-	if ((error = do_recv_NPObject(message, &result.value.objectValue)) < 0)
+	if ((error = do_recv_NPObject_helper(message, &result.value.objectValue,
+										 pass_ref)) < 0)
 	  return error;
-	// NPVariant owns reference from do_recv_NPObject.
+	// NPVariant owns reference from do_recv_NPObject_helper.
 	break;
   }
 
@@ -1465,6 +1531,25 @@ static int do_recv_NPVariant(rpc_message_t *message, void *p_value)
   return RPC_ERROR_NO_ERROR;
 }
 
+static int do_send_NPVariant(rpc_message_t *message, void *p_value)
+{
+  return do_send_NPVariant_helper(message, p_value, false);
+}
+
+static int do_recv_NPVariant(rpc_message_t *message, void *p_value)
+{
+  return do_recv_NPVariant_helper(message, p_value, false);
+}
+
+static int do_send_NPVariant_pass_ref(rpc_message_t *message, void *p_value)
+{
+  return do_send_NPVariant_helper(message, p_value, true);
+}
+
+static int do_recv_NPVariant_pass_ref(rpc_message_t *message, void *p_value)
+{
+  return do_recv_NPVariant_helper(message, p_value, true);
+}
 
 /*
  *  Initialize marshalers for NPAPI types
@@ -1556,6 +1641,12 @@ static const rpc_message_descriptor_t message_descs[] = {
 	do_recv_NPObject
   },
   {
+	RPC_TYPE_NP_OBJECT_PASS_REF,
+	sizeof(NPObject *),
+	do_send_NPObject_pass_ref,
+	do_recv_NPObject_pass_ref
+  },
+  {
 	RPC_TYPE_NP_IDENTIFIER,
 	sizeof(NPIdentifier),
 	do_send_NPIdentifier,
@@ -1578,6 +1669,12 @@ static const rpc_message_descriptor_t message_descs[] = {
 	sizeof(NPVariant),
 	do_send_NPVariant,
 	do_recv_NPVariant
+  },
+  {
+	RPC_TYPE_NP_VARIANT_PASS_REF,
+	sizeof(NPVariant),
+	do_send_NPVariant_pass_ref,
+	do_recv_NPVariant_pass_ref
   }
 };
 
