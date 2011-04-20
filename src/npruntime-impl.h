@@ -2,6 +2,7 @@
  *  npruntime.c - Scripting plugins support
  *
  *  nspluginwrapper (C) 2005-2009 Gwenole Beauchesne
+ *                  (C) 2011 David Benjamin
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -21,28 +22,25 @@
 #ifndef NPRUNTIME_IMPL_H
 #define NPRUNTIME_IMPL_H
 
-// NPObjectInfo is used to hold additional information for an NPObject instance
-typedef struct {
-  NPObject *npobj;
-  uint32_t npobj_id;
-  bool is_valid;
-  void *plugin;
-} NPObjectInfo;
+// npruntime bridge system inspired by Chromium's proxy/stub setup.
 
-extern NPObjectInfo *npobject_info_new(NPObject *npobj) attribute_hidden;
-extern NPObjectInfo *npobject_info_lookup(NPObject *npobj) attribute_hidden;
-
-extern NPObject *npobject_new(uint32_t npobj_id, NPP instance, NPClass *class) attribute_hidden;
-extern void npobject_destroy(NPObject *npobj) attribute_hidden;
-extern NPObject *npobject_lookup(uint32_t npobj_id) attribute_hidden;
-extern void npobject_associate(NPObject *npobj, NPObjectInfo *npobj_info) attribute_hidden;
-
+// Init and shutdown of the NPObject bridge system.
 extern bool npobject_bridge_new(void) attribute_hidden;
 extern void npobject_bridge_destroy(void) attribute_hidden;
 
-extern NPClass npclass_bridge attribute_hidden;
-
 extern int npclass_add_method_descriptors(rpc_connection_t *connection) attribute_hidden;
+
+// Management of stubs, objects which live on the side that owns the
+// NPObject and holds a reference to it on behalf of a proxy.
+extern uint32_t npobject_create_stub(NPObject *npobj) attribute_hidden;
+extern NPObject *npobject_lookup_local(uint32_t id) attribute_hidden;
+
+// Create a proxy object. The received id must correspond to a live
+// stub in the other process. Deallocating this object releases its
+// corresponding stub. Holds a reference to the other NPObject on via
+// its stub.
+extern NPObject *npobject_create_proxy(uint32_t id) attribute_hidden;
+extern uint32_t npobject_get_proxy_id(NPObject *npobj) attribute_hidden;
 
 struct _NPVariant;
 extern void npvariant_clear(struct _NPVariant *variant) attribute_hidden;

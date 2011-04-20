@@ -1183,31 +1183,21 @@ static int do_send_NPObject(rpc_message_t *message, void *p_value)
   uint32_t npobj_id = 0;
   NPObject *npobj = (NPObject *)p_value;
   if (npobj) {
-	NPObjectInfo *npobj_info = npobject_info_lookup(npobj);
-	if (npobj_info)
-	  npobj_id = npobj_info->npobj_id;
-#ifdef BUILD_WRAPPER
-	else {
-	  // create a new mapping (browser-side)
-	  if ((npobj_info = npobject_info_new(npobj)) == NULL)
-		return RPC_ERROR_NO_MEMORY;
-	  npobj_id = npobj_info->npobj_id;
-	  npobject_associate(npobj, npobj_info);
+	npobj_id = npobject_get_proxy_id(npobj);
+	if (npobj_id == 0) {
+	  // Sending an object on our side. Allocate a stub so the other
+	  // side can make a proxy.
+	  npobj_id = npobject_create_stub(npobj);
+	} else {
+	  // This is a proxy for the object on the other side. Just pass
+	  // the id along.
 	}
-#endif
+	D(bug("sending id 0x%x\n", npobj_id));
 	assert(npobj_id != 0);
   }
   int error = rpc_message_send_uint32(message, npobj_id);
   if (error < 0)
 	return error;
-
-#ifdef BUILD_WRAPPER
-  // synchronize referenceCount
-  if (npobj) {
-	if ((error = rpc_message_send_uint32(message, npobj->referenceCount)) < 0)
-	  return error;
-  }
-#endif
 
   return RPC_ERROR_NO_ERROR;
 }
@@ -1222,27 +1212,17 @@ static int do_recv_NPObject(rpc_message_t *message, void *p_value)
 
   NPObject *npobj = NULL;
   if (npobj_id) {
-	npobj = npobject_lookup(npobj_id);
-#ifdef BUILD_VIEWER
-	// create a new mapping (plugin-side)
+	npobj = npobject_lookup_local(npobj_id);
 	if (npobj == NULL) {
-	  if ((npobj = npobject_new(npobj_id, NULL, NULL)) == NULL)
-		return RPC_ERROR_NO_MEMORY;
+	  // We got an id of a newly created remote stub. Create a proxy
+	  // for it.
+	  npobj = npobject_create_proxy(npobj_id);
+	} else {
+	  // This is an object on our side. Just use it.
+	  D(bug("local\n"));
 	}
-#endif
+	D(bug("recv id 0x%x, obj %p\n", npobj_id, npobj));
 	assert(npobj != NULL);
-
-#ifdef BUILD_VIEWER
-	// synchronize referenceCount
-	uint32_t referenceCount;
-	if ((error = rpc_message_recv_uint32(message, &referenceCount)) < 0)
-	  return error;
-	if (npobj->referenceCount != referenceCount) {
-	  D(bug("synchronize NPObject::referenceCount (%d -> %d)\n",
-			npobj->referenceCount, referenceCount));
-	  npobj->referenceCount = referenceCount;
-	}
-#endif
   }
 
   *((NPObject **)p_value) = npobj;
@@ -1421,13 +1401,6 @@ static int do_send_NPVariant(rpc_message_t *message, void *p_value)
 	  return error;
 	break;
   case NPVariantType_Object:
-	if (NPW_IS_BROWSER) {
-	  /* Note: when we pass an NPObject to the plugin, it's supposed
-		 to be released once it's done with processing the RPC args.
-		 i.e. NPN_ReleaseVariantValue() is called for any NPVariant we
-		 received through rpc_method_get_args(). */
-	  NPN_RetainObject(variant->value.objectValue);
-	}
 	if ((error = do_send_NPObject(message, variant->value.objectValue)) < 0)
 	  return error;
 	break;
@@ -1478,13 +1451,8 @@ static int do_recv_NPVariant(rpc_message_t *message, void *p_value)
   case NPVariantType_Object:
 	if ((error = do_recv_NPObject(message, &result.value.objectValue)) < 0)
 	  return error;
-	if (NPW_IS_BROWSER) {
-	  /* Note: it's not necessary to propagate the refcount back to
-		 the plugin-side since the object will be unref'ed through
-		 NPN_ReleaseVariantValue() once we are done with processing
-		 the RPC args. */
-	  NPN_RetainObject(result.value.objectValue);
-	}
+	/* The NPVariant now owns a reference to this object. */
+	NPN_RetainObject(result.value.objectValue);
 	break;
   }
 

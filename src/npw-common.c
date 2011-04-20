@@ -129,6 +129,12 @@ NPN_MemFlush (uint32_t size)
 }
 
 attribute_hidden NPObject *
+NPN_CreateObject (NPP instance, NPClass *aclass)
+{
+  return g_mozilla_funcs.createobject(instance, aclass);
+}
+
+attribute_hidden NPObject *
 NPN_RetainObject (NPObject *npobj)
 {
   return g_mozilla_funcs.retainobject(npobj);

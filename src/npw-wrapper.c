@@ -1126,34 +1126,6 @@ g_NPN_CreateObject(NPP instance, NPClass *klass)
   return npobj;
 }
 
-static int handle_NPN_CreateObject(rpc_connection_t *connection)
-{
-  D(bug("handle_NPN_CreateObject\n"));
-
-  PluginInstance *plugin;
-  int error = rpc_method_get_args(connection,
-								  RPC_TYPE_NPW_PLUGIN_INSTANCE, &plugin,
-								  RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPN_CreateObject() get args", error);
-	return error;
-  }
-
-  NPObject *npobj = g_NPN_CreateObject(PLUGIN_INSTANCE_NPP(plugin), &npclass_bridge);
-
-  uint32_t npobj_id = 0;
-  if (npobj) {
-	NPObjectInfo *npobj_info = npobject_info_new(npobj);
-	if (npobj_info) {
-	  npobj_id = npobj_info->npobj_id;
-	  npobject_associate(npobj, npobj_info);
-	}
-  }
-
-  return rpc_method_send_reply(connection, RPC_TYPE_UINT32, npobj_id, RPC_TYPE_INVALID);
-}
-
 // NPN_RetainObject
 static NPObject *
 g_NPN_RetainObject(NPObject *npobj)
@@ -1164,31 +1136,6 @@ g_NPN_RetainObject(NPObject *npobj)
   return new_npobj;
 }
 
-static int handle_NPN_RetainObject(rpc_connection_t *connection)
-{
-  D(bug("handle_NPN_RetainObject\n"));
-
-  NPObject *npobj;
-  int error = rpc_method_get_args(connection,
-								  RPC_TYPE_NP_OBJECT, &npobj,
-								  RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPN_RetainObject() get args", error);
-	return error;
-  }
-
-  if (npobj == NULL) // this shall not happen, let it crash
-	npw_printf("ERROR: NPN_RetainObject got a null NPObject\n");
-
-  NPObject *new_npobj = g_NPN_RetainObject(npobj);
-
-  if (new_npobj != npobj)
-	npw_printf("WARNING: NPN_RetainObject() did not return the same object\n");
-
-  return rpc_method_send_reply(connection, RPC_TYPE_UINT32, npobj->referenceCount, RPC_TYPE_INVALID);
-}
-
 // NPN_ReleaseObject
 static void
 g_NPN_ReleaseObject(NPObject *npobj)
@@ -1197,34 +1144,6 @@ g_NPN_ReleaseObject(NPObject *npobj)
   uint32_t refcount = npobj->referenceCount - 1;
   NPN_ReleaseObject(npobj);
   D(bugiD("NPN_ReleaseObject done (refcount: %d)\n", refcount));
-}
-
-static int handle_NPN_ReleaseObject(rpc_connection_t *connection)
-{
-  D(bug("handle_NPN_ReleaseObject\n"));
-
-  NPObject *npobj;
-  int error = rpc_method_get_args(connection,
-								  RPC_TYPE_NP_OBJECT, &npobj,
-								  RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPN_ReleaseObject() get args", error);
-	return error;
-  }
-
-  if (npobj == NULL) // this shall not happen, let it crash
-	npw_printf("ERROR: NPN_ReleaseObject got a null NPObject\n");
-
-  /* Decrement reference count here so that we don't depend on a
-   * (possibly) deallocated NPObject afterwards, when we send the
-   * value in the RPC reply
-   */
-  uint32_t refcount = npobj->referenceCount - 1;
-
-  g_NPN_ReleaseObject(npobj);
-
-  return rpc_method_send_reply(connection, RPC_TYPE_UINT32, refcount, RPC_TYPE_INVALID);
 }
 
 // NPN_Invoke
@@ -3889,9 +3808,6 @@ static void plugin_init(int is_NP_Initialize)
 	{ RPC_METHOD_NPN_GET_VALUE_FOR_URL,					handle_NPN_GetValueForURL },
 	{ RPC_METHOD_NPN_SET_VALUE_FOR_URL,					handle_NPN_SetValueForURL },
 	{ RPC_METHOD_NPN_GET_AUTHENTICATION_INFO,			handle_NPN_GetAuthenticationInfo },
-	{ RPC_METHOD_NPN_CREATE_OBJECT,						handle_NPN_CreateObject },
-	{ RPC_METHOD_NPN_RETAIN_OBJECT,						handle_NPN_RetainObject },
-	{ RPC_METHOD_NPN_RELEASE_OBJECT,					handle_NPN_ReleaseObject },
 	{ RPC_METHOD_NPN_INVOKE,							handle_NPN_Invoke },
 	{ RPC_METHOD_NPN_INVOKE_DEFAULT,					handle_NPN_InvokeDefault },
 	{ RPC_METHOD_NPN_EVALUATE,							handle_NPN_Evaluate },

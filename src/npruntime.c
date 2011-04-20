@@ -60,11 +60,118 @@ bool npruntime_use_cache(void)
   return use_cache;
 }
 
+/* ====================================================================== */
+/* === NPObject stubs                                                 === */
+/* ====================================================================== */
+
+static GHashTable *g_stubs = NULL;  // uint32_t  -> (NPObjectStub *)
+
+typedef struct _NPObjectStub {
+  NPObject *npobject;
+  uint32_t id;
+} NPObjectStub;
+
+uint32_t npobject_create_stub(NPObject *npobj)
+{
+  npw_return_val_if_fail(npobj != NULL, 0);
+
+  static uint32_t next_id = 0;
+
+  // Allocate an id. Client and server get distinct id spaces.
+  uint32_t id = ++next_id;
+  assert(id < (1<<31));
+  if (rpc_is_server(g_rpc_connection))
+	id |= (1<<31);
+
+  D(bug("npobject_create_stub: npobj=%p, id=0x%x\n", npobj, id));
+  NPObjectStub *stub = g_new0(NPObjectStub, 1);
+  stub->npobject = NPN_RetainObject(npobj);
+  stub->id = id;
+  g_hash_table_insert(g_stubs, GINT_TO_POINTER(stub->id), stub);
+
+  return stub->id;
+}
+
+static NPObjectStub *npobject_lookup_stub(uint32_t id)
+{
+  return g_hash_table_lookup(g_stubs, GINT_TO_POINTER(id));
+}
+
+NPObject *npobject_lookup_local(uint32_t id)
+{
+  NPObjectStub *stub = npobject_lookup_stub(id);
+  return stub ? stub->npobject : NULL;
+}
+
+static void npobject_destroy_stub(NPObjectStub *stub)
+{
+  D(bug("npobject_stub: id=0x%x\n", stub->id));
+  g_hash_table_remove(g_stubs, GINT_TO_POINTER(stub->id));
+  NPN_ReleaseObject(stub->npobject);
+  g_free(stub);
+}
+
+/* ====================================================================== */
+/* === NPObject proxies                                               === */
+/* ====================================================================== */
+
+static GHashTable *g_proxies = NULL;  // uint32_t  -> (NPObjectProxy *)
+
+static NPClass npclass_bridge;
+
+typedef struct _NPObjectProxy {
+  NPObject parent;
+  uint32_t id;
+  bool is_valid;
+} NPObjectProxy;
+
+static NPObjectProxy *npobject_get_proxy(NPObject *npobj)
+{
+  if (npobj->_class != &npclass_bridge)
+	return NULL;
+  return (NPObjectProxy *)npobj;
+}
+
+NPObject *npobject_create_proxy(uint32_t id)
+{
+  D(bugiI("npobject_create_proxy: id=0x%x\n", id));
+  NPObject *object = NPN_CreateObject(NULL, &npclass_bridge);
+  NPObjectProxy *proxy = npobject_get_proxy(object);
+  proxy->id = id;
+  proxy->is_valid = true;
+  // There isn't a huge need to track them by id. Any, really. But it
+  // does let us invalidate them all.
+  g_hash_table_insert(g_proxies, GINT_TO_POINTER(id), proxy);
+  D(bugiD("npobject_create_proxy done: obj=%p\n", object));
+  return object;
+}
+
+uint32_t npobject_get_proxy_id(NPObject *npobj)
+{
+  NPObjectProxy *proxy = npobject_get_proxy(npobj);
+  if (proxy == NULL)
+	return 0;
+  return proxy->id;
+}
+
+static inline bool is_valid_npobject_proxy(NPObject *npobj)
+{
+  if (npobj == NULL)
+	return false;
+  NPObjectProxy *proxy = npobject_get_proxy(npobj);
+  if (proxy == NULL)
+	return false;
+  if (!proxy->is_valid)
+	npw_printf("ERROR: NPObject proxy %p is no longer valid!\n", npobj);
+  return proxy->is_valid;
+}
 
 /* ====================================================================== */
 /* === NPClass Bridge                                                 === */
 /* ====================================================================== */
 
+static NPObject *g_NPClass_Allocate(NPP npp, NPClass *aclass);
+static void g_NPClass_Deallocate(NPObject *npobj);
 static void g_NPClass_Invalidate(NPObject *npobj);
 static bool g_NPClass_HasMethod(NPObject *npobj, NPIdentifier name);
 static bool g_NPClass_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *args, uint32_t argCount, NPVariant *result);
@@ -76,10 +183,10 @@ static bool g_NPClass_RemoveProperty(NPObject *npobj, NPIdentifier name);
 static bool g_NPClass_Enumerate(NPObject *npobj, NPIdentifier **value, uint32_t *count);
 static bool g_NPClass_Construct(NPObject *npobj, const NPVariant *args, uint32_t argCount, NPVariant *result);
 
-NPClass npclass_bridge = {
+static NPClass npclass_bridge = {
   NPW_NP_CLASS_STRUCT_VERSION,
-  NULL,
-  NULL,
+  g_NPClass_Allocate,
+  g_NPClass_Deallocate,
   g_NPClass_Invalidate,
   g_NPClass_HasMethod,
   g_NPClass_Invoke,
@@ -94,14 +201,74 @@ NPClass npclass_bridge = {
 
 static inline bool is_valid_npobject_class(NPObject *npobj)
 {
-  if (npobj == NULL || npobj->_class == NULL)
-	return false;
-  NPObjectInfo *npobj_info = npobject_info_lookup(npobj);
-  if (npobj_info == NULL)
-	return false;
-  if (!npobj_info->is_valid)
-	npw_printf("ERROR: NPObject %p is no longer valid!\n", npobj);
-  return npobj_info->is_valid;
+  return npobj != NULL && npobj->_class != NULL;
+}
+
+// NPClass::Allocate
+NPObject *g_NPClass_Allocate(NPP npp, NPClass *aclass)
+{
+  return malloc(sizeof(NPObjectProxy));
+}
+
+// NPClass::Deallocate
+int npclass_handle_Deallocate(rpc_connection_t *connection)
+{
+  D(bug("npclass_handle_Deallocate\n"));
+
+  uint32_t id;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_UINT32, &id,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPClass::Deallocate() get args", error);
+	return error;
+  }
+
+  D(bugiI("NPClass:Deallocate: id=0x%x\n", id));
+  NPObjectStub *stub = npobject_lookup_stub(id);
+  if (stub != NULL) {
+	npobject_destroy_stub(stub);
+  }
+  D(bugiD("NPClass:Deallocate done\n"));
+
+  return rpc_method_send_reply(connection, RPC_TYPE_INVALID);
+}
+
+static void npclass_invoke_Deallocate(NPObjectProxy *proxy)
+{
+  npw_return_if_fail(rpc_method_invoke_possible(g_rpc_connection));
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPCLASS_DEALLOCATE,
+								RPC_TYPE_UINT32, proxy->id,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPClass::Deallocate() invoke", error);
+	return;
+  }
+
+  // FIXME: This really could be asynchronous...
+  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPClass::Deallocate() wait for reply", error);
+	return;
+  }
+}
+
+void g_NPClass_Deallocate(NPObject *npobj)
+{
+  // Unregister the proxy.
+  D(bugiI("NPClass::Deallocate: npobj=%p\n", npobj));
+  NPObjectProxy *proxy = npobject_get_proxy(npobj);
+  if (proxy && proxy->is_valid) {
+	npclass_invoke_Deallocate(proxy);
+	g_hash_table_remove(g_proxies, GINT_TO_POINTER(proxy->id));
+  }
+  D(bugiD("NPClass::Deallocate done\n"));
+  free(npobj);
 }
 
 // NPClass::Invalidate
@@ -152,7 +319,7 @@ static void npclass_invoke_Invalidate(NPObject *npobj)
 
 void g_NPClass_Invalidate(NPObject *npobj)
 {
-  if (!is_valid_npobject_class(npobj))
+  if (!is_valid_npobject_proxy(npobj))
 	return;
 
   if (!thread_check()) {
@@ -222,7 +389,7 @@ static bool npclass_invoke_HasMethod(NPObject *npobj, NPIdentifier name)
 
 bool g_NPClass_HasMethod(NPObject *npobj, NPIdentifier name)
 {
-  if (!is_valid_npobject_class(npobj))
+  if (!is_valid_npobject_proxy(npobj))
 	return false;
 
   if (!thread_check()) {
@@ -321,7 +488,7 @@ bool g_NPClass_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *args,
 	return false;
   VOID_TO_NPVARIANT(*result);
 
-  if (!is_valid_npobject_class(npobj))
+  if (!is_valid_npobject_proxy(npobj))
 	return false;
 
   if (!thread_check()) {
@@ -420,7 +587,7 @@ bool g_NPClass_InvokeDefault(NPObject *npobj, const NPVariant *args, uint32_t ar
 	return false;
   VOID_TO_NPVARIANT(*result);
 
-  if (!is_valid_npobject_class(npobj))
+  if (!is_valid_npobject_proxy(npobj))
 	return false;
 
   if (!thread_check()) {
@@ -494,7 +661,7 @@ static bool npclass_invoke_HasProperty(NPObject *npobj, NPIdentifier name)
 
 bool g_NPClass_HasProperty(NPObject *npobj, NPIdentifier name)
 {
-  if (!is_valid_npobject_class(npobj))
+  if (!is_valid_npobject_proxy(npobj))
 	return false;
 
   if (!thread_check()) {
@@ -580,7 +747,7 @@ bool g_NPClass_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *result
 	return false;
   VOID_TO_NPVARIANT(*result);
 
-  if (!is_valid_npobject_class(npobj))
+  if (!is_valid_npobject_proxy(npobj))
 	return false;
 
   if (!thread_check()) {
@@ -666,7 +833,7 @@ bool g_NPClass_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *
 	return false;
   }
 
-  if (!is_valid_npobject_class(npobj))
+  if (!is_valid_npobject_proxy(npobj))
 	return false;
 
   if (!thread_check()) {
@@ -737,7 +904,7 @@ static bool npclass_invoke_RemoveProperty(NPObject *npobj, NPIdentifier name)
 
 bool g_NPClass_RemoveProperty(NPObject *npobj, NPIdentifier name)
 {
-  if (!is_valid_npobject_class(npobj))
+  if (!is_valid_npobject_proxy(npobj))
 	return false;
 
   if (!thread_check()) {
@@ -822,7 +989,7 @@ bool g_NPClass_Enumerate(NPObject *npobj,
   if (count == NULL || idents == NULL)
 	return false;
 
-  if (!is_valid_npobject_class(npobj))
+  if (!is_valid_npobject_proxy(npobj))
 	return false;
 
   if (!thread_check()) {
@@ -919,7 +1086,7 @@ bool g_NPClass_Construct(NPObject *npobj, const NPVariant *args, uint32_t argCou
 	return false;
   VOID_TO_NPVARIANT(*result);
 
-  if (!is_valid_npobject_class(npobj))
+  if (!is_valid_npobject_proxy(npobj))
 	return false;
 
   if (!thread_check()) {
@@ -949,6 +1116,7 @@ int npclass_add_method_descriptors(rpc_connection_t *connection)
 	{ RPC_METHOD_NPCLASS_REMOVE_PROPERTY,	npclass_handle_RemoveProperty },
 	{ RPC_METHOD_NPCLASS_ENUMERATE,			npclass_handle_Enumerate },
 	{ RPC_METHOD_NPCLASS_CONSTRUCT,			npclass_handle_Construct },
+	{ RPC_METHOD_NPCLASS_DEALLOCATE,		npclass_handle_Deallocate },
   };
   return rpc_connection_add_method_descriptors(g_rpc_connection, vtable,
 											   sizeof(vtable) / sizeof(vtable[0]));
@@ -956,162 +1124,48 @@ int npclass_add_method_descriptors(rpc_connection_t *connection)
 
 
 /* ====================================================================== */
-/* === NPObjectInfo                                                   === */
-/* ====================================================================== */
-
-NPObjectInfo *npobject_info_new(NPObject *npobj)
-{
-  NPObjectInfo *npobj_info = NPW_MemNew(NPObjectInfo, 1);
-  if (npobj_info) {
-	static uint32_t id;
-	npobj_info->npobj = npobj;
-	npobj_info->npobj_id = ++id;
-	npobj_info->is_valid = true;
-	npobj_info->plugin = NULL;
-  }
-  return npobj_info;
-}
-
-static void npobject_info_destroy(NPObjectInfo *npobj_info)
-{
-  if (npobj_info == NULL)
-	return;
-
-  npw_plugin_instance_unref(npobj_info->plugin);
-
-  NPW_MemFree(npobj_info);
-}
-
-
-/* ====================================================================== */
-/* === NPObject                                                       === */
-/* ====================================================================== */
-
-static void npobject_hash_table_insert(NPObject *npobj, NPObjectInfo *npobj_info);
-static bool npobject_hash_table_remove(NPObject *npobj);
-
-static NPObject *_npobject_new(NPP instance, NPClass *class)
-{
-  NPObject *npobj;
-  if (class && class->allocate)
-	npobj = class->allocate(instance, class);
-  else
-	npobj = malloc(sizeof(*npobj));
-  if (npobj) {
-	npobj->_class = class ? class : &npclass_bridge;
-	npobj->referenceCount = 1;
-  }
-  return npobj;
-}
-
-static void _npobject_destroy(NPObject *npobj)
-{
-  if (npobj) {
-	if (npobj->_class && npobj->_class->deallocate)
-	  npobj->_class->deallocate(npobj);
-	else
-	  free(npobj);
-  }
-}
-
-NPObject *npobject_new(uint32_t npobj_id, NPP instance, NPClass *class)
-{
-  NPObject *npobj = _npobject_new(instance, class);
-  if (npobj == NULL)
-	return NULL;
-
-  NPObjectInfo *npobj_info = npobject_info_new(npobj);
-  if (npobj_info == NULL) {
-	_npobject_destroy(npobj);
-	return NULL;
-  }
-  npobj_info->npobj_id = npobj_id;
-  npobj_info->plugin = npw_plugin_instance_ref(NPW_PLUGIN_INSTANCE(instance));
-  npobject_associate(npobj, npobj_info);
-  return npobj;
-}
-
-void npobject_destroy(NPObject *npobj)
-{
-  if (npobj)
-	npobject_hash_table_remove(npobj);
-
-  _npobject_destroy(npobj);
-}
-
-void npobject_associate(NPObject *npobj, NPObjectInfo *npobj_info)
-{
-  assert(npobj && npobj_info && npobj_info->npobj_id > 0);
-  npobject_hash_table_insert(npobj, npobj_info);
-}
-
-
-/* ====================================================================== */
 /* === NPObject Repository                                            === */
 /* ====================================================================== */
 
-// NOTE: those hashes must be maintained in a whole, not separately
-static GHashTable *g_npobjects = NULL;			// (NPObject *)  -> (NPObjectInfo *)
-static GHashTable *g_npobject_ids = NULL;		// (NPObject ID) -> (NPObject *)
-
 bool npobject_bridge_new(void)
 {
-  if ((g_npobjects = g_hash_table_new_full(NULL, NULL, NULL, (GDestroyNotify)npobject_info_destroy)) == NULL)
-	return false;
-  if ((g_npobject_ids = g_hash_table_new(NULL, NULL)) == NULL)
-	return false;
+  g_stubs = g_hash_table_new(NULL, NULL);
+  g_proxies = g_hash_table_new(NULL, NULL);
   return true;
 }
 
 void npobject_bridge_destroy(void)
 {
-  if (g_npobject_ids) {
-	g_hash_table_destroy(g_npobject_ids);
-	g_npobject_ids = NULL;
+  if (g_stubs) {
+	g_hash_table_destroy(g_stubs);
+	g_stubs = NULL;
   }
-  if (g_npobjects) {
-	g_hash_table_destroy(g_npobjects);
-	g_npobjects = NULL;
+  if (g_proxies) {
+	g_hash_table_destroy(g_proxies);
+	g_proxies = NULL;
   }
 }
 
-void npobject_hash_table_insert(NPObject *npobj, NPObjectInfo *npobj_info)
+static void proxy_deactivate_func(gpointer key, gpointer value, gpointer user_data)
 {
-  g_hash_table_insert(g_npobjects, npobj, npobj_info);
-  g_hash_table_insert(g_npobject_ids, (void *)(uintptr_t)npobj_info->npobj_id, npobj);
+  NPObjectProxy *proxy = (NPObjectProxy *)value;
+  proxy->is_valid = false;
 }
 
-bool npobject_hash_table_remove(NPObject *npobj)
+static void stub_destroy_func(gpointer key, gpointer value, gpointer user_data)
 {
-  NPObjectInfo *npobj_info = npobject_info_lookup(npobj);
-  assert(npobj_info != NULL);
-  bool removed_all = true;
-  if (!g_hash_table_remove(g_npobject_ids, (void *)(uintptr_t)npobj_info->npobj_id))
-	removed_all = false;
-  if (!g_hash_table_remove(g_npobjects, npobj))
-	removed_all = false;
-  return removed_all;
-}
-
-NPObjectInfo *npobject_info_lookup(NPObject *npobj)
-{
-  return g_hash_table_lookup(g_npobjects, npobj);
-}
-
-NPObject *npobject_lookup(uint32_t npobj_id)
-{
-  return g_hash_table_lookup(g_npobject_ids, (void *)(uintptr_t)npobj_id);
-}
-
-static void npruntime_deactivate_func(gpointer key, gpointer value, gpointer user_data)
-{
-  NPObjectInfo *npobj_info = (NPObjectInfo *)value;
-  npobj_info->is_valid = false;
+  NPObjectStub *stub = (NPObjectStub *)value;
+  npobject_destroy_stub(stub);
 }
 
 void npruntime_deactivate(void)
 {
-  g_hash_table_foreach(g_npobjects, npruntime_deactivate_func, NULL);
+  // Invalidate any proxies the wrapper may still be holding on to.
+  g_hash_table_foreach(g_proxies, proxy_deactivate_func, NULL);
+  g_hash_table_foreach(g_stubs, stub_destroy_func, NULL);
+  // Reset both tables.
+  npobject_bridge_destroy();
+  npobject_bridge_new();
 }
 
 

@@ -2004,35 +2004,6 @@ g_NPN_PopPopupsEnabledState(NPP instance)
 /* === NPRuntime glue                                                 === */
 /* ====================================================================== */
 
-// Allocates a new NPObject
-static uint32_t
-invoke_NPN_CreateObject(PluginInstance *plugin)
-{
-  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), 0);
-
-  int error = rpc_method_invoke(g_rpc_connection,
-								RPC_METHOD_NPN_CREATE_OBJECT,
-								RPC_TYPE_NPW_PLUGIN_INSTANCE, plugin,
-								RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPN_CreateObject() invoke", error);
-	return 0;
-  }
-
-  uint32_t npobj_id = 0;
-  error = rpc_method_wait_for_reply(g_rpc_connection,
-									RPC_TYPE_UINT32, &npobj_id,
-									RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPN_CreateObject() wait for reply", error);
-	return 0;
-  }
-
-  return npobj_id;
-}
-
 static NPObject *
 g_NPN_CreateObject(NPP instance, NPClass *class)
 {
@@ -2041,52 +2012,22 @@ g_NPN_CreateObject(NPP instance, NPClass *class)
 	return NULL;
   }
   
-  if (instance == NULL)
-	return NULL;
-
-  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
-  if (plugin == NULL)
-	return NULL;
-
   if (class == NULL)
 	return NULL;
 
   D(bugiI("NPN_CreateObject\n"));
-  npw_plugin_instance_ref(plugin);
-  uint32_t npobj_id = invoke_NPN_CreateObject(plugin);
-  npw_plugin_instance_unref(plugin);
-  assert(npobj_id != 0);
-  NPObject *npobj = npobject_new(npobj_id, instance, class);
-  D(bugiD("NPN_CreateObject return: %p (refcount: %d)\n", npobj, npobj->referenceCount));
+
+  NPObject *npobj;
+  if (class->allocate)
+	npobj = class->allocate(instance, class);
+  else
+	npobj = malloc(sizeof(*npobj));
+  if (npobj) {
+	npobj->_class = class;
+	npobj->referenceCount = 1;
+  }
+  D(bugiD("NPN_CreateObject return: %p\n", npobj));
   return npobj;
-}
-
-// Increments the reference count of the given NPObject
-static uint32_t
-invoke_NPN_RetainObject(NPObject *npobj)
-{
-  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
-						 npobj->referenceCount);
-
-  int error = rpc_method_invoke(g_rpc_connection,
-								RPC_METHOD_NPN_RETAIN_OBJECT,
-								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPN_RetainObject() invoke", error);
-	return npobj->referenceCount;
-  }
-
-  uint32_t refcount;
-  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_UINT32, &refcount, RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPN_RetainObject() wait for reply", error);
-	return npobj->referenceCount;
-  }
-
-  return refcount;
 }
 
 static NPObject *
@@ -2101,49 +2042,27 @@ g_NPN_RetainObject(NPObject *npobj)
 	return NULL;
 
   D(bugiI("NPN_RetainObject npobj=%p\n", npobj));
-  uint32_t refcount = invoke_NPN_RetainObject(npobj);
-  D(bugiD("NPN_RetainObject return: %p (refcount: %d)\n", npobj, refcount));
-  npobj->referenceCount = refcount;
+  npobj->referenceCount++;
+  D(bugiD("NPN_RetainObject return: %p (refcount: %d)\n", npobj,
+		  npobj->referenceCount));
   return npobj;
-}
-
-// Decrements the reference count of the give NPObject
-static uint32_t
-invoke_NPN_ReleaseObject(NPObject *npobj)
-{
-  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
-						 npobj->referenceCount);
-
-  int error = rpc_method_invoke(g_rpc_connection,
-								RPC_METHOD_NPN_RELEASE_OBJECT,
-								RPC_TYPE_NP_OBJECT, npobj,
-								RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPN_ReleaseObject() invoke", error);
-	return npobj->referenceCount;
-  }
-
-  uint32_t refcount;
-  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_UINT32, &refcount, RPC_TYPE_INVALID);
-
-  if (error != RPC_ERROR_NO_ERROR) {
-	npw_perror("NPN_ReleaseObject() wait for reply", error);
-	return npobj->referenceCount;
-  }
-
-  return refcount;
 }
 
 static void
 g_NPN_ReleaseObject_Now(NPObject *npobj)
 {
   D(bugiI("NPN_ReleaseObject npobj=%p\n", npobj));
-  uint32_t refcount = invoke_NPN_ReleaseObject(npobj);
+  npobj->referenceCount--;
+  uint32_t refcount = npobj->referenceCount;
+  if (npobj->referenceCount == 0) {
+	if (npobj) {
+	  if (npobj->_class && npobj->_class->deallocate)
+		npobj->_class->deallocate(npobj);
+	  else
+		free(npobj);
+	}
+  }
   D(bugiD("NPN_ReleaseObject done (refcount: %d)\n", refcount));
-
-  if ((npobj->referenceCount = refcount) == 0)
-	npobject_destroy(npobj);
 }
 
 static void
