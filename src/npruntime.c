@@ -268,16 +268,16 @@ int npclass_handle_Invoke(rpc_connection_t *connection)
 	g_free(result_str);
   }
 
-  int rpc_ret = rpc_method_send_reply(connection,
-									  RPC_TYPE_UINT32, ret,
-									  RPC_TYPE_NP_VARIANT, &result,
-									  RPC_TYPE_INVALID);
-
   if (args) {
 	for (int i = 0; i < argCount; i++)
 	  NPN_ReleaseVariantValue(&args[i]);
 	free(args);
   }
+
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
 
   NPN_ReleaseVariantValue(&result);
   return rpc_ret;
@@ -368,16 +368,16 @@ int npclass_handle_InvokeDefault(rpc_connection_t *connection)
 	g_free(result_str);
   }
 
-  int rpc_ret = rpc_method_send_reply(connection,
-									  RPC_TYPE_UINT32, ret,
-									  RPC_TYPE_NP_VARIANT, &result,
-									  RPC_TYPE_INVALID);
-
   if (args) {
 	for (int i = 0; i < argCount; i++)
 	  NPN_ReleaseVariantValue(&args[i]);
 	free(args);
   }
+
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
 
   NPN_ReleaseVariantValue(&result);
   return rpc_ret;
@@ -867,16 +867,16 @@ int npclass_handle_Construct(rpc_connection_t *connection)
 	g_free(result_str);
   }
 
-  int rpc_ret = rpc_method_send_reply(connection,
-									  RPC_TYPE_UINT32, ret,
-									  RPC_TYPE_NP_VARIANT, &result,
-									  RPC_TYPE_INVALID);
-
   if (args) {
 	for (int i = 0; i < argCount; i++)
 	  NPN_ReleaseVariantValue(&args[i]);
 	free(args);
   }
+
+  int rpc_ret = rpc_method_send_reply(connection,
+									  RPC_TYPE_UINT32, ret,
+									  RPC_TYPE_NP_VARIANT, &result,
+									  RPC_TYPE_INVALID);
 
   NPN_ReleaseVariantValue(&result);
   return rpc_ret;
