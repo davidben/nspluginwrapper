@@ -1106,6 +1106,7 @@ void npobject_bridge_destroy(void)
   }
 }
 
+#if NPW_IS_BROWSER
 static void proxy_deactivate_func(gpointer key, gpointer value, gpointer user_data)
 {
   NPObjectProxy *proxy = (NPObjectProxy *)value;
@@ -1127,6 +1128,7 @@ void npruntime_deactivate(void)
   npobject_bridge_destroy();
   npobject_bridge_new();
 }
+#endif
 
 
 /* ====================================================================== */

@@ -31,7 +31,6 @@
 #include <npapi.h>
 #include <npfunctions.h>
 #include <npruntime.h>
-#include "npruntime-impl.h"
 
 /* Supported NPAPI interfaces */
 #define NPW_NPAPI_VERSION		24
@@ -47,6 +46,8 @@
 # error "Could not determine what we are building (browser|plugin)-side?"
 #endif
 #define NPW_IS_PLUGIN (!NPW_IS_BROWSER)
+
+#include "npruntime-impl.h"
 
 #if NPW_IS_BROWSER
 # define _NPW_INSTANCE_PRIVATE_DATA pdata

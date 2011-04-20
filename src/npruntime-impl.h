@@ -49,8 +49,10 @@ extern void npvariant_clear(struct _NPVariant *variant) attribute_hidden;
 extern char *string_of_NPVariant(const struct _NPVariant *arg) attribute_hidden;
 extern void print_npvariant_args(const struct _NPVariant *args, uint32_t nargs) attribute_hidden;
 
+#if NPW_IS_BROWSER
 // Deactivate all NPObject instances
 extern void npruntime_deactivate(void) attribute_hidden;
+#endif
 
 // Check whether to use NPRuntime data caching
 // (on by default, disabled with NPW_NPRUNTIME_CACHE=0|no)
