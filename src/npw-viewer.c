@@ -1166,7 +1166,10 @@ invoke_NPN_GetValue(PluginInstance *plugin, NPNVariable variable, void *value)
   case RPC_TYPE_NP_OBJECT:
 	{
 	  NPObject *npobj = NULL;
-	  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_INT32, &ret, RPC_TYPE_NP_OBJECT, &npobj, RPC_TYPE_INVALID);
+	  error = rpc_method_wait_for_reply(g_rpc_connection,
+										RPC_TYPE_INT32, &ret,
+										RPC_TYPE_NP_OBJECT_PASS_REF, &npobj,
+										RPC_TYPE_INVALID);
 	  if (error != RPC_ERROR_NO_ERROR) {
 		npw_perror("NPN_GetValue() wait for reply", error);
 		ret = NPERR_GENERIC_ERROR;
@@ -2126,7 +2129,7 @@ invoke_NPN_Invoke(PluginInstance *plugin, NPObject *npobj, NPIdentifier methodNa
   uint32_t ret;
   error = rpc_method_wait_for_reply(g_rpc_connection,
 									RPC_TYPE_UINT32, &ret,
-									RPC_TYPE_NP_VARIANT, result,
+									RPC_TYPE_NP_VARIANT_PASS_REF, result,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -2189,7 +2192,7 @@ invoke_NPN_InvokeDefault(PluginInstance *plugin, NPObject *npobj,
   uint32_t ret;
   error = rpc_method_wait_for_reply(g_rpc_connection,
 									RPC_TYPE_UINT32, &ret,
-									RPC_TYPE_NP_VARIANT, result,
+									RPC_TYPE_NP_VARIANT_PASS_REF, result,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -2251,7 +2254,7 @@ invoke_NPN_Evaluate(PluginInstance *plugin, NPObject *npobj, NPString *script, N
   uint32_t ret;
   error = rpc_method_wait_for_reply(g_rpc_connection,
 									RPC_TYPE_UINT32, &ret,
-									RPC_TYPE_NP_VARIANT, result,
+									RPC_TYPE_NP_VARIANT_PASS_REF, result,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -2315,7 +2318,7 @@ invoke_NPN_GetProperty(PluginInstance *plugin, NPObject *npobj, NPIdentifier pro
   uint32_t ret;
   error = rpc_method_wait_for_reply(g_rpc_connection,
 									RPC_TYPE_UINT32, &ret,
-									RPC_TYPE_NP_VARIANT, result,
+									RPC_TYPE_NP_VARIANT_PASS_REF, result,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -2684,7 +2687,7 @@ invoke_NPN_Construct(PluginInstance *plugin, NPObject *npobj,
   uint32_t ret;
   error = rpc_method_wait_for_reply(g_rpc_connection,
 									RPC_TYPE_UINT32, &ret,
-									RPC_TYPE_NP_VARIANT, result,
+									RPC_TYPE_NP_VARIANT_PASS_REF, result,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -4081,10 +4084,10 @@ static int handle_NPP_GetValue(rpc_connection_t *connection)
 	{
 	  NPObject *npobj = NULL;
 	  ret = g_NPP_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&npobj);
-	  int err = rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_NP_OBJECT, npobj, RPC_TYPE_INVALID);
-	  if (npobj)
-		NPN_ReleaseObject(npobj);
-	  return err;
+	  return rpc_method_send_reply(connection,
+								   RPC_TYPE_INT32, ret,
+								   RPC_TYPE_NP_OBJECT_PASS_REF, npobj,
+								   RPC_TYPE_INVALID);
 	}
   }
 

@@ -457,13 +457,10 @@ int npclass_handle_Invoke(rpc_connection_t *connection)
 	free(args);
   }
 
-  int rpc_ret = rpc_method_send_reply(connection,
-									  RPC_TYPE_UINT32, ret,
-									  RPC_TYPE_NP_VARIANT, &result,
-									  RPC_TYPE_INVALID);
-
-  NPN_ReleaseVariantValue(&result);
-  return rpc_ret;
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_NP_VARIANT_PASS_REF, &result,
+							   RPC_TYPE_INVALID);
 }
 
 static bool npclass_invoke_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *args, uint32_t argCount,
@@ -486,7 +483,7 @@ static bool npclass_invoke_Invoke(NPObject *npobj, NPIdentifier name, const NPVa
   uint32_t ret;
   error = rpc_method_wait_for_reply(g_rpc_connection,
 									RPC_TYPE_UINT32, &ret,
-									RPC_TYPE_NP_VARIANT, result,
+									RPC_TYPE_NP_VARIANT_PASS_REF, result,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -557,13 +554,10 @@ int npclass_handle_InvokeDefault(rpc_connection_t *connection)
 	free(args);
   }
 
-  int rpc_ret = rpc_method_send_reply(connection,
-									  RPC_TYPE_UINT32, ret,
-									  RPC_TYPE_NP_VARIANT, &result,
-									  RPC_TYPE_INVALID);
-
-  NPN_ReleaseVariantValue(&result);
-  return rpc_ret;
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_NP_VARIANT_PASS_REF, &result,
+							   RPC_TYPE_INVALID);
 }
 
 static bool npclass_invoke_InvokeDefault(NPObject *npobj, const NPVariant *args, uint32_t argCount,
@@ -585,7 +579,7 @@ static bool npclass_invoke_InvokeDefault(NPObject *npobj, const NPVariant *args,
   uint32_t ret;
   error = rpc_method_wait_for_reply(g_rpc_connection,
 									RPC_TYPE_UINT32, &ret,
-									RPC_TYPE_NP_VARIANT, result,
+									RPC_TYPE_NP_VARIANT_PASS_REF, result,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -719,13 +713,10 @@ int npclass_handle_GetProperty(rpc_connection_t *connection)
 	g_free(result_str);
   }
 
-  int rpc_ret = rpc_method_send_reply(connection,
-									  RPC_TYPE_UINT32, ret,
-									  RPC_TYPE_NP_VARIANT, &result,
-									  RPC_TYPE_INVALID);
-
-  NPN_ReleaseVariantValue(&result);
-  return rpc_ret;
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_NP_VARIANT_PASS_REF, &result,
+							   RPC_TYPE_INVALID);
 }
 
 static bool npclass_invoke_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *result)
@@ -746,7 +737,7 @@ static bool npclass_invoke_GetProperty(NPObject *npobj, NPIdentifier name, NPVar
   uint32_t ret;
   error = rpc_method_wait_for_reply(g_rpc_connection,
 									RPC_TYPE_UINT32, &ret,
-									RPC_TYPE_NP_VARIANT, result,
+									RPC_TYPE_NP_VARIANT_PASS_REF, result,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -1055,13 +1046,10 @@ int npclass_handle_Construct(rpc_connection_t *connection)
 	free(args);
   }
 
-  int rpc_ret = rpc_method_send_reply(connection,
-									  RPC_TYPE_UINT32, ret,
-									  RPC_TYPE_NP_VARIANT, &result,
-									  RPC_TYPE_INVALID);
-
-  NPN_ReleaseVariantValue(&result);
-  return rpc_ret;
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_NP_VARIANT_PASS_REF, &result,
+							   RPC_TYPE_INVALID);
 }
 
 static bool npclass_invoke_Construct(NPObject *npobj, const NPVariant *args, uint32_t argCount,
@@ -1083,7 +1071,7 @@ static bool npclass_invoke_Construct(NPObject *npobj, const NPVariant *args, uin
   uint32_t ret;
   error = rpc_method_wait_for_reply(g_rpc_connection,
 									RPC_TYPE_UINT32, &ret,
-									RPC_TYPE_NP_VARIANT, result,
+									RPC_TYPE_NP_VARIANT_PASS_REF, result,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
