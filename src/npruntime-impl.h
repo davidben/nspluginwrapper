@@ -30,7 +30,6 @@ typedef struct {
 } NPObjectInfo;
 
 extern NPObjectInfo *npobject_info_new(NPObject *npobj) attribute_hidden;
-extern void npobject_info_destroy(NPObjectInfo *npobj_info) attribute_hidden;
 extern NPObjectInfo *npobject_info_lookup(NPObject *npobj) attribute_hidden;
 
 extern NPObject *npobject_new(uint32_t npobj_id, NPP instance, NPClass *class) attribute_hidden;

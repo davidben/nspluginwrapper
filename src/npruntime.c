@@ -972,7 +972,7 @@ NPObjectInfo *npobject_info_new(NPObject *npobj)
   return npobj_info;
 }
 
-void npobject_info_destroy(NPObjectInfo *npobj_info)
+static void npobject_info_destroy(NPObjectInfo *npobj_info)
 {
   if (npobj_info == NULL)
 	return;
