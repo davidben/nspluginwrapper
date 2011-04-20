@@ -805,12 +805,11 @@ int npclass_handle_SetProperty(rpc_connection_t *connection)
 	D(bugiD("NPClass::SetProperty return: %d\n", ret));
   }
 
-  int rpc_ret = rpc_method_send_reply(connection,
-									  RPC_TYPE_UINT32, ret,
-									  RPC_TYPE_INVALID);
-
   NPN_ReleaseVariantValue(&value);
-  return rpc_ret;
+
+  return rpc_method_send_reply(connection,
+							   RPC_TYPE_UINT32, ret,
+							   RPC_TYPE_INVALID);
 }
 
 static bool npclass_invoke_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *value)
