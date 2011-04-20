@@ -142,7 +142,19 @@ static NPObjectProxy *npobject_get_proxy(NPObject *npobj)
 NPObject *npobject_create_proxy(uint32_t id)
 {
   D(bugiI("npobject_create_proxy: id=0x%x\n", id));
-  NPObject *object = NPN_CreateObject(NULL, &npclass_bridge);
+
+  // Firefox doesn't like it when we use a NULL npp, but we don't need
+  // it here (and don't know it). So simulate NPN_CreateObject.
+  //
+  // XXX: Firefox stores NPObjects in a manager on the
+  // PluginModuleChild. We possibly want to get our hands on the
+  // NPP. (Have the wrapper manage viewer-created objects after all.)
+  NPObject *object = npclass_bridge.allocate(NULL, &npclass_bridge);
+  if (object == NULL)
+	return NULL;
+  object->_class = &npclass_bridge;
+  object->referenceCount = 1;
+
   NPObjectProxy *proxy = npobject_get_proxy(object);
   proxy->id = id;
   proxy->is_valid = true;
