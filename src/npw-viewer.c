@@ -1173,6 +1173,7 @@ invoke_NPN_GetValue(PluginInstance *plugin, NPNVariable variable, void *value)
 	  }
 	  D(bug("-> value: <object %p>\n", npobj));
 	  *((NPObject **)value) = npobj;
+	  // Caller releases NPObject reference.
 	  break;
 	}
   }
@@ -4080,7 +4081,10 @@ static int handle_NPP_GetValue(rpc_connection_t *connection)
 	{
 	  NPObject *npobj = NULL;
 	  ret = g_NPP_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&npobj);
-	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_NP_OBJECT, npobj, RPC_TYPE_INVALID);
+	  int err = rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_NP_OBJECT, npobj, RPC_TYPE_INVALID);
+	  if (npobj)
+		NPN_ReleaseObject(npobj);
+	  return err;
 	}
   }
 

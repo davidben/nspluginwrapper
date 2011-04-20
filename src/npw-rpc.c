@@ -1218,8 +1218,10 @@ static int do_recv_NPObject(rpc_message_t *message, void *p_value)
 	  // for it.
 	  npobj = npobject_create_proxy(npobj_id);
 	} else {
-	  // This is an object on our side. Just use it.
+	  // This is an object on our side. Retain it; receiver must
+	  // release all received NPObjects.
 	  D(bug("local\n"));
+	  NPN_RetainObject(npobj);
 	}
 	D(bug("recv id 0x%x, obj %p\n", npobj_id, npobj));
 	assert(npobj != NULL);
@@ -1451,8 +1453,7 @@ static int do_recv_NPVariant(rpc_message_t *message, void *p_value)
   case NPVariantType_Object:
 	if ((error = do_recv_NPObject(message, &result.value.objectValue)) < 0)
 	  return error;
-	/* The NPVariant now owns a reference to this object. */
-	NPN_RetainObject(result.value.objectValue);
+	// NPVariant owns reference from do_recv_NPObject.
 	break;
   }
 

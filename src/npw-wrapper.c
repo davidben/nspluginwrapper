@@ -524,7 +524,9 @@ static int handle_NPN_GetValue(rpc_connection_t *connection)
 	  NPObject *npobj = NULL;
 	  if (valid_instance)
 		ret = g_NPN_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&npobj);
-	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_NP_OBJECT, npobj, RPC_TYPE_INVALID);
+	  int err = rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_NP_OBJECT, npobj, RPC_TYPE_INVALID);
+	  NPN_ReleaseObject(npobj);
+	  return err;
 	}
   }
 
@@ -1184,6 +1186,8 @@ static int handle_NPN_Invoke(rpc_connection_t *connection)
   VOID_TO_NPVARIANT(result);
   bool ret = g_NPN_Invoke(PLUGIN_INSTANCE_NPP(plugin), npobj, methodName, args, argCount, &result);
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
   if (args) {
 	for (int i = 0; i < argCount; i++)
 	  NPN_ReleaseVariantValue(&args[i]);
@@ -1235,6 +1239,8 @@ static int handle_NPN_InvokeDefault(rpc_connection_t *connection)
   VOID_TO_NPVARIANT(result);
   bool ret = g_NPN_InvokeDefault(PLUGIN_INSTANCE_NPP(plugin), npobj, args, argCount, &result);
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
   if (args) {
 	for (int i = 0; i < argCount; i++)
 	  NPN_ReleaseVariantValue(&args[i]);
@@ -1287,6 +1293,8 @@ static int handle_NPN_Evaluate(rpc_connection_t *connection)
   VOID_TO_NPVARIANT(result);
   bool ret = g_NPN_Evaluate(PLUGIN_INSTANCE_NPP(plugin), npobj, &script, &result);
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
   if (script.UTF8Characters)
 	NPN_MemFree((void *)script.UTF8Characters);
 
@@ -1333,6 +1341,9 @@ static int handle_NPN_GetProperty(rpc_connection_t *connection)
   VOID_TO_NPVARIANT(result);
   bool ret = g_NPN_GetProperty(PLUGIN_INSTANCE_NPP(plugin), npobj, propertyName, &result);
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
+
   int rpc_ret = rpc_method_send_reply(connection,
 									  RPC_TYPE_UINT32, ret,
 									  RPC_TYPE_NP_VARIANT, &result,
@@ -1374,6 +1385,8 @@ static int handle_NPN_SetProperty(rpc_connection_t *connection)
 
   bool ret = g_NPN_SetProperty(PLUGIN_INSTANCE_NPP(plugin), npobj, propertyName, &value);
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
   NPN_ReleaseVariantValue(&value);
 
   return rpc_method_send_reply(connection,
@@ -1411,6 +1424,9 @@ static int handle_NPN_RemoveProperty(rpc_connection_t *connection)
 
   bool ret = g_NPN_RemoveProperty(PLUGIN_INSTANCE_NPP(plugin), npobj, propertyName);
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
+
   return rpc_method_send_reply(connection,
 							   RPC_TYPE_UINT32, ret,
 							   RPC_TYPE_INVALID);
@@ -1446,6 +1462,9 @@ static int handle_NPN_HasProperty(rpc_connection_t *connection)
 
   bool ret = g_NPN_HasProperty(PLUGIN_INSTANCE_NPP(plugin), npobj, propertyName);
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
+
   return rpc_method_send_reply(connection,
 							   RPC_TYPE_UINT32, ret,
 							   RPC_TYPE_INVALID);
@@ -1480,6 +1499,9 @@ static int handle_NPN_HasMethod(rpc_connection_t *connection)
   }
 
   bool ret = g_NPN_HasMethod(PLUGIN_INSTANCE_NPP(plugin), npobj, methodName);
+
+  if (npobj)
+	NPN_ReleaseObject(npobj);
 
   return rpc_method_send_reply(connection,
 							   RPC_TYPE_UINT32, ret,
@@ -1519,6 +1541,9 @@ static int handle_NPN_Enumerate(rpc_connection_t *connection)
   NPIdentifier *identifiers = NULL;
   uint32_t count = 0;
   bool ret = g_NPN_Enumerate(PLUGIN_INSTANCE_NPP(plugin), npobj, &identifiers, &count);
+
+  if (npobj)
+	NPN_ReleaseObject(npobj);
 
   error = rpc_method_send_reply(connection,
 								RPC_TYPE_UINT32, ret,
@@ -1567,6 +1592,8 @@ static int handle_NPN_Construct(rpc_connection_t *connection)
   VOID_TO_NPVARIANT(result);
   bool ret = g_NPN_Construct(PLUGIN_INSTANCE_NPP(plugin), npobj, args, argCount, &result);
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
   if (args) {
 	for (int i = 0; i < argCount; i++)
 	  NPN_ReleaseVariantValue(&args[i]);
@@ -1609,6 +1636,8 @@ static int handle_NPN_SetException(rpc_connection_t *connection)
 
   g_NPN_SetException(npobj, message);
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
   // XXX memory leak (message)
 
   return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
@@ -2330,6 +2359,7 @@ invoke_NPP_GetValue(PluginInstance *plugin, NPPVariable variable, void *value)
 	  }
 	  D(bug("-> value: <object %p>\n", npobj));
 	  *((NPObject **)value) = npobj;
+	  // Caller is responsible for releasing reference.
 	  break;
 	}
   }
