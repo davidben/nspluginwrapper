@@ -40,7 +40,7 @@ extern NPObject *npobject_lookup_local(uint32_t id) attribute_hidden;
 // stub in the other process. Deallocating this object releases its
 // corresponding stub. Holds a reference to the other NPObject on via
 // its stub.
-extern NPObject *npobject_create_proxy(uint32_t id) attribute_hidden;
+extern NPObject *npobject_create_proxy(NPP npp, uint32_t id) attribute_hidden;
 extern uint32_t npobject_get_proxy_id(NPObject *npobj) attribute_hidden;
 extern void npobject_destroy_proxy(NPObject *npobj, bool release_stub);
 

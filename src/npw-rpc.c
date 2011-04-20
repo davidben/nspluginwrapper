@@ -1246,7 +1246,7 @@ static int do_recv_NPObject_helper(rpc_message_t *message, void *p_value,
 	if (npobj == NULL) {
 	  // We got an id of a newly created remote stub. Create a proxy
 	  // for it.
-	  npobj = npobject_create_proxy(npobj_id);
+	  npobj = npobject_create_proxy(NULL, npobj_id);
 	  if (release_stub)
 		npw_printf("ERROR: received release_stub for proxy NPObject.\n");
 	} else {
