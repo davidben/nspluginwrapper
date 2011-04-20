@@ -217,80 +217,6 @@ bool thread_check(void)
   return true;
 }
 
-// Delayed calls machinery
-// XXX: use a pipe, this should be faster (avoids GSource creation and
-// explicit memory allocation)
-enum {
-  RPC_DELAYED_NPN_RELEASE_OBJECT = 1
-};
-
-typedef struct _DelayedCall {
-  gint type;
-  gpointer data;
-} DelayedCall;
-
-static GList *g_delayed_calls = NULL;
-static guint g_delayed_calls_id = 0;
-
-static void g_NPN_ReleaseObject_Now(NPObject *npobj);
-static gboolean delayed_calls_process_cb(gpointer user_data);
-
-static void delayed_calls_add(int type, gpointer data)
-{
-  DelayedCall *dcall = NPW_MemNew(DelayedCall, 1);
-  if (dcall == NULL)
-	return;
-  dcall->type = type;
-  dcall->data = data;
-  g_delayed_calls = g_list_append(g_delayed_calls, dcall);
-
-  if (g_delayed_calls_id == 0)
-	g_delayed_calls_id = g_idle_add_full(G_PRIORITY_LOW,
-										 delayed_calls_process_cb, NULL, NULL);
-}
-
-// Returns whether there are pending calls left in the queue
-static gboolean delayed_calls_process(PluginInstance *plugin, gboolean is_in_NPP_Destroy)
-{
-  while (g_delayed_calls != NULL) {
-
-	if (!is_in_NPP_Destroy) {
-	  /* Continue later if there is incoming RPC */
-	  if (rpc_wait_dispatch(g_rpc_connection, 0) > 0)
-		return TRUE;
-	}
-
-	DelayedCall *dcall = (DelayedCall *)g_delayed_calls->data;
-	/* XXX: Remove the link first; this function /must/ be
-	 * re-entrant. We may be called again while processing the
-	 * delayed call. */
-	g_delayed_calls = g_list_delete_link(g_delayed_calls, g_delayed_calls);
-	switch (dcall->type) {
-	case RPC_DELAYED_NPN_RELEASE_OBJECT:
-	  {
-		NPObject *npobj = (NPObject *)dcall->data;
-		g_NPN_ReleaseObject_Now(npobj);
-		break;
-	  }
-	}
-	NPW_MemFree(dcall);
-  }
-
-  if (g_delayed_calls)
-	return TRUE;
-
-  if (g_delayed_calls_id) {
-	g_source_remove(g_delayed_calls_id);
-	g_delayed_calls_id = 0;
-  }
-  return FALSE;
-}
-
-static gboolean delayed_calls_process_cb(gpointer user_data)
-{
-  return delayed_calls_process(NULL, FALSE);
-}
-
 // NPIdentifier cache
 static inline bool use_npidentifier_cache(void)
 {
@@ -2053,8 +1979,16 @@ g_NPN_RetainObject(NPObject *npobj)
 }
 
 static void
-g_NPN_ReleaseObject_Now(NPObject *npobj)
+g_NPN_ReleaseObject(NPObject *npobj)
 {
+  if (!thread_check()) {
+	npw_printf("WARNING: NPN_ReleaseObject not called from the main thread\n");
+	return;
+  }
+
+  if (npobj == NULL)
+	return;
+
   D(bugiI("NPN_ReleaseObject npobj=%p\n", npobj));
   npobj->referenceCount--;
   uint32_t refcount = npobj->referenceCount;
@@ -2067,43 +2001,6 @@ g_NPN_ReleaseObject_Now(NPObject *npobj)
 	}
   }
   D(bugiD("NPN_ReleaseObject done (refcount: %d)\n", refcount));
-}
-
-static void
-g_NPN_ReleaseObject_Delayed(NPObject *npobj)
-{
-  delayed_calls_add(RPC_DELAYED_NPN_RELEASE_OBJECT, npobj);
-}
-
-static void
-g_NPN_ReleaseObject(NPObject *npobj)
-{
-  if (!thread_check()) {
-	npw_printf("WARNING: NPN_ReleaseObject not called from the main thread\n");
-	return;
-  }
-	
-  if (npobj == NULL)
-	return;
-
-  if (rpc_method_invoke_possible(g_rpc_connection)) {
-	D(bug("NPN_ReleaseObject <now>\n"));
-	g_NPN_ReleaseObject_Now(npobj);
-  }
-  else {
-	/* NPVariants that get tunneled over RPC get released locally. To
-	 * counter this, they get retained when sent over RPC. However,
-	 * the corresponding local ReleaseObject means that we are likely
-	 * to call NPN_ReleaseObject when handle_depth !=
-	 * dispatch_depth. To that end, delay the release object.
-	 *
-	 * XXX: This is awful. It really should be revised, possibly by
-	 * not using the browser-provided NPN_ReleaseVariantValue if NPAPI
-	 * allows it. Or we make a copy of it, send that over instead and
-	 * NPN_ReleaseVariantValue /before/ making the call. */
-	D(bug("NPN_ReleaseObject <delayed>\n"));
-	g_NPN_ReleaseObject_Delayed(npobj);
-  }
 }
 
 // Invokes a method on the given NPObject
@@ -3899,10 +3796,6 @@ static NPError g_NPP_Destroy(NPP instance, NPSavedData **sdata)
 
   if (sdata)
 	*sdata = NULL;
-
-  // Process all pending calls as the data could become junk afterwards
-  // XXX: this also processes delayed calls from other instances
-  delayed_calls_process(plugin, TRUE);
 
   D(bugiI("NPP_Destroy instance=%p\n", instance));
   NPError ret = plugin_funcs.destroy(instance, sdata);
