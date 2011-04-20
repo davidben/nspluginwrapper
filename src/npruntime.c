@@ -950,8 +950,8 @@ int npclass_add_method_descriptors(rpc_connection_t *connection)
 	{ RPC_METHOD_NPCLASS_ENUMERATE,			npclass_handle_Enumerate },
 	{ RPC_METHOD_NPCLASS_CONSTRUCT,			npclass_handle_Construct },
   };
-  return rpc_connection_add_method_descriptors(g_rpc_connection,
-											   vtable, sizeof(vtable));
+  return rpc_connection_add_method_descriptors(g_rpc_connection, vtable,
+											   sizeof(vtable) / sizeof(vtable[0]));
 }
 
 
