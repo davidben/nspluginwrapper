@@ -202,31 +202,6 @@ TARGETS		+= $(test_rpc_PROGRAMS)
 
 archivedir	= files/
 SRCARCHIVE	= $(PACKAGE)-$(VERSION)$(VERSION_SUFFIX).tar
-FILES		= configure Makefile nspluginwrapper.spec
-FILES		+= README NEWS TODO COPYING ChangeLog
-FILES		+= $(wildcard utils/*.sh)
-FILES		+= $(wildcard utils/*.c)
-FILES		+= $(wildcard src/*.c)
-FILES		+= $(wildcard src/*.cpp)
-FILES		+= $(wildcard src/*.h)
-FILES		+= $(wildcard src/*.sh)
-FILES		+= $(wildcard src/*.map)
-FILES		+= $(wildcard tests/*.html)
-FILES		+= $(wildcard tests/*.c tests/*.h)
-FILES		+= $(wildcard npapi/*.h)
-FILES		+= $(LSB_TOP_DIR)/headers/core_filelist
-FILES		+= $(addprefix $(LSB_TOP_DIR)/headers/,$(shell cat $(LSB_TOP_DIR)/headers/core_filelist))
-FILES		+= $(LSB_TOP_DIR)/headers/desktop_filelist
-FILES		+= $(addprefix $(LSB_TOP_DIR)/headers/,$(shell cat $(LSB_TOP_DIR)/headers/desktop_filelist))
-FILES		+= $(LSB_SRC_DIR)/LibNameMap.txt
-FILES		+= $(LSB_SRC_DIR)/core_filelist
-FILES		+= $(LSB_SRC_DIR)/core_static_filelist
-FILES		+= $(LSB_SRC_DIR)/desktop_filelist
-FILES		+= $(patsubst %,$(LSB_SRC_DIR)/%.c,$(LSB_CORE_STUBS))
-FILES		+= $(patsubst %,$(LSB_SRC_DIR)/%.Version,$(LSB_CORE_STUBS))
-FILES		+= $(patsubst %,$(LSB_SRC_DIR)/%.c,$(LSB_CORE_STATIC_STUBS))
-FILES		+= $(patsubst %,$(LSB_SRC_DIR)/%.c,$(LSB_DESKTOP_STUBS))
-FILES		+= $(patsubst %,$(LSB_SRC_DIR)/%.Version,$(LSB_DESKTOP_STUBS))
 
 all: $(TARGETS)
 
@@ -308,24 +283,6 @@ install.mkruntime: $(SRC_PATH)/utils/mkruntime.sh
 
 $(archivedir)::
 	[ -d $(archivedir) ] || mkdir $(archivedir) > /dev/null 2>&1
-
-tarball:
-	$(MAKE) -C $(SRC_PATH) do_tarball
-do_tarball: $(archivedir) $(archivedir)$(SRCARCHIVE).bz2
-
-$(archivedir)$(SRCARCHIVE): $(archivedir) $(FILES)
-	BUILDDIR=`mktemp -d /tmp/buildXXXXXXXX`						; \
-	mkdir -p $$BUILDDIR/$(PACKAGE)-$(VERSION)					; \
-	(cd $(SRC_PATH) && tar c $(FILES)) | tar x -C $$BUILDDIR/$(PACKAGE)-$(VERSION)	; \
-	[ "$(SNAPSHOT)" = "2" ] && svndate_def="%" || svndate_def="#"			; \
-	sed -e "s/^[%#]define svndate.*/$${svndate_def}define svndate $(SVNDATE)/" 	  \
-	  < $(SRC_PATH)/nspluginwrapper.spec						  \
-	  > $$BUILDDIR/$(PACKAGE)-$(VERSION)/nspluginwrapper.spec			; \
-	(cd $$BUILDDIR && tar cvf $(SRCARCHIVE) $(PACKAGE)-$(VERSION))			; \
-	mv -f $$BUILDDIR/$(SRCARCHIVE) $(archivedir)					; \
-	rm -rf $$BUILDDIR
-$(archivedir)$(SRCARCHIVE).bz2: $(archivedir)$(SRCARCHIVE)
-	bzip2 -9vf $(archivedir)$(SRCARCHIVE)
 
 RPMBUILD = \
 	RPMDIR=`mktemp -d`								; \
