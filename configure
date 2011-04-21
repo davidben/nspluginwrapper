@@ -864,8 +864,10 @@ echo "SNAPSHOT=$SNAPSHOT" >> $config_mak
 echo "#define NPW_SNAPSHOT $SNAPSHOT" >> $config_h
 if test $SNAPSHOT -ge 2; then
     echo "#define NPW_VERSION \"$VERSION-Pre ($SVNDATE)\"" >> $config_h
+    echo "#define NPW_FULL_VERSION NPW_VERSION" >> $config_h
 else
     echo "#define NPW_VERSION \"$VERSION\"" >> $config_h
+    echo "#define NPW_FULL_VERSION \"$VERSION-$RELEASE\"" >> $config_h
 fi
 
 echo "pkglibdir=$pkglibdir" >> $config_mak
