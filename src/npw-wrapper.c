@@ -1624,7 +1624,8 @@ static int handle_NPN_SetException(rpc_connection_t *connection)
 
   if (npobj)
 	NPN_ReleaseObject(npobj);
-  // XXX memory leak (message)
+  if (message)
+	free(message);
 
   return rpc_method_send_reply (connection, RPC_TYPE_INVALID);
 }
