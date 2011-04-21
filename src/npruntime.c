@@ -944,15 +944,26 @@ static bool npclass_invoke_Enumerate(NPObject *npobj,
   }
 
   uint32_t ret;
+  uint32_t myCount = 0;
+  NPIdentifier *myIdentifiers = NULL;
   error = rpc_method_wait_for_reply(g_rpc_connection,
 									RPC_TYPE_UINT32, &ret,
-									RPC_TYPE_ARRAY, RPC_TYPE_NP_IDENTIFIER, count, idents,
+									RPC_TYPE_ARRAY, RPC_TYPE_NP_IDENTIFIER, &myCount, &myIdentifiers,
 									RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
 	npw_perror("NPClass::Enumerate() wait for reply", error);
 	return false;
   }
+
+  *count = myCount;
+  if (ret) {
+	ret = NPW_ReallocData(myIdentifiers,
+						  sizeof(**idents) * myCount,
+						  (void**)idents) == NPERR_NO_ERROR;
+  }
+  if (myIdentifiers)
+	free(myIdentifiers);
 
   return ret;
 }

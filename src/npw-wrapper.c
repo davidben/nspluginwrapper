@@ -2295,14 +2295,11 @@ invoke_NPP_GetValue(PluginInstance *plugin, NPPVariable variable, void *value)
 	  switch (variable) {
 	  case NPPVformValue:
 		// this is a '\0'-terminated UTF-8 string data allocated by NPN_MemAlloc()
-		if (ret == NPERR_NO_ERROR && str) {
-		  char *utf8_str = g_NPN_MemAlloc(strlen(str) + 1);
-		  if (utf8_str == NULL)
-			ret = NPERR_OUT_OF_MEMORY_ERROR;
-		  else
-			strcpy(utf8_str, str);
+		if (ret == NPERR_NO_ERROR) {
+		  char *npn_str = NULL;
+		  ret = NPW_ReallocData(str, strlen(str) + 1, (void**)&npn_str);
 		  free(str);
-		  str = utf8_str;
+		  str = npn_str;
 		}
 		break;
 	  default:

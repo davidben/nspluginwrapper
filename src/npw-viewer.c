@@ -2541,15 +2541,11 @@ invoke_NPN_Enumerate(PluginInstance *plugin, NPObject *npobj,
   }
 
   *count = myCount;
-  if (ret && myIdentifiers) {
-	  *identifiers = NPN_MemAlloc(sizeof(**identifiers) * myCount);
-	  if (*identifiers == NULL) {
-		ret = NPERR_OUT_OF_MEMORY_ERROR;
-	  } else {
-		memcpy(*identifiers, myIdentifiers, sizeof(**identifiers) * myCount);
-	  }
+  if (ret) {
+	ret = NPW_ReallocData(myIdentifiers,
+						  sizeof(**identifiers) * myCount,
+						  (void**)identifiers) == NPERR_NO_ERROR;
   }
-
   if (myIdentifiers)
 	free(myIdentifiers);
 
