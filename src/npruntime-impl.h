@@ -49,6 +49,7 @@ extern void npobject_destroy_proxy(NPObject *npobj, bool release_stub);
 // pointer, so we keep track of the ownership of NPObjects. This
 // mapping also doubles as a way of tracking if they've been invalidated.
 extern void npobject_register(NPObject *npobj, void *plugin) attribute_hidden;
+extern bool npobject_is_registered(NPObject *npobj) attribute_hidden;
 extern void *npobject_get_owner(NPObject *npobj) attribute_hidden;
 extern void npobject_unregister(NPObject *npobj) attribute_hidden;
 #endif

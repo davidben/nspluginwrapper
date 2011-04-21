@@ -228,7 +228,7 @@ static inline bool is_valid_npobject_class(NPObject *npobj)
 	return false;
 #if NPW_IS_PLUGIN
   // Reject requests on invalidated objects.
-  if (npobject_get_owner(npobj) == NULL) {
+  if (!npobject_is_registered(npobj)) {
 	npw_printf("ERROR: accessed invalidated NPObject\n");
 	return false;
   }
@@ -1101,8 +1101,13 @@ static GHashTable *g_npobj_owners = NULL;
 
 void npobject_register(NPObject *npobj, void *plugin)
 {
-  assert(npobject_get_owner(npobj) == NULL);
+  assert(!npobject_is_registered(npobj));
   g_hash_table_insert(g_npobj_owners, npobj, plugin);
+}
+
+bool npobject_is_registered(NPObject *npobj)
+{
+  return g_hash_table_lookup_extended(g_npobj_owners, npobj, NULL, NULL);
 }
 
 void *npobject_get_owner(NPObject *npobj)

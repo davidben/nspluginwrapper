@@ -1962,10 +1962,11 @@ g_NPN_CreateObject(NPP instance, NPClass *class)
 	npobj->_class = class;
 	npobj->referenceCount = 1;
 
-	if (npobject_get_proxy_id(npobj) == 0 && plugin) {
+	if (npobject_get_proxy_id(npobj) == 0) {
 	  // Register anything that isn't a proxy.
 	  npobject_register(npobj, plugin);
-	  g_hash_table_insert(plugin->npobjects, npobj, npobj);
+	  if (plugin)
+		g_hash_table_insert(plugin->npobjects, npobj, npobj);
 	}
   }
   D(bugiD("NPN_CreateObject return: %p\n", npobj));
@@ -2010,8 +2011,8 @@ g_NPN_ReleaseObject(NPObject *npobj)
 	if (plugin) {
 	  // Unregister the owner, if not proxy.
 	  g_hash_table_remove(plugin->npobjects, npobj);
-	  npobject_unregister(npobj);
 	}
+	npobject_unregister(npobj);
 #endif
 	if (npobj) {
 	  if (npobj->_class && npobj->_class->deallocate)
