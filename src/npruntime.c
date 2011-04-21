@@ -243,7 +243,7 @@ NPObject *g_NPClass_Allocate(NPP npp, NPClass *aclass)
 }
 
 // NPClass::Deallocate
-int npclass_handle_Deallocate(rpc_connection_t *connection)
+static int npclass_handle_Deallocate(rpc_connection_t *connection)
 {
   D(bug("npclass_handle_Deallocate\n"));
 
@@ -317,7 +317,7 @@ void g_NPClass_Invalidate(NPObject *npobj)
 }
 
 // NPClass::HasMethod
-int npclass_handle_HasMethod(rpc_connection_t *connection)
+static int npclass_handle_HasMethod(rpc_connection_t *connection)
 {
   D(bug("npclass_handle_HasMethod\n"));
 
@@ -388,7 +388,7 @@ bool g_NPClass_HasMethod(NPObject *npobj, NPIdentifier name)
 }
 
 // NPClass::Invoke
-int npclass_handle_Invoke(rpc_connection_t *connection)
+static int npclass_handle_Invoke(rpc_connection_t *connection)
 {
   D(bug("npclass_handle_Invoke\n"));
 
@@ -487,7 +487,7 @@ bool g_NPClass_Invoke(NPObject *npobj, NPIdentifier name, const NPVariant *args,
 }
 
 // NPClass::InvokeDefault
-int npclass_handle_InvokeDefault(rpc_connection_t *connection)
+static int npclass_handle_InvokeDefault(rpc_connection_t *connection)
 {
   D(bug("npclass_handle_InvokeDefault\n"));
 
@@ -583,7 +583,7 @@ bool g_NPClass_InvokeDefault(NPObject *npobj, const NPVariant *args, uint32_t ar
 }
 
 // NPClass::HasProperty
-int npclass_handle_HasProperty(rpc_connection_t *connection)
+static int npclass_handle_HasProperty(rpc_connection_t *connection)
 {
   D(bug("npclass_handle_HasProperty\n"));
 
@@ -654,7 +654,7 @@ bool g_NPClass_HasProperty(NPObject *npobj, NPIdentifier name)
 }
   
 // NPClass::GetProperty
-int npclass_handle_GetProperty(rpc_connection_t *connection)
+static int npclass_handle_GetProperty(rpc_connection_t *connection)
 {
   D(bug("npclass_handle_GetProperty\n"));
 
@@ -739,7 +739,7 @@ bool g_NPClass_GetProperty(NPObject *npobj, NPIdentifier name, NPVariant *result
 }
   
 // NPClass::SetProperty
-int npclass_handle_SetProperty(rpc_connection_t *connection)
+static int npclass_handle_SetProperty(rpc_connection_t *connection)
 {
   D(bug("npclass_handle_SetProperty\n"));
 
@@ -822,7 +822,7 @@ bool g_NPClass_SetProperty(NPObject *npobj, NPIdentifier name, const NPVariant *
 }
 
 // NPClass::RemoveProperty
-int npclass_handle_RemoveProperty(rpc_connection_t *connection)
+static int npclass_handle_RemoveProperty(rpc_connection_t *connection)
 {
   D(bug("npclass_handle_RemoveProperty\n"));
 
@@ -893,7 +893,7 @@ bool g_NPClass_RemoveProperty(NPObject *npobj, NPIdentifier name)
 }
 
 // NPClass::Enumerate
-int npclass_handle_Enumerate(rpc_connection_t *connection)
+static int npclass_handle_Enumerate(rpc_connection_t *connection)
 {
   D(bug("npclass_handle_Enumerate\n"));
 
@@ -979,7 +979,7 @@ bool g_NPClass_Enumerate(NPObject *npobj,
 }
 
 // NPClass::Construct
-int npclass_handle_Construct(rpc_connection_t *connection)
+static int npclass_handle_Construct(rpc_connection_t *connection)
 {
   D(bug("npclass_handle_Construct\n"));
 

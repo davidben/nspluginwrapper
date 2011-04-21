@@ -42,7 +42,7 @@ extern NPObject *npobject_lookup_local(uint32_t id) attribute_hidden;
 // its stub.
 extern NPObject *npobject_create_proxy(NPP npp, uint32_t id) attribute_hidden;
 extern uint32_t npobject_get_proxy_id(NPObject *npobj) attribute_hidden;
-extern void npobject_destroy_proxy(NPObject *npobj, bool release_stub);
+extern void npobject_destroy_proxy(NPObject *npobj, bool release_stub) attribute_hidden;
 
 #if NPW_IS_PLUGIN
 // Firefox requires that NPN_CreateObject be called with a real NPP
