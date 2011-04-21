@@ -509,7 +509,7 @@ fi
 cat > $TMPC << EOF
 #include <glib.h>
 int main(void) {
-    (void) g_main_pending();
+    (void) g_main_context_pending(NULL);
     return 0;
 }
 EOF
