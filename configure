@@ -858,6 +858,7 @@ echo "#define LIBDIR \"$libdir\"" >> $config_h
 echo "ALLOW_STRIP=$strip" >> $config_mak
 
 echo "VERSION=$VERSION" >> $config_mak
+echo "RELEASE=$RELEASE" >> $config_mak
 echo "SVNDATE=$SVNDATE" >> $config_mak
 echo "SNAPSHOT=$SNAPSHOT" >> $config_mak
 echo "#define NPW_SNAPSHOT $SNAPSHOT" >> $config_h

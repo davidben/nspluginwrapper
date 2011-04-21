@@ -9,24 +9,6 @@ SRC_PATH = .
 endif
 
 PACKAGE = nspluginwrapper
-ifeq ($(VERSION),)
-VERSION := $(shell sed < $(SRC_PATH)/$(PACKAGE).spec -n '/^\%define version[	]*/s///p')
-endif
-ifeq ($(RELEASE),)
-RELEASE := $(shell sed < $(SRC_PATH)/$(PACKAGE).spec -n '/^\%define release[	]*/s///p')
-endif
-ifeq ($(SVNDATE),)
-SVNDATE := $(shell sed < $(SRC_PATH)/$(PACKAGE).spec -n '/^\%define svndate[ 	]*/s///p')
-endif
-ifeq ($(SVNDATE),)
-SVNDATE := $(shell date '+%Y%m%d')
-endif
-ifeq ($(SNAPSHOT),)
-SNAPSHOT := $(shell echo "$(RELEASE)" | grep "^0")
-ifeq ($(SNAPSHOT),$(RELEASE))
-SNAPSHOT := 2
-endif
-endif
 ifeq ($(SNAPSHOT),2)
 VERSION_SUFFIX = -$(SVNDATE)
 endif
