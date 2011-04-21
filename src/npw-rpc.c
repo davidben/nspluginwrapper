@@ -1178,26 +1178,43 @@ static int do_recv_NPPrintData(rpc_message_t *message, void *p_value)
  *  Process NPObject objects
  */
 
+enum NPObjectType {
+  NPOBJECT_NULL = 0,
+  NPOBJECT_SENDER_OWNED,
+  NPOBJECT_RECEIVER_OWNED
+};
+
 static int do_send_NPObject_helper(rpc_message_t *message, void *p_value,
 								   bool pass_ref)
 {
-  uint32_t npobj_id = 0;
   NPObject *npobj = (NPObject *)p_value;
+
+  int error;
+  uint32_t type = NPOBJECT_NULL;
+  NPW_PluginInstance *plugin = NULL;
+  uint32_t npobj_id = 0;
   bool release_stub = false;
+
   if (npobj) {
 	npobj_id = npobject_get_proxy_id(npobj);
 	if (npobj_id == 0) {
 	  // Sending an object on our side. Allocate a stub so the other
 	  // side can make a proxy.
+	  type = NPOBJECT_SENDER_OWNED;
 	  npobj_id = npobject_create_stub(npobj);
 	  if (pass_ref) {
 		// Release our reference; the stub protects the object from
 		// deallocation.
 		NPN_ReleaseObject(npobj);
 	  }
+#if NPW_IS_PLUGIN
+	  // Get the owning NPP so we can figure out who the owner is.
+	  plugin = npobject_get_owner(npobj);
+#endif
 	} else {
 	  // This is a proxy for the object on the other side. Just pass
 	  // the id along.
+	  type = NPOBJECT_RECEIVER_OWNED;
 	  if (pass_ref) {
 		// As above, we release out reference. If this is not the last
 		// reference, we may just do so. Otherwise, we destroy it, but
@@ -1205,6 +1222,7 @@ static int do_send_NPObject_helper(rpc_message_t *message, void *p_value,
 		// this one.
 		if (npobj->referenceCount == 1) {
 		  npobject_destroy_proxy(npobj, false);
+		  // Tell the other side to destroy the stub after taking a ref.
 		  release_stub = true;
 		} else {
 		  NPN_ReleaseObject(npobj);
@@ -1214,10 +1232,15 @@ static int do_send_NPObject_helper(rpc_message_t *message, void *p_value,
 	D(bug("sending id 0x%x\n", npobj_id));
 	assert(npobj_id != 0);
   }
-  int error = rpc_message_send_uint32(message, npobj_id);
-  if (error < 0)
+
+  // This could be significantly trimmed down, but it really doesn't
+  // matter. Latency, not bandwidth, is what we care about.
+  if ((error = rpc_message_send_uint32(message, type)) < 0)
 	return error;
-  // Tell the other side whether or not to destroy the stub.
+  if ((error = do_send_NPW_PluginInstance(message, plugin)) < 0)
+	return error;
+  if ((error = rpc_message_send_uint32(message, npobj_id)) < 0)
+	return error;
   if (pass_ref) {
 	if ((error = rpc_message_send_uint32(message, release_stub)) < 0)
 	  return error;
@@ -1230,9 +1253,15 @@ static int do_recv_NPObject_helper(rpc_message_t *message, void *p_value,
 								   bool pass_ref)
 {
   int error;
-  uint32_t npobj_id;
+  uint32_t type = NPOBJECT_NULL;
+  uint32_t npobj_id = 0;
+  NPW_PluginInstance *plugin = NULL;
   uint32_t release_stub = 0;
 
+  if ((error = rpc_message_recv_uint32(message, &type)) < 0)
+	return error;
+  if ((error = do_recv_NPW_PluginInstance(message, &plugin)) < 0)
+	return error;
   if ((error = rpc_message_recv_uint32(message, &npobj_id)) < 0)
 	return error;
   if (pass_ref) {
@@ -1241,26 +1270,30 @@ static int do_recv_NPObject_helper(rpc_message_t *message, void *p_value,
   }
 
   NPObject *npobj = NULL;
-  if (npobj_id) {
+  if (type == NPOBJECT_NULL) {
+	// Do nothing.
+  } else if (type == NPOBJECT_SENDER_OWNED) {
+	// We got a newly-created remote stub. Create a matching proxy.
+	npobj = npobject_create_proxy(NPW_PLUGIN_INSTANCE_NPP(plugin), npobj_id);
+	if (release_stub) {
+	  npw_printf("ERROR: received release_stub for proxy NPObject.\n");
+	  return RPC_ERROR_GENERIC;
+	}
+  } else if (type == NPOBJECT_RECEIVER_OWNED) {
 	npobj = npobject_lookup_local(npobj_id);
-	if (npobj == NULL) {
-	  // We got an id of a newly created remote stub. Create a proxy
-	  // for it.
-	  npobj = npobject_create_proxy(NULL, npobj_id);
-	  if (release_stub)
-		npw_printf("ERROR: received release_stub for proxy NPObject.\n");
-	} else {
-	  // This is an object on our side. Retain it; receiver must
-	  // release all received NPObjects.
-	  D(bug("local\n"));
-	  NPN_RetainObject(npobj);
-	  if (release_stub) {
-		// We just retained the object, so it won't be destroyed.
-		npobject_destroy_stub(npobj_id);
-	  }
+	assert(npobj != NULL);
+	// This is an object on our side. Retain it; receiver must
+	// release all received NPObjects.
+	D(bug("local\n"));
+	NPN_RetainObject(npobj);
+	if (release_stub) {
+	  // We just retained the object, so it won't be destroyed.
+	  npobject_destroy_stub(npobj_id);
 	}
 	D(bug("recv id 0x%x, obj %p\n", npobj_id, npobj));
-	assert(npobj != NULL);
+  } else {
+	npw_printf("ERROR: unknown NPObject type %d\n", type);
+	return RPC_ERROR_GENERIC;
   }
 
   *((NPObject **)p_value) = npobj;

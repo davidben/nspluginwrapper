@@ -44,6 +44,15 @@ extern NPObject *npobject_create_proxy(NPP npp, uint32_t id) attribute_hidden;
 extern uint32_t npobject_get_proxy_id(NPObject *npobj) attribute_hidden;
 extern void npobject_destroy_proxy(NPObject *npobj, bool release_stub);
 
+#if NPW_IS_PLUGIN
+// Firefox requires that NPN_CreateObject be called with a real NPP
+// pointer, so we keep track of the ownership of NPObjects. This
+// mapping also doubles as a way of tracking if they've been invalidated.
+extern void npobject_register(NPObject *npobj, void *plugin) attribute_hidden;
+extern void *npobject_get_owner(NPObject *npobj) attribute_hidden;
+extern void npobject_unregister(NPObject *npobj) attribute_hidden;
+#endif
+
 struct _NPVariant;
 extern void npvariant_clear(struct _NPVariant *variant) attribute_hidden;
 extern char *string_of_NPVariant(const struct _NPVariant *arg) attribute_hidden;

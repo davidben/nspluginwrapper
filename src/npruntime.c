@@ -226,7 +226,16 @@ static NPClass npclass_bridge = {
 
 static inline bool is_valid_npobject_class(NPObject *npobj)
 {
-  return npobj != NULL && npobj->_class != NULL;
+  if (npobj == NULL || npobj->_class == NULL)
+	return false;
+#if NPW_IS_PLUGIN
+  // Reject requests on invalidated objects.
+  if (npobject_get_owner(npobj) == NULL) {
+	npw_printf("ERROR: accessed invalidated NPObject\n");
+	return false;
+  }
+#endif
+  return true;
 }
 
 // NPClass::Allocate
@@ -1082,15 +1091,41 @@ int npclass_add_method_descriptors(rpc_connection_t *connection)
 											   sizeof(vtable) / sizeof(vtable[0]));
 }
 
+#if NPW_IS_PLUGIN
+/* ====================================================================== */
+/* === NPObject Registration                                          === */
+/* ====================================================================== */
+
+static GHashTable *g_npobj_owners = NULL;
+
+void npobject_register(NPObject *npobj, void *plugin)
+{
+  assert(npobject_get_owner(npobj) == NULL);
+  g_hash_table_insert(g_npobj_owners, npobj, plugin);
+}
+
+void *npobject_get_owner(NPObject *npobj)
+{
+  return g_hash_table_lookup(g_npobj_owners, npobj);
+}
+
+void npobject_unregister(NPObject *npobj)
+{
+  g_hash_table_remove(g_npobj_owners, npobj);
+}
+#endif
 
 /* ====================================================================== */
-/* === NPObject Repository                                            === */
+/* === NPObject Bridge System                                         === */
 /* ====================================================================== */
 
 bool npobject_bridge_new(void)
 {
   g_stubs = g_hash_table_new(NULL, NULL);
   g_proxies = g_hash_table_new(NULL, NULL);
+#if NPW_IS_PLUGIN
+  g_npobj_owners = g_hash_table_new(NULL, NULL);
+#endif
   return true;
 }
 
@@ -1104,6 +1139,12 @@ void npobject_bridge_destroy(void)
 	g_hash_table_destroy(g_proxies);
 	g_proxies = NULL;
   }
+#if NPW_IS_PLUGIN
+  if (g_npobj_owners) {
+	g_hash_table_destroy(g_npobj_owners);
+	g_npobj_owners = NULL;
+  }
+#endif
 }
 
 #if NPW_IS_BROWSER

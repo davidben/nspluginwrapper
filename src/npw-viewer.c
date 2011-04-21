@@ -79,6 +79,7 @@ typedef struct _PluginInstance {
   GdkWindow *browser_toplevel;
   uint32_t next_timer_id;
   GHashTable *timers;
+  GHashTable *npobjects;
 } PluginInstance;
 
 #define PLUGIN_INSTANCE(instance) \
@@ -158,6 +159,9 @@ static void plugin_instance_finalize(PluginInstance *plugin)
   }
   if (plugin->timers) {
 	g_hash_table_destroy(plugin->timers);
+  }
+  if (plugin->npobjects) {
+	g_hash_table_destroy(plugin->npobjects);
   }
 }
 
@@ -1945,7 +1949,9 @@ g_NPN_CreateObject(NPP instance, NPClass *class)
   if (class == NULL)
 	return NULL;
 
-  D(bugiI("NPN_CreateObject\n"));
+  PluginInstance *plugin = PLUGIN_INSTANCE(instance);
+
+  D(bugiI("NPN_CreateObject instance=%p, plugin=%p\n", instance, plugin));
 
   NPObject *npobj;
   if (class->allocate)
@@ -1955,6 +1961,12 @@ g_NPN_CreateObject(NPP instance, NPClass *class)
   if (npobj) {
 	npobj->_class = class;
 	npobj->referenceCount = 1;
+
+	if (npobject_get_proxy_id(npobj) == 0 && plugin) {
+	  // Register anything that isn't a proxy.
+	  npobject_register(npobj, plugin);
+	  g_hash_table_insert(plugin->npobjects, npobj, npobj);
+	}
   }
   D(bugiD("NPN_CreateObject return: %p\n", npobj));
   return npobj;
@@ -1993,6 +2005,14 @@ g_NPN_ReleaseObject(NPObject *npobj)
   npobj->referenceCount--;
   uint32_t refcount = npobj->referenceCount;
   if (npobj->referenceCount == 0) {
+#if NPW_IS_PLUGIN
+	PluginInstance *plugin = npobject_get_owner(npobj);
+	if (plugin) {
+	  // Unregister the owner, if not proxy.
+	  g_hash_table_remove(plugin->npobjects, npobj);
+	  npobject_unregister(npobj);
+	}
+#endif
 	if (npobj) {
 	  if (npobj->_class && npobj->_class->deallocate)
 		npobj->_class->deallocate(npobj);
@@ -3727,10 +3747,10 @@ static NPError g_NPP_New(NPMIMEType plugin_type, uint32_t instance_id,
   }
 
   plugin->next_timer_id = 1;
-  plugin->timers = g_hash_table_new_full(g_direct_hash,
-										 g_direct_equal,
-										 NULL,
+  plugin->timers = g_hash_table_new_full(NULL, NULL, NULL,
 										 (GDestroyNotify) timer_free);
+  plugin->npobjects = g_hash_table_new(NULL, NULL);
+
   return ret;
 }
 
@@ -3784,6 +3804,16 @@ static int handle_NPP_New(rpc_connection_t *connection)
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
+static void invalidate_npobject(gpointer key, gpointer value, gpointer user_data)
+{
+  NPObject *npobj = key;
+  D(bugiI("invalidate_npobject %p\n", npobj));
+  if (npobj->_class && npobj->_class->invalidate)
+	npobj->_class->invalidate(npobj);
+  npobject_unregister(npobj);
+  D(bugiD("invalidate_npobject done\n"));
+}
+
 // NPP_Destroy
 static NPError g_NPP_Destroy(NPP instance, NPSavedData **sdata)
 {
@@ -3800,6 +3830,13 @@ static NPError g_NPP_Destroy(NPP instance, NPSavedData **sdata)
   D(bugiI("NPP_Destroy instance=%p\n", instance));
   NPError ret = plugin_funcs.destroy(instance, sdata);
   D(bugiD("NPP_Destroy return: %d [%s]\n", ret, string_of_NPError(ret)));
+
+  // Invalidate all NPObjects remaining. We won't forcibly delete them
+  // like Firefox does because there may be proxies and stubs still
+  // holding on. The references should eventually go away and allow us
+  // to free it. If needbe we can track more objects, but anything
+  // left here is arguably a plugin or browser bug.
+  g_hash_table_foreach(plugin->npobjects, invalidate_npobject, NULL);
 
   if (!plugin->use_xembed)
 	xt_source_destroy();
