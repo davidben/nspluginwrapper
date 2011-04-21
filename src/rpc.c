@@ -482,14 +482,9 @@ void rpc_connection_unref(rpc_connection_t *connection)
 }
 
 // Returns whether we are in sync mode or not (i.e. needs other end sync)
-inline bool rpc_is_server(rpc_connection_t *connection)
-{
-  return connection->type == RPC_CONNECTION_SERVER;
-}
-
 static inline bool _rpc_connection_is_sync_mode(rpc_connection_t *connection)
 {
-  return rpc_is_server(connection);
+  return connection->type == RPC_CONNECTION_SERVER;
 }
 
 // Returns whether we are allowed to synchronize with the other end

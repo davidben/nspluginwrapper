@@ -77,11 +77,9 @@ uint32_t npobject_create_stub(NPObject *npobj)
 
   static uint32_t next_id = 0;
 
-  // Allocate an id. Client and server get distinct id spaces.
+  // Allocate an id. Client and server get separate id spaces because
+  // of type field.
   uint32_t id = ++next_id;
-  assert(id < (1<<31));
-  if (rpc_is_server(g_rpc_connection))
-	id |= (1<<31);
 
   D(bug("npobject_create_stub: npobj=%p, id=0x%x\n", npobj, id));
   NPObjectStub *stub = g_new0(NPObjectStub, 1);

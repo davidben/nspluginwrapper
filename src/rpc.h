@@ -54,7 +54,6 @@ extern void rpc_connection_unref(rpc_connection_t *connection) attribute_hidden;
 
 extern rpc_connection_t *rpc_init_server(const char *ident) attribute_hidden;
 extern rpc_connection_t *rpc_init_client(const char *ident) attribute_hidden;
-extern bool rpc_is_server(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_exit(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_listen_socket(rpc_connection_t *connection) attribute_hidden;
 extern int rpc_listen(rpc_connection_t *connection) attribute_hidden;
