@@ -1229,7 +1229,6 @@ static int do_send_NPObject_helper(rpc_message_t *message, void *p_value,
 		}
 	  }
 	}
-	D(bug("sending id 0x%x\n", npobj_id));
 	assert(npobj_id != 0);
   }
 
@@ -1284,13 +1283,11 @@ static int do_recv_NPObject_helper(rpc_message_t *message, void *p_value,
 	assert(npobj != NULL);
 	// This is an object on our side. Retain it; receiver must
 	// release all received NPObjects.
-	D(bug("local\n"));
 	NPN_RetainObject(npobj);
 	if (release_stub) {
 	  // We just retained the object, so it won't be destroyed.
 	  npobject_destroy_stub(npobj_id);
 	}
-	D(bug("recv id 0x%x, obj %p\n", npobj_id, npobj));
   } else {
 	npw_printf("ERROR: unknown NPObject type %d\n", type);
 	return RPC_ERROR_GENERIC;
