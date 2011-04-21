@@ -773,13 +773,9 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
 	if (toolkit == NULL)
 	  return -1;
 	toolkit->container = gtk_plug_new((GdkNativeWindow)window->window);
-	if (toolkit->container == NULL)
-	  return -1;
 	gtk_widget_set_size_request(toolkit->container, window->width, window->height); 
 	gtk_widget_show(toolkit->container);
 	toolkit->socket = gtk_socket_new();
-	if (toolkit->socket == NULL)
-	  return -1;
 	gtk_widget_show(toolkit->socket);
 	gtk_container_add(GTK_CONTAINER(toolkit->container), toolkit->socket);
 	gtk_widget_show_all(toolkit->container);
