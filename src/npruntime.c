@@ -312,6 +312,9 @@ void g_NPClass_Invalidate(NPObject *npobj)
   // for a plugin-side NPObject. We'll invalidate them viewer-side.
   NPObjectProxy *proxy = npobject_get_proxy(npobj);
   proxy->is_valid = false;
+  // Release the underlying stub now, otherwise the is_valid check
+  // will refuse to do so. The stub is of no use to us now.
+  npclass_invoke_Deallocate(proxy);
   D(bugiD("NPClass::Invalidate done\n"));
 }
 
@@ -1152,6 +1155,7 @@ static void proxy_deactivate_func(gpointer key, gpointer value, gpointer user_da
 {
   NPObjectProxy *proxy = (NPObjectProxy *)value;
   proxy->is_valid = false;
+  // No need to release the stub. At this point the viewer is dead.
 }
 
 static void stub_destroy_func(gpointer key, gpointer value, gpointer user_data)
