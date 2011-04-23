@@ -153,6 +153,11 @@ NPObject *npobject_create_proxy(NPP instance, uint32_t id)
   return object;
 }
 
+bool npobject_is_proxy(NPObject *npobj)
+{
+  return npobject_get_proxy(npobj) != NULL;
+}
+
 uint32_t npobject_get_proxy_id(NPObject *npobj)
 {
   NPObjectProxy *proxy = npobject_get_proxy(npobj);

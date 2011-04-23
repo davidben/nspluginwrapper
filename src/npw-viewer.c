@@ -1958,7 +1958,9 @@ g_NPN_CreateObject(NPP instance, NPClass *class)
 	npobj->_class = class;
 	npobj->referenceCount = 1;
 
-	if (npobject_get_proxy_id(npobj) == 0) {
+	// We specifically cannot call npobject_get_proxy_id here because
+	// the proxy has only been allocated, not constructed. (Sigh.)
+	if (!npobject_is_proxy(npobj)) {
 	  // Register anything that isn't a proxy.
 	  npobject_register(npobj, plugin);
 	  if (plugin)
