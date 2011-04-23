@@ -103,10 +103,11 @@ NPObject *npobject_lookup_local(uint32_t id)
 
 static void npobject_destroy_stub_obj(NPObjectStub *stub)
 {
-  D(bug("npobject_destroy_stub: id=0x%x\n", stub->id));
+  D(bugiI("npobject_destroy_stub: id=0x%x\n", stub->id));
   g_hash_table_remove(g_stubs, GINT_TO_POINTER(stub->id));
   NPN_ReleaseObject(stub->npobject);
   g_free(stub);
+  D(bugiD("npobject_destroy_stub done\n"));
 }
 
 void npobject_destroy_stub(uint32_t id)
