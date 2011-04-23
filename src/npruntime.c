@@ -341,6 +341,9 @@ static int npclass_handle_HasMethod(rpc_connection_t *connection)
 	D(bugiD("NPClass::HasMethod return: %d\n", ret));
   }
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
+
   return rpc_method_send_reply(connection,
 							   RPC_TYPE_UINT32, ret,
 							   RPC_TYPE_INVALID);
@@ -420,6 +423,8 @@ static int npclass_handle_Invoke(rpc_connection_t *connection)
 	g_free(result_str);
   }
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
   if (args) {
 	for (int i = 0; i < argCount; i++)
 	  NPN_ReleaseVariantValue(&args[i]);
@@ -517,6 +522,8 @@ static int npclass_handle_InvokeDefault(rpc_connection_t *connection)
 	g_free(result_str);
   }
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
   if (args) {
 	for (int i = 0; i < argCount; i++)
 	  NPN_ReleaseVariantValue(&args[i]);
@@ -607,6 +614,9 @@ static int npclass_handle_HasProperty(rpc_connection_t *connection)
 	D(bugiD("NPClass::HasProperty return: %d\n", ret));
   }
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
+
   return rpc_method_send_reply(connection,
 							   RPC_TYPE_UINT32, ret,
 							   RPC_TYPE_INVALID);
@@ -681,6 +691,9 @@ static int npclass_handle_GetProperty(rpc_connection_t *connection)
 	D(bugiD("NPClass::GetProperty return: %d (%s)\n", ret, result_str));
 	g_free(result_str);
   }
+
+  if (npobj)
+	NPN_ReleaseObject(npobj);
 
   return rpc_method_send_reply(connection,
 							   RPC_TYPE_UINT32, ret,
@@ -765,6 +778,8 @@ static int npclass_handle_SetProperty(rpc_connection_t *connection)
 	D(bugiD("NPClass::SetProperty return: %d\n", ret));
   }
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
   NPN_ReleaseVariantValue(&value);
 
   return rpc_method_send_reply(connection,
@@ -846,6 +861,9 @@ static int npclass_handle_RemoveProperty(rpc_connection_t *connection)
 	D(bugiD("NPClass::RemoveProperty return: %d\n", ret));
   }
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
+
   return rpc_method_send_reply(connection,
 							   RPC_TYPE_UINT32, ret,
 							   RPC_TYPE_INVALID);
@@ -919,6 +937,9 @@ static int npclass_handle_Enumerate(rpc_connection_t *connection)
 	// TODO: Print the identifiers to debug
 	D(bugiD("NPClass::Enumerate return: %d (%d identifiers)\n", ret, argCount));
   }
+
+  if (npobj)
+	NPN_ReleaseObject(npobj);
 
   int rpc_ret = rpc_method_send_reply(connection,
 									  RPC_TYPE_UINT32, ret,
@@ -1020,6 +1041,8 @@ static int npclass_handle_Construct(rpc_connection_t *connection)
 	g_free(result_str);
   }
 
+  if (npobj)
+	NPN_ReleaseObject(npobj);
   if (args) {
 	for (int i = 0; i < argCount; i++)
 	  NPN_ReleaseVariantValue(&args[i]);
