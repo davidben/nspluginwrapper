@@ -68,7 +68,7 @@
 
 // Define the maximum amount of time (in seconds) to wait for a message
 #ifndef RPC_MESSAGE_TIMEOUT
-#define RPC_MESSAGE_TIMEOUT 10
+#define RPC_MESSAGE_TIMEOUT 30
 #endif
 
 // Define the maximum amount of time (in seconds) to wait for plugin connection
