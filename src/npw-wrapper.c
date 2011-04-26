@@ -959,7 +959,7 @@ static int handle_NPN_NewStream(rpc_connection_t *connection)
 							   RPC_TYPE_INVALID);
 }
 
-// NPN_DestroySream
+// NPN_DestroyStream
 static NPError
 g_NPN_DestroyStream(NPP instance, NPStream *stream, NPReason reason)
 {
