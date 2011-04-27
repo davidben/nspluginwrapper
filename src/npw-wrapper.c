@@ -3428,69 +3428,16 @@ static NPError
 invoke_NP_Initialize(uint32_t npapi_version, uint32_t *plugin_version)
 {
   if (PLUGIN_DIRECT_EXEC) {
-	NPNetscapeFuncs mozilla_funcs;
-	memset(&mozilla_funcs, 0, sizeof(mozilla_funcs));
-	mozilla_funcs.size = sizeof(mozilla_funcs);
-	mozilla_funcs.version = npapi_version;
-	mozilla_funcs.geturl = g_NPN_GetURL;
-	mozilla_funcs.posturl = g_NPN_PostURL;
-	mozilla_funcs.requestread = g_NPN_RequestRead;
-	mozilla_funcs.newstream = g_NPN_NewStream;
-	mozilla_funcs.write = g_NPN_Write;
-	mozilla_funcs.destroystream = g_NPN_DestroyStream;
-	mozilla_funcs.status = g_NPN_Status;
-	mozilla_funcs.uagent = g_NPN_UserAgent;
-	mozilla_funcs.memalloc = g_NPN_MemAlloc;
-	mozilla_funcs.memfree = g_NPN_MemFree;
-	mozilla_funcs.memflush = g_NPN_MemFlush;
-	mozilla_funcs.reloadplugins = g_NPN_ReloadPlugins;
-	mozilla_funcs.getJavaEnv = g_NPN_GetJavaEnv;
-	mozilla_funcs.getJavaPeer = g_NPN_GetJavaPeer;
-	mozilla_funcs.geturlnotify = g_NPN_GetURLNotify;
-	mozilla_funcs.posturlnotify = g_NPN_PostURLNotify;
-	mozilla_funcs.getvalue = g_NPN_GetValue;
-	mozilla_funcs.setvalue = g_NPN_SetValue;
-	mozilla_funcs.invalidaterect = g_NPN_InvalidateRect;
-	mozilla_funcs.invalidateregion = g_NPN_InvalidateRegion;
-	mozilla_funcs.forceredraw = g_NPN_ForceRedraw;
-	mozilla_funcs.pushpopupsenabledstate = g_NPN_PushPopupsEnabledState;
-	mozilla_funcs.poppopupsenabledstate = g_NPN_PopPopupsEnabledState;
-	mozilla_funcs.getvalueforurl = g_NPN_GetValueForURL;
-	mozilla_funcs.setvalueforurl = g_NPN_SetValueForURL;
-	mozilla_funcs.getauthenticationinfo = g_NPN_GetAuthenticationInfo;
-	if ((npapi_version & 0xff) >= NPVERS_HAS_NPRUNTIME_SCRIPTING) {
-	  mozilla_funcs.getstringidentifier = g_NPN_GetStringIdentifier;
-	  mozilla_funcs.getstringidentifiers = g_NPN_GetStringIdentifiers;
-	  mozilla_funcs.getintidentifier = g_NPN_GetIntIdentifier;
-	  mozilla_funcs.identifierisstring = g_NPN_IdentifierIsString;
-	  mozilla_funcs.utf8fromidentifier = g_NPN_UTF8FromIdentifier;
-	  mozilla_funcs.intfromidentifier = g_NPN_IntFromIdentifier;
-	  mozilla_funcs.createobject = g_NPN_CreateObject;
-	  mozilla_funcs.retainobject = g_NPN_RetainObject;
-	  mozilla_funcs.releaseobject = g_NPN_ReleaseObject;
-	  mozilla_funcs.invoke = g_NPN_Invoke;
-	  mozilla_funcs.invokeDefault = g_NPN_InvokeDefault;
-	  mozilla_funcs.evaluate = g_NPN_Evaluate;
-	  mozilla_funcs.getproperty = g_NPN_GetProperty;
-	  mozilla_funcs.setproperty = g_NPN_SetProperty;
-	  mozilla_funcs.removeproperty = g_NPN_RemoveProperty;
-	  mozilla_funcs.hasproperty = g_NPN_HasProperty;
-	  mozilla_funcs.hasmethod = g_NPN_HasMethod;
-	  mozilla_funcs.releasevariantvalue = g_NPN_ReleaseVariantValue;
-	  mozilla_funcs.setexception = g_NPN_SetException;
-	  mozilla_funcs.enumerate = g_NPN_Enumerate;
-	  mozilla_funcs.construct = g_NPN_Construct;
-	}
-	if ((npapi_version & 0xff) >= NPVERS_HAS_PLUGIN_THREAD_ASYNC_CALL) {
-	  // Avoid pretending we have support for this if we really don't.
-	  mozilla_funcs.pluginthreadasynccall = g_NPN_PluginThreadAsyncCall;
-	}
-	if ((npapi_version & 0xff) >= NPVERS_MACOSX_HAS_COCOA_EVENTS) {
-	  // Avoid pretending we have support for this if we really don't.
-	  mozilla_funcs.scheduletimer = g_NPN_ScheduleTimer;
-	  mozilla_funcs.unscheduletimer = g_NPN_UnscheduleTimer;
-	}
-	NPError error = g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
+	NPNetscapeFuncs wrapped_mozilla_funcs;
+	memset(&wrapped_mozilla_funcs, 0, sizeof(wrapped_mozilla_funcs));
+	wrapped_mozilla_funcs.size = sizeof(wrapped_mozilla_funcs);
+	wrapped_mozilla_funcs.version = npapi_version;
+#define BROWSER_FUNC(func, member)					\
+	if (mozilla_funcs.member != NULL)				\
+	  wrapped_mozilla_funcs.member = g_ ## func;
+#include "browser-funcs.h"
+#undef BROWSER_FUNC
+	NPError error = g_plugin_NP_Initialize(&wrapped_mozilla_funcs, &plugin_funcs);
     *plugin_version = plugin_funcs.version;
     return error;
   }
@@ -3555,20 +3502,11 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
   memset(&full_plugin_funcs, 0, sizeof(full_plugin_funcs));
   full_plugin_funcs.size = sizeof(NPPluginFuncs);
   full_plugin_funcs.version = NPW_NPAPI_VERSION;
-  full_plugin_funcs.newp = g_NPP_New;
-  full_plugin_funcs.destroy = g_NPP_Destroy;
-  full_plugin_funcs.setwindow = g_NPP_SetWindow;
-  full_plugin_funcs.newstream = g_NPP_NewStream;
-  full_plugin_funcs.destroystream = g_NPP_DestroyStream;
-  full_plugin_funcs.asfile = g_NPP_StreamAsFile;
-  full_plugin_funcs.writeready = g_NPP_WriteReady;
-  full_plugin_funcs.write = g_NPP_Write;
-  full_plugin_funcs.print = g_NPP_Print;
-  full_plugin_funcs.event = g_NPP_HandleEvent;
-  full_plugin_funcs.urlnotify = g_NPP_URLNotify;
+#define PLUGIN_FUNC(func, member)				\
+  full_plugin_funcs.member = g_ ## func;
+#include "plugin-funcs.h"
+#undef PLUGIN_FUNC
   full_plugin_funcs.javaClass = NULL;
-  full_plugin_funcs.getvalue = g_NPP_GetValue;
-  full_plugin_funcs.setvalue = g_NPP_SetValue;
 
   // override function table with an additional thunking layer for
   // possibly broken 64-bit Konqueror versions (NPAPI 0.11)
