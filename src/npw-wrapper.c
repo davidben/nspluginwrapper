@@ -3425,7 +3425,10 @@ static bool is_konqueror(void)
 
 // Provides global initialization for a plug-in
 static NPError
-invoke_NP_Initialize(uint32_t npapi_version, uint32_t *plugin_version)
+invoke_NP_Initialize(uint32_t npapi_version,
+					 uint32_t *plugin_version,
+					 uint32_t **plugin_capabilities,
+					 uint32_t *plugin_capabilities_len)
 {
   if (PLUGIN_DIRECT_EXEC) {
 	NPNetscapeFuncs wrapped_mozilla_funcs;
@@ -3445,9 +3448,20 @@ invoke_NP_Initialize(uint32_t npapi_version, uint32_t *plugin_version)
   npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
 						 NPERR_MODULE_LOAD_FAILED_ERROR);
 
+  // Allocate browser capabilities.
+  uint32_t browser_capabilities[] = {
+#define BROWSER_FUNC(func, member)				\
+	(mozilla_funcs.member != NULL) ? 1 : 0,
+#include "browser-funcs.h"
+#undef BROWSER_FUNC
+  };
+
   int error = rpc_method_invoke(g_rpc_connection,
 								RPC_METHOD_NP_INITIALIZE,
 								RPC_TYPE_UINT32, npapi_version,
+								RPC_TYPE_ARRAY, RPC_TYPE_UINT32,
+								G_N_ELEMENTS(browser_capabilities),
+								browser_capabilities,
 								RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -3459,6 +3473,9 @@ invoke_NP_Initialize(uint32_t npapi_version, uint32_t *plugin_version)
   error = rpc_method_wait_for_reply(g_rpc_connection,
                                     RPC_TYPE_INT32, &ret,
                                     RPC_TYPE_UINT32, plugin_version,
+									RPC_TYPE_ARRAY, RPC_TYPE_UINT32,
+									plugin_capabilities_len,
+									plugin_capabilities,
                                     RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -3470,10 +3487,13 @@ invoke_NP_Initialize(uint32_t npapi_version, uint32_t *plugin_version)
 }
 
 static NPError
-g_NP_Initialize(uint32_t npapi_version, uint32_t *plugin_version)
+g_NP_Initialize(uint32_t npapi_version,
+				uint32_t *plugin_version,
+				uint32_t **plugin_capabilities, uint32_t *plugin_capabilities_len)
 {
   D(bugiI("NP_Initialize\n"));
-  NPError ret = invoke_NP_Initialize(npapi_version, plugin_version);
+  NPError ret = invoke_NP_Initialize(npapi_version, plugin_version,
+									 plugin_capabilities, plugin_capabilities_len);
   D(bugiD("NP_Initialize return: %d [%s], plugin_version=%d\n",
           ret, string_of_NPError(ret), *plugin_version));
   return ret;
@@ -3550,13 +3570,33 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
   D(bug("Browser supports NPAPI %d, advertising version %d to plugin\n",
         moz_funcs->version, npapi_version));
   uint32_t plugin_version = 0;
-  NPError error = g_NP_Initialize(npapi_version, &plugin_version);
+  uint32_t *plugin_capabilities = NULL;
+  uint32_t plugin_capabilities_len;
+  NPError error = g_NP_Initialize(npapi_version, &plugin_version,
+								  &plugin_capabilities, &plugin_capabilities_len);
 
   // Likewise, advertise the common NPAPI version between the plugin and our
   // thunking capabilities.
   full_plugin_funcs.version = MIN(plugin_version, NPW_NPAPI_VERSION);
   D(bug("Plugin supports NPAPI %d, advertising version %d to browser\n",
         plugin_version, full_plugin_funcs.version));
+
+  // Don't advertise any functions the plugin doesn't support.
+  int num = 0;
+#define PLUGIN_FUNC(func, member)								\
+  if (num >= plugin_capabilities_len)	{						\
+	D(bug("ERROR: provided array was too small.\n"));			\
+	goto plugin_func_done;										\
+  }																\
+  if (!plugin_capabilities[num]) {								\
+	D(bug("plugin does not support " #func "\n"));				\
+	full_plugin_funcs.member = NULL;							\
+  }																\
+  num++;
+#include "plugin-funcs.h"
+#undef PLUGIN_FUNC
+ plugin_func_done:
+  free(plugin_capabilities);
 
   // Copy only the portion of full_plugin_funcs that the browser
   // understands.
@@ -3964,7 +4004,14 @@ static NPError plugin_start(void)
 	return NPERR_MODULE_LOAD_FAILED_ERROR;
 
   uint32_t plugin_version;
-  return g_NP_Initialize(npapi_version, &plugin_version);
+  uint32_t *plugin_capabilities = NULL;
+  uint32_t plugin_capabilities_len;
+  NPError ret = g_NP_Initialize(npapi_version, &plugin_version,
+								&plugin_capabilities, &plugin_capabilities_len);
+  // Assume capabilities unchanged.
+  if (plugin_capabilities)
+	free(plugin_capabilities);
+  return ret;
 }
 
 static NPError plugin_start_if_needed(void)

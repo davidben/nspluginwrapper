@@ -3549,7 +3549,9 @@ static int handle_NP_GetValue(rpc_connection_t *connection)
 
 // NP_Initialize
 static NPError
-g_NP_Initialize(uint32_t version, uint32_t *plugin_version)
+g_NP_Initialize(uint32_t version, uint32_t *plugin_version,
+				uint32_t *browser_capabilities, uint32_t browser_capabilities_len,
+				uint32_t *plugin_capabilities, uint32_t plugin_capabilities_len)
 {
   if (g_plugin_NP_Initialize == NULL)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
@@ -3560,11 +3562,22 @@ g_NP_Initialize(uint32_t version, uint32_t *plugin_version)
   memset(&mozilla_funcs, 0, sizeof(mozilla_funcs));
   mozilla_funcs.size = sizeof(mozilla_funcs);
   mozilla_funcs.version = version;
-  // TODO: query for support.
-#define BROWSER_FUNC(func, member)					\
-  mozilla_funcs.member = g_ ## func;
+
+  int num = 0;
+#define BROWSER_FUNC(func, member)										\
+  if (num >= browser_capabilities_len) {								\
+	npw_printf("ERROR: capabilities length mismatch at %d: got %d\n",	\
+			   num, browser_capabilities_len);							\
+	goto browser_func_done;												\
+  }																		\
+  if (!browser_capabilities[num])										\
+	D(bug("browser does not provide " #func "\n"));						\
+  else																	\
+	mozilla_funcs.member = g_ ## func;									\
+  num++;
 #include "browser-funcs.h"
 #undef BROWSER_FUNC
+ browser_func_done:
 
   if (!npobject_bridge_new())
 	return NPERR_OUT_OF_MEMORY_ERROR;
@@ -3580,6 +3593,21 @@ g_NP_Initialize(uint32_t version, uint32_t *plugin_version)
   D(bugiI("NP_Initialize version=%d\n", version));
   NPError ret = g_plugin_NP_Initialize(&mozilla_funcs, &plugin_funcs);
   *plugin_version = plugin_funcs.version;
+
+  if (plugin_capabilities) {
+	int num = 0;
+#define PLUGIN_FUNC(func, member)								\
+	if (num >= plugin_capabilities_len)	{						\
+	  D(bug("ERROR: provided array was too small.\n"));			\
+	  goto plugin_func_done;									\
+	}															\
+	plugin_capabilities[num] = (plugin_funcs.member != NULL);	\
+	num++;
+#include "plugin-funcs.h"
+#undef PLUGIN_FUNC
+  }
+ plugin_func_done:
+
   D(bugiD("NP_Initialize return: %d, plugin_version=%d\n", ret, *plugin_version));
   return ret;
 }
@@ -3589,8 +3617,12 @@ static int handle_NP_Initialize(rpc_connection_t *connection)
   D(bug("handle_NP_Initialize\n"));
 
   uint32_t version;
+  uint32_t *browser_capabilities;
+  uint32_t browser_capabilities_len;
   int error = rpc_method_get_args(connection,
 								  RPC_TYPE_UINT32, &version,
+								  RPC_TYPE_ARRAY, RPC_TYPE_UINT32,
+								  &browser_capabilities_len, &browser_capabilities,
 								  RPC_TYPE_INVALID);
 
   if (error != RPC_ERROR_NO_ERROR) {
@@ -3599,10 +3631,26 @@ static int handle_NP_Initialize(rpc_connection_t *connection)
   }
 
   uint32_t plugin_version = 0;
-  NPError ret = g_NP_Initialize(version, &plugin_version);
+  uint32_t plugin_capabilities[0
+#define PLUGIN_FUNC(func, member)				\
+							   + 1
+#include "plugin-funcs.h"
+#undef PLUGIN_FUNC
+							   ];
+  NPError ret = g_NP_Initialize(version, &plugin_version,
+								browser_capabilities, browser_capabilities_len,
+								plugin_capabilities,
+								G_N_ELEMENTS(plugin_capabilities));
+
+  if (browser_capabilities)
+	free(browser_capabilities);
+
   return rpc_method_send_reply(connection,
                                RPC_TYPE_INT32, ret,
                                RPC_TYPE_UINT32, plugin_version,
+							   RPC_TYPE_ARRAY, RPC_TYPE_UINT32,
+							   G_N_ELEMENTS(plugin_capabilities),
+							   plugin_capabilities,
                                RPC_TYPE_INVALID);
 }
 
