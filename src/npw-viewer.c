@@ -3579,6 +3579,12 @@ g_NP_Initialize(uint32_t version, uint32_t *plugin_version,
 #undef BROWSER_FUNC
  browser_func_done:
 
+  // Unconditionally provide NPN_PluginThreadAsyncCall and the timer
+  // functions. They require no browser support.
+  mozilla_funcs.pluginthreadasynccall = g_NPN_PluginThreadAsyncCall;
+  mozilla_funcs.scheduletimer = g_NPN_ScheduleTimer;
+  mozilla_funcs.unscheduletimer = g_NPN_UnscheduleTimer;
+
   if (!npobject_bridge_new())
 	return NPERR_OUT_OF_MEMORY_ERROR;
 
