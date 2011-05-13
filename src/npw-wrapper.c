@@ -3602,10 +3602,9 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
 
   // Copy only the portion of full_plugin_funcs that the browser
   // understands.
-  uint16_t plugin_funcs_size = plugin_funcs->size;
-  memcpy(plugin_funcs, &full_plugin_funcs,
-		 MIN(plugin_funcs_size, sizeof(full_plugin_funcs)));
-  plugin_funcs->size = MIN(plugin_funcs_size, sizeof(full_plugin_funcs));
+  uint16_t plugin_funcs_size = MIN(plugin_funcs->size, sizeof(full_plugin_funcs));
+  memcpy(plugin_funcs, &full_plugin_funcs, plugin_funcs_size);
+  plugin_funcs->size = plugin_funcs_size;
 
   return error;
 }
