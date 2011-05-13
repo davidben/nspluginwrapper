@@ -3558,6 +3558,7 @@ g_NP_Initialize(uint32_t version, uint32_t *plugin_version,
 
   memset(&plugin_funcs, 0, sizeof(plugin_funcs));
   plugin_funcs.size = sizeof(plugin_funcs);
+  plugin_funcs.version = version;
 
   memset(&mozilla_funcs, 0, sizeof(mozilla_funcs));
   mozilla_funcs.size = sizeof(mozilla_funcs);
