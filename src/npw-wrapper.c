@@ -3581,22 +3581,24 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
   D(bug("Plugin supports NPAPI %d, advertising version %d to browser\n",
         plugin_version, full_plugin_funcs.version));
 
-  // Don't advertise any functions the plugin doesn't support.
-  int num = 0;
+  if (!PLUGIN_DIRECT_EXEC) {
+	// Don't advertise any functions the plugin doesn't support.
+	int num = 0;
 #define PLUGIN_FUNC(func, member)								\
-  if (num >= plugin_capabilities_len)	{						\
-	D(bug("ERROR: provided array was too small.\n"));			\
-	goto plugin_func_done;										\
-  }																\
-  if (!plugin_capabilities[num]) {								\
-	D(bug("plugin does not support " #func "\n"));				\
-	full_plugin_funcs.member = NULL;							\
-  }																\
-  num++;
+	if (num >= plugin_capabilities_len)	{						\
+	  D(bug("ERROR: provided array was too small.\n"));			\
+	  goto plugin_func_done;									\
+	}															\
+	if (!plugin_capabilities[num]) {							\
+	  D(bug("plugin does not support " #func "\n"));			\
+	  full_plugin_funcs.member = NULL;							\
+	}															\
+	num++;
 #include "plugin-funcs.h"
 #undef PLUGIN_FUNC
- plugin_func_done:
-  free(plugin_capabilities);
+  plugin_func_done:
+	free(plugin_capabilities);
+  }
 
   // Copy only the portion of full_plugin_funcs that the browser
   // understands.
