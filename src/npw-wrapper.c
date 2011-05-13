@@ -2904,6 +2904,115 @@ static int16_t g_NPP_HandleEvent(NPP instance, void *event)
   return ret;
 }
 
+// Clears site-data stored by the plug-in
+static NPError
+invoke_NPP_ClearSiteData(const char* site, uint64_t flags, uint64_t maxAge)
+{
+  if (PLUGIN_DIRECT_EXEC)
+	return plugin_funcs.clearsitedata(site, flags, maxAge);
+
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection),
+						 NPERR_GENERIC_ERROR);
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPP_CLEAR_SITE_DATA,
+								RPC_TYPE_STRING, site,
+								RPC_TYPE_UINT64, flags,
+								RPC_TYPE_UINT64, maxAge,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_ClearSiteData() invoke", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  int32_t ret;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_INT32, &ret,
+									RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_ClearSiteData() wait for reply", error);
+	return NPERR_GENERIC_ERROR;
+  }
+
+  return ret;
+}
+
+static NPError
+g_NPP_ClearSiteData(const char* site, uint64_t flags, uint64_t maxAge)
+{
+  D(bugiI("NPP_ClearSiteData site=%s, flags=%" G_GUINT64_FORMAT
+		  ", maxAge=%" G_GUINT64_FORMAT "\n",
+		  site ? site : "<null>", flags, maxAge));
+  NPError ret = invoke_NPP_ClearSiteData(site, flags, maxAge);
+  D(bugiD("NPP_ClearSiteData return: %d [%s]\n", ret, string_of_NPError(ret)));
+  return ret;
+}
+
+// Get sites with data stored by the plug-in
+static char **
+invoke_NPP_GetSitesWithData(void)
+{
+  if (PLUGIN_DIRECT_EXEC)
+	return plugin_funcs.getsiteswithdata();
+
+  npw_return_val_if_fail(rpc_method_invoke_possible(g_rpc_connection), NULL);
+
+  int error = rpc_method_invoke(g_rpc_connection,
+								RPC_METHOD_NPP_GET_SITES_WITH_DATA,
+								RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_GetSitesWithData() invoke", error);
+	return NULL;
+  }
+
+  char **sites = NULL;
+  uint32_t siteCount = 0;
+  error = rpc_method_wait_for_reply(g_rpc_connection,
+									RPC_TYPE_ARRAY, RPC_TYPE_STRING,
+									&siteCount, &sites,
+									RPC_TYPE_INVALID);
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_GetSitesWithData() wait for reply", error);
+	return NULL;
+  }
+
+  // Convert this to the format NPAPI wants... ugh.
+  char **sites_ret = NULL;
+  if (siteCount > 0) {
+	sites_ret = NPN_MemAlloc(sizeof(char*) * (siteCount+1));
+	if (sites_ret) {
+	  for (int i = 0; i < siteCount; i++) {
+		// Ignore allocation failures here.
+		NPW_ReallocData(sites[i], strlen(sites[i]), (void**)&sites_ret[i]);
+	  }
+	  sites_ret[siteCount] = NULL;
+	}
+  }
+
+  // Delete the other copy.
+  if (sites) {
+	for (int i = 0; i < siteCount; i++) {
+	  free(sites[i]);
+	}
+	free(sites);
+  }
+
+  return sites_ret;
+}
+
+static char **
+g_NPP_GetSitesWithData(void)
+{
+  D(bugiI("NPP_GetSitesWithData\n"));
+  char **ret = invoke_NPP_GetSitesWithData();
+  D(bugiD("NPP_GetSitesWithData return: %d sites\n",
+		  ret ? g_strv_length(ret) : 0));
+  return ret;
+}
+
 // Allows the browser to query the plug-in for information
 static NPError
 g_NP_GetValue(void *future, NPPVariable variable, void *value)

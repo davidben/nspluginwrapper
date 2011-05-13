@@ -4496,6 +4496,87 @@ static int handle_NPP_HandleEvent(rpc_connection_t *connection)
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
 }
 
+// Clears site-data stored by the plug-in
+static NPError
+g_NPP_ClearSiteData(const char* site, uint64_t flags, uint64_t maxAge)
+{
+  if (plugin_funcs.clearsitedata == NULL)
+	return NPERR_INVALID_FUNCTABLE_ERROR;
+
+  D(bugiI("NPP_ClearSiteData site=%s, flags=%" G_GUINT64_FORMAT
+		  ", maxAge=%" G_GUINT64_FORMAT "\n",
+		  site ? site : "<null>", flags, maxAge));
+  NPError ret = plugin_funcs.clearsitedata(site, flags, maxAge);
+  D(bugiD("NPP_ClearSiteData return: %d [%s]\n", ret, string_of_NPError(ret)));
+  return ret;
+}
+
+static int handle_NPP_ClearSiteData(rpc_connection_t *connection)
+{
+  D(bug("handle_NPP_ClearSiteData\n"));
+
+  char *site = NULL;
+  uint64_t flags;
+  uint64_t maxAge;
+  int error = rpc_method_get_args(connection,
+								  RPC_TYPE_STRING, &site,
+								  RPC_TYPE_UINT64, &flags,
+								  RPC_TYPE_UINT64, &maxAge,
+								  RPC_TYPE_INVALID);
+
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_ClearSiteData() get args", error);
+	return error;
+  }
+
+  NPError ret = g_NPP_ClearSiteData(site, flags, maxAge);
+
+  if (site)
+	free(site);
+
+  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
+}
+
+// Get sites with data stored by the plug-in
+static char **
+g_NPP_GetSitesWithData(void)
+{
+  if (plugin_funcs.getsiteswithdata == NULL)
+	return NULL;
+
+  D(bugiI("NPP_GetSitesWithData\n"));
+  char **ret = plugin_funcs.getsiteswithdata();
+  D(bugiD("NPP_GetSitesWithData return: %d sites\n",
+		  ret ? g_strv_length(ret) : 0));
+  return ret;
+}
+
+static int handle_NPP_GetSitesWithData(rpc_connection_t *connection)
+{
+  D(bug("handle_NPP_GetSitesWithData\n"));
+
+  int error = rpc_method_get_args(connection, RPC_TYPE_INVALID);
+  if (error != RPC_ERROR_NO_ERROR) {
+	npw_perror("NPP_GetSitesWithData() get args", error);
+	return error;
+  }
+
+  char **sites = g_NPP_GetSitesWithData();
+
+  int ret = rpc_method_send_reply(connection,
+								  RPC_TYPE_ARRAY, RPC_TYPE_STRING,
+								  sites ? g_strv_length(sites) : 0, sites,
+								  RPC_TYPE_INVALID);
+  if (sites) {
+	for (int i = 0; sites[i]; i++) {
+	  NPN_MemFree(sites[i]);
+	}
+	NPN_MemFree(sites);
+  }
+
+  return ret;
+}
+
 
 /* ====================================================================== */
 /* === Events processing                                              === */
@@ -4829,6 +4910,8 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	{ RPC_METHOD_NPP_STREAM_AS_FILE,			handle_NPP_StreamAsFile },
 	{ RPC_METHOD_NPP_PRINT,						handle_NPP_Print },
 	{ RPC_METHOD_NPP_HANDLE_EVENT,				handle_NPP_HandleEvent },
+	{ RPC_METHOD_NPP_CLEAR_SITE_DATA,			handle_NPP_ClearSiteData },
+	{ RPC_METHOD_NPP_GET_SITES_WITH_DATA,		handle_NPP_GetSitesWithData },
   };
   if (rpc_connection_add_method_descriptors(g_rpc_connection, vtable, sizeof(vtable) / sizeof(vtable[0])) < 0) {
 	npw_printf("ERROR: failed to setup NPP method callbacks\n");
