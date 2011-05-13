@@ -49,7 +49,6 @@ extern const char *string_of_NPWindowType(int type) attribute_hidden;
 // Misc utility functions
 extern void npw_perror(const char *prefix, int error) attribute_hidden;
 extern const char *npw_strerror(int error) attribute_hidden;
-extern G_GNUC_PRINTF(1, 2) char *npw_asprintf(const char *format, ...) attribute_hidden;
 extern void npw_close_all_open_files(void) attribute_hidden;
 
 #ifdef __cplusplus
