@@ -39,6 +39,7 @@
 #include <pwd.h>
 #include <dirent.h>
 
+#include <glib.h>
 
 static bool g_auto = false;
 static bool g_verbose = false;
@@ -166,15 +167,6 @@ static int mkdir_p(const char *path)
   return -1;
 }
 
-static const char *get_user_home_dir(void)
-{
-  struct passwd *pwent = getpwuid(geteuid());
-  if (pwent)
-	return pwent->pw_dir;
-
-  return getenv("HOME");
-}
-
 static const char *get_system_mozilla_plugin_dir(void)
 {
   static const char default_dir[] = LIBDIR "/mozilla/plugins";
@@ -258,7 +250,7 @@ static const char *get_user_mozilla_plugin_dir(void)
   const char *home;
   static char plugin_path[PATH_MAX];
 
-  if ((home = get_user_home_dir()) == NULL)
+  if ((home = g_get_home_dir()) == NULL)
 	return NULL;
 
   sprintf(plugin_path, "%s/.mozilla/plugins", home);
@@ -647,7 +639,7 @@ static bool match_path_prefix(const char *path, const char *prefix)
 static bool is_user_home_path(const char *path)
 {
   const char *homedir;
-  if ((homedir = get_user_home_dir()) == NULL)
+  if ((homedir = g_get_home_dir()) == NULL)
 	return false;
   return match_path_prefix(path, homedir);
 }
