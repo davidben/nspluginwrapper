@@ -57,22 +57,6 @@ static void error(const char *format, ...)
   exit(1);
 }
 
-static int strstart(const char *str, const char *val, const char **ptr)
-{
-  const char *p, *q;
-  p = str;
-  q = val;
-  while (*q != '\0') {
-	if (*p != *q)
-	  return 0;
-	p++;
-	q++;
-  }
-  if (ptr)
-	*ptr = p;
-  return 1;
-}
-
 static const char *strnstr(const char *str, int len, const char *substr)
 {
   const char *match = strstr(str, substr);
@@ -879,7 +863,7 @@ static int update_plugin(const char *plugin_path)
 	ret = remove_plugin(plugin_path);
   }
   else if (has_system_wide_wrapper_plugin(plugin_info.path, true)
-		   && !strstart(plugin_path, get_system_mozilla_plugin_dir(), NULL)) {
+		   && !g_str_has_prefix(plugin_path, get_system_mozilla_plugin_dir())) {
 	if (g_verbose)
 	  printf("  NPAPI plugin %s is already installed system-wide, removing wrapper\n", plugin_info.path);
 	ret = remove_plugin(plugin_path);
