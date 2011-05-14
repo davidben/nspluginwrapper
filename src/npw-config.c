@@ -671,24 +671,15 @@ static int process_plugin_dir(const char *plugin_dir, is_plugin_cb test, process
   if (dir == NULL)
 	return -1;
 
-  int plugin_path_length = 256;
-  char *plugin_path = (char *)malloc(plugin_path_length);
-  int plugin_dir_length = strlen(plugin_dir);
-
   struct dirent *ent;
   while ((ent = readdir(dir)) != NULL) {
-	int len = plugin_dir_length + 1 + strlen(ent->d_name) + 1;
-	if (len > plugin_path_length) {
-	  plugin_path_length = len;
-	  plugin_path = (char *)realloc(plugin_path, plugin_path_length);
-	}
-	sprintf(plugin_path, "%s/%s", plugin_dir, ent->d_name);
+	char *plugin_path = g_build_filename(plugin_dir, ent->d_name, NULL);
 	NPW_PluginInfo plugin_info;
 	if (test(plugin_path, &plugin_info))
 	  process(plugin_path, &plugin_info);
+	g_free(plugin_path);
   }
 
-  free(plugin_path);
   closedir(dir);
   return 0;
 }
