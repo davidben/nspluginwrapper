@@ -156,7 +156,9 @@ npconfig_RAWSRCS = npw-config.c
 npconfig_SOURCES = $(npconfig_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 npconfig_OBJECTS = $(npconfig_RAWSRCS:%.c=npconfig-%.o)
 npconfig_CFLAGS  = $(CFLAGS)
+npconfig_CFLAGS += $(GLIB_CFLAGS)
 npconfig_LIBS    = $(libdl_LIBS)
+npconfig_LIBS   += $(GLIB_LIBS)
 npconfig_LDFLAGS = $(LDFLAGS)
 ifneq (,$(findstring $(OS),netbsd dragonfly))
 # We will try to dlopen() the native plugin library. If that lib is
