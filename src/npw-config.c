@@ -248,13 +248,15 @@ static const char *get_system_mozilla_plugin_dir(void)
 static const char *get_user_mozilla_plugin_dir(void)
 {
   const char *home;
-  static char plugin_path[PATH_MAX];
+  static char *plugin_path = NULL;
+
+  if (plugin_path != NULL)
+	return plugin_path;
 
   if ((home = g_get_home_dir()) == NULL)
 	return NULL;
 
-  sprintf(plugin_path, "%s/.mozilla/plugins", home);
-  return plugin_path;
+  return (plugin_path = g_build_filename(home, ".mozilla", "plugins", NULL));
 }
 
 static const char **get_mozilla_plugin_dirs(void)
