@@ -122,35 +122,6 @@ static int strexpand(char *dst, int dstlen, const char *src, int srclen, const V
   return 0;
 }
 
-/* Implement mkdir -p with default permissions (derived from busybox code) */
-static int mkdir_p(const char *path)
-{
-  char path_copy[strlen(path) + 1];
-  char *s = path_copy;
-  path = strcpy(s, path);
-  for (;;) {
-	char c = 0;
-	while (*s) {
-	  if (*s == '/') {
-		while (*++s == '/')
-		  ;
-		c = *s;
-		*s = 0;
-		break;
-	  }
-	  ++s;
-	}
-	if (mkdir(path, 0755) < 0) {
-	  struct stat st;
-	  if ((errno != EEXIST && errno != EISDIR) || stat(path, &st) < 0 || !S_ISDIR(st.st_mode))
-		break;
-	}
-	if ((*s = c) == '\0')
-	  return 0;
-  }
-  return -1;
-}
-
 static const char *get_system_mozilla_plugin_dir(void)
 {
   static const char default_dir[] = LIBDIR "/mozilla/plugins";
@@ -787,7 +758,8 @@ static int install_plugin(const char *plugin_path, NPW_PluginInfo *plugin_info)
   }
 
   const char *user_plugin_dir = get_user_mozilla_plugin_dir();
-  if (access(user_plugin_dir, R_OK | W_OK) < 0 && mkdir_p(user_plugin_dir) < 0)
+  if (access(user_plugin_dir, R_OK | W_OK) < 0 &&
+	  g_mkdir_with_parents(user_plugin_dir, 0755) < 0)
 	return 1;
 
   ret = do_install_plugin(plugin_path, user_plugin_dir, plugin_info);
