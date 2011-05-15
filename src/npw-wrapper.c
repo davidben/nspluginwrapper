@@ -3947,7 +3947,10 @@ static void plugin_init(int is_NP_Initialize)
   mozilla_funcs.getvalue(NULL, NPNVToolkit, (void *)&toolkit);
 
   // Initialize RPC events listener, try to attach it to the main event loop
-  if (toolkit == NPNVGtk12 || toolkit == NPNVGtk2) {	// GLib
+  if (toolkit == NPNVGtk12 || toolkit == NPNVGtk2
+	  || toolkit == 0xFEEDABEE) {  // GLib
+	// We use the glib event loop in Konqueror (0xFEEDABEE) because
+	// its Xt event loop bridge is completely broken and non-functional.
 	D(bug("  trying to attach RPC listener to main GLib event loop\n"));
 	g_rpc_source = rpc_event_source_new(g_rpc_connection);
 	g_source_set_priority(g_rpc_source, G_PRIORITY_LOW);
