@@ -848,6 +848,7 @@ g_NP_Initialize (Plugin *plugin)
 
   memset (&plugin->plugin_funcs, 0, sizeof (plugin->plugin_funcs));
   plugin->plugin_funcs.size = sizeof (plugin->plugin_funcs);
+  plugin->plugin_funcs.version = 19;
 
   memset (&plugin->mozilla_funcs, 0, sizeof (plugin->mozilla_funcs));
   plugin->mozilla_funcs.size = sizeof (plugin->mozilla_funcs);
