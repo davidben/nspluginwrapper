@@ -1,6 +1,12 @@
-nspluginwrapper NEWS -- history of user-visible changes.  2011-04-23
+nspluginwrapper NEWS -- history of user-visible changes.  2011-05-15
 Copyright (C) 2005-2009 Gwenole Beauchesne
           (C) 2011 David Benjamin
+
+Version 1.4.0 - 15.May.2011
+* Report capabilities over RPC to fix logic based on NULL plugin/browser hooks
+* Fix initialization bug that causes Flash 10.3 to report a version of 0
+* Implement ClearSiteData NPAPI extension for managing Flash LSOs
+* Work around bug in Konqueror that prevents plug-ins from functioning properly
 
 Version 1.3.2 (BETA) - 23.Apr.2011
 * Work around lack of client-side windows in Flash
