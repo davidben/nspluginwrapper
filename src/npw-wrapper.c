@@ -3686,7 +3686,7 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
         moz_funcs->version, npapi_version));
   uint32_t plugin_version = 0;
   uint32_t *plugin_capabilities = NULL;
-  uint32_t plugin_capabilities_len;
+  uint32_t plugin_capabilities_len = 0;
   NPError error = g_NP_Initialize(npapi_version, &plugin_version,
 								  &plugin_capabilities, &plugin_capabilities_len);
 
@@ -3696,7 +3696,7 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
   D(bug("Plugin supports NPAPI %d, advertising version %d to browser\n",
         plugin_version, full_plugin_funcs.version));
 
-  if (!PLUGIN_DIRECT_EXEC) {
+  if (plugin_capabilities) {
 	// Don't advertise any functions the plugin doesn't support.
 	int num = 0;
 #define PLUGIN_FUNC(func, member)								\
