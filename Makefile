@@ -265,11 +265,6 @@ install.viewer.glue::
 	echo "#!/bin/sh" > $$p;								\
 	echo "TARGET_OS=$(TARGET_OS)" >> $$p;						\
 	echo "TARGET_ARCH=$(TARGET_ARCH)" >> $$p;					\
-	echo 'case "$$*" in' >> $$p; 							\
-	echo "*libflashplayer*)" >> $$p; 						\
-	echo "	export GDK_NATIVE_WINDOWS=1" >> $$p; 					\
-	echo "	;;" >> $$p; 								\
-	echo "esac" >> $$p; 								\
 	echo ". $(npcommondir)/$(nploader_PROGRAM)" >> $$p;			\
 	chmod 755 $$p
 do.install.libnoxshm: $(libnoxshm_LIBRARY)

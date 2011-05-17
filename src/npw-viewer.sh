@@ -5,6 +5,12 @@
 OS="`uname -s | tr '[A-Z]' '[a-z]'`"
 ARCH="`uname -m`"
 
+case "$*" in
+    *libflashplayer*)
+	export GDK_NATIVE_WINDOWS=1
+	;;
+esac
+
 if test -z "$TARGET_OS"; then
     echo "*** NSPlugin Viewer *** error, TARGET_OS not initialized"
     exit 1
