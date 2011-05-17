@@ -3622,6 +3622,12 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
   // for now, we only need fields up to including forceRedraw
   if (moz_funcs->size < (offsetof(NPNetscapeFuncs, forceredraw) + sizeof(NPN_ForceRedrawProcPtr)))
     return NPERR_INVALID_FUNCTABLE_ERROR;
+
+  if (g_plugin.initialized == 0)
+	plugin_init(0);
+  if (g_plugin.initialized <= 0)
+	return NPERR_GENERIC_ERROR;
+
   if (g_plugin.is_wrapper)
 	return NPERR_NO_ERROR;
 
