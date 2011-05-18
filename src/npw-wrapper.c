@@ -3613,7 +3613,6 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
 {
   D(bug("NP_Initialize\n"));
 
-  static NPPluginFuncs full_plugin_funcs;
   if (moz_funcs == NULL || plugin_funcs == NULL)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
 
@@ -3634,6 +3633,7 @@ NP_Initialize(NPNetscapeFuncs *moz_funcs, NPPluginFuncs *plugin_funcs)
   // copy mozilla_funcs table here as plugin_init() will need it
   memcpy(&mozilla_funcs, moz_funcs, MIN(moz_funcs->size, sizeof(mozilla_funcs)));
 
+  static NPPluginFuncs full_plugin_funcs;
   memset(&full_plugin_funcs, 0, sizeof(full_plugin_funcs));
   full_plugin_funcs.size = sizeof(NPPluginFuncs);
   full_plugin_funcs.version = NPW_NPAPI_VERSION;
