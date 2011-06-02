@@ -242,38 +242,38 @@ install.dirs:
 	mkdir -p $(DESTDIR)$(nphostdir) || :
 	mkdir -p $(DESTDIR)$(nptargetdir) || :
 ifeq ($(build_player),yes)
-install.player: $(npplayer_PROGRAM)
+install.player: install.dirs $(npplayer_PROGRAM)
 	$(INSTALL) -m 755 $(STRIP_OPT) $(npplayer_PROGRAM) $(DESTDIR)$(nphostdir)/$(npplayer_PROGRAM)
 	mkdir -p $(DESTDIR)$(bindir)
 	$(LN_S) $(nphostdir)/$(npplayer_PROGRAM) $(DESTDIR)$(bindir)/nspluginplayer
 else
 install.player:
 endif
-install.wrapper: $(npwrapper_LIBRARY)
+install.wrapper: install.dirs $(npwrapper_LIBRARY)
 	$(INSTALL) -m 755 $(STRIP_OPT) $(npwrapper_LIBRARY) $(DESTDIR)$(nphostdir)/$(npwrapper_LIBRARY)
 ifeq ($(build_viewer),yes)
-install.viewer: install.viewer.bin install.viewer.glue
-install.libnoxshm: do.install.libnoxshm
+install.viewer: install.dirs install.viewer.bin install.viewer.glue
+install.libnoxshm: install.dirs do.install.libnoxshm
 else
 install.viewer:
 install.libnoxshm:
 endif
-install.viewer.bin: $(npviewer_PROGRAM)
+install.viewer.bin: install.dirs $(npviewer_PROGRAM)
 	$(INSTALL) -m 755 $(STRIP_OPT) $(npviewer_PROGRAM) $(DESTDIR)$(nptargetdir)/$(npviewer_PROGRAM)
-install.viewer.glue::
+install.viewer.glue:: install.dirs
 	p=$(DESTDIR)$(nptargetdir)/$(npviewer_PROGRAM:%.bin=%);	\
 	echo "#!/bin/sh" > $$p;								\
 	echo "TARGET_OS=$(TARGET_OS)" >> $$p;						\
 	echo "TARGET_ARCH=$(TARGET_ARCH)" >> $$p;					\
 	echo ". $(npcommondir)/$(nploader_PROGRAM)" >> $$p;			\
 	chmod 755 $$p
-do.install.libnoxshm: $(libnoxshm_LIBRARY)
+do.install.libnoxshm: install.dirs $(libnoxshm_LIBRARY)
 	$(INSTALL) -m 755 $(STRIP_OPT) $(libnoxshm_LIBRARY) $(DESTDIR)$(nptargetdir)/$(libnoxshm_LIBRARY)
-install.config: $(npconfig_PROGRAM)
+install.config: install.dirs $(npconfig_PROGRAM)
 	$(INSTALL) -m 755 $(STRIP_OPT) $(npconfig_PROGRAM) $(DESTDIR)$(nphostdir)/$(npconfig_PROGRAM)
 	mkdir -p $(DESTDIR)$(bindir)
 	$(LN_S) $(nphostdir)/$(npconfig_PROGRAM) $(DESTDIR)$(bindir)/nspluginwrapper
-install.loader: $(nploader_PROGRAM)
+install.loader: install.dirs $(nploader_PROGRAM)
 	$(INSTALL) -m 755 $(nploader_PROGRAM) $(DESTDIR)$(npcommondir)/$(nploader_PROGRAM)
 install.mkruntime: $(SRC_PATH)/utils/mkruntime.sh
 	$(INSTALL) -m 755 $< $(DESTDIR)$(npcommondir)/mkruntime
