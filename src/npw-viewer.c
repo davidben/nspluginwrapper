@@ -4953,9 +4953,8 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	while ((needed_fds = g_main_context_query(context, max_priority, &timeout,
 											  fds + 1, nfds - 1)) > nfds - 1) {
 	  // Reallocate to make room
-	  g_free(fds);
 	  nfds = needed_fds + 1;
-	  fds = g_new0(GPollFD, nfds);
+	  fds = g_renew(GPollFD, fds, nfds);
 	  fds[0].fd = rpc_socket(g_rpc_connection);
 	  fds[0].events = G_IO_IN;
 	}
