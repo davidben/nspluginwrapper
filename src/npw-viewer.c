@@ -4934,15 +4934,22 @@ static int do_main(int argc, char **argv, const char *connection_path)
   // Set error handler - stop plugin if there's a connection error
   rpc_connection_set_error_callback(g_rpc_connection, rpc_error_callback_cb, NULL);
 
-  // Cache an array for the FDs to poll. We always poll one extra: the
-  // RPC fd, which is treated special.
+  // Cache the array of FDs to poll.
   int fds_size = 2;
   GPollFD *fds = g_new0(GPollFD, fds_size);
-  fds[0].fd = rpc_socket(g_rpc_connection);
-  fds[0].events = G_IO_IN;
 
   g_is_running = true;
   GMainContext *context = g_main_context_default();
+
+  // We track the RPC source out-of-band so that we can integrate it
+  // with the remote main loop. Run it at high priority so we do not
+  // delay the browser on an RPC request; it's effectively the highest
+  // priority anyway from the sync mechanism.
+  GPollFD rpc_fd = { 0 };
+  rpc_fd.fd = rpc_socket(g_rpc_connection);
+  rpc_fd.events = G_IO_IN;
+  g_main_context_add_poll(context, &rpc_fd, G_PRIORITY_HIGH);
+
   while (g_is_running) {
 	/* PREPARE */
 	int max_priority;
@@ -4951,19 +4958,17 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	/* QUERY */
 	int timeout, needed_fds;
 	while ((needed_fds = g_main_context_query(context, max_priority, &timeout,
-											  fds + 1, fds_size - 1)) > fds_size - 1) {
+											  fds, fds_size)) > fds_size) {
 	  // Reallocate to make room
-	  fds_size = needed_fds + 1;
+	  fds_size = needed_fds;
 	  fds = g_renew(GPollFD, fds, fds_size);
-	  fds[0].fd = rpc_socket(g_rpc_connection);
-	  fds[0].events = G_IO_IN;
 	}
 
 	/* POLL */
-	(g_main_context_get_poll_func(context))(fds, needed_fds + 1, timeout);
+	(g_main_context_get_poll_func(context))(fds, needed_fds, timeout);
 
 	/* CHECK */
-	bool ready = g_main_context_check(context, max_priority, fds + 1, needed_fds);
+	bool ready = g_main_context_check(context, max_priority, fds, needed_fds);
 
 	/* DISPATCH */
 	if (ready) {
@@ -4972,12 +4977,13 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	  rpc_sync(g_rpc_connection);
 	  g_main_context_dispatch(context);
 	  rpc_end_sync(g_rpc_connection);
-	} else if (fds[0].revents & fds[0].events) {
+	} else if (rpc_fd.revents & rpc_fd.events) {
 	  // We don't have anything, but there is an incoming RPC
 	  // request. Just respond to it. No need to sync.
 	  rpc_dispatch(g_rpc_connection);
 	}
   }
+  g_main_context_remove_poll(context, &rpc_fd);
   g_free(fds);
   D(bug("--- EXIT ---\n"));
 
