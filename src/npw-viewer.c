@@ -4936,8 +4936,8 @@ static int do_main(int argc, char **argv, const char *connection_path)
 
   // Cache an array for the FDs to poll. We always poll one extra: the
   // RPC fd, which is treated special.
-  int nfds = 2;
-  GPollFD *fds = g_new0(GPollFD, nfds);
+  int fds_size = 2;
+  GPollFD *fds = g_new0(GPollFD, fds_size);
   fds[0].fd = rpc_socket(g_rpc_connection);
   fds[0].events = G_IO_IN;
 
@@ -4951,10 +4951,10 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	/* QUERY */
 	int timeout, needed_fds;
 	while ((needed_fds = g_main_context_query(context, max_priority, &timeout,
-											  fds + 1, nfds - 1)) > nfds - 1) {
+											  fds + 1, fds_size - 1)) > fds_size - 1) {
 	  // Reallocate to make room
-	  nfds = needed_fds + 1;
-	  fds = g_renew(GPollFD, fds, nfds);
+	  fds_size = needed_fds + 1;
+	  fds = g_renew(GPollFD, fds, fds_size);
 	  fds[0].fd = rpc_socket(g_rpc_connection);
 	  fds[0].events = G_IO_IN;
 	}
