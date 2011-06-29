@@ -4961,10 +4961,10 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	}
 
 	/* POLL */
-	(g_main_context_get_poll_func(context))(fds, nfds, timeout);
+	(g_main_context_get_poll_func(context))(fds, needed_fds + 1, timeout);
 
 	/* CHECK */
-	bool ready = g_main_context_check(context, max_priority, fds + 1, nfds - 1);
+	bool ready = g_main_context_check(context, max_priority, fds + 1, needed_fds);
 
 	/* DISPATCH */
 	if (ready) {
