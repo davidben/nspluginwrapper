@@ -275,7 +275,7 @@ install.config: install.dirs $(npconfig_PROGRAM)
 	$(LN_S) $(nphostdir)/$(npconfig_PROGRAM) $(DESTDIR)$(bindir)/nspluginwrapper
 install.loader: install.dirs $(nploader_PROGRAM)
 	$(INSTALL) -m 755 $(nploader_PROGRAM) $(DESTDIR)$(npcommondir)/$(nploader_PROGRAM)
-install.mkruntime: $(SRC_PATH)/utils/mkruntime.sh
+install.mkruntime: install.dirs $(SRC_PATH)/utils/mkruntime.sh
 	$(INSTALL) -m 755 $< $(DESTDIR)$(npcommondir)/mkruntime
 
 $(archivedir)::
