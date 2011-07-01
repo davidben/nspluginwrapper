@@ -1,6 +1,9 @@
-nspluginwrapper NEWS -- history of user-visible changes.  2011-06-04
+nspluginwrapper NEWS -- history of user-visible changes.  2011-06-30
 Copyright (C) 2005-2009 Gwenole Beauchesne
           (C) 2011 David Benjamin
+
+Version 1.4.4 - 30.Jun.2011
+* Fix crash in some cases when the number of watched file descriptors decreases
 
 Version 1.4.2 - 04.Jun.2011
 * Fix crash in WebKit/GTK when npwrapper.so is incorrectly treated as a plugin
