@@ -1233,6 +1233,7 @@ np_stream_new (const gchar *url, void *notify_data)
     return NULL;
 
   curl_easy_setopt (handle, CURLOPT_URL, url);
+  curl_easy_setopt (handle, CURLOPT_NOSIGNAL, 1);
   curl_easy_setopt (handle, CURLOPT_WRITEFUNCTION, on_stream_read_nothing_cb);
   curl_easy_setopt (handle, CURLOPT_FILETIME, 1);
   curl_easy_setopt (handle, CURLOPT_TIMECONDITION, CURL_TIMECOND_LASTMOD);
@@ -1626,6 +1627,7 @@ on_stream_open_cb (gpointer user_data)
 
   CURL * const handle = pstream->curl_handle;
   curl_easy_setopt (handle, CURLOPT_URL, pstream->np_stream->url);
+  curl_easy_setopt (handle, CURLOPT_NOSIGNAL, 1);
   curl_easy_setopt (handle, CURLOPT_WRITEFUNCTION, on_stream_read_cb);
   curl_easy_setopt (handle, CURLOPT_WRITEDATA, pstream);
   curl_easy_setopt (handle, CURLOPT_PRIVATE, pstream);
