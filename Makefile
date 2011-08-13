@@ -278,22 +278,6 @@ install.loader: install.dirs $(nploader_PROGRAM)
 install.mkruntime: install.dirs $(SRC_PATH)/utils/mkruntime.sh
 	$(INSTALL) -m 755 $< $(DESTDIR)$(npcommondir)/mkruntime
 
-$(archivedir)::
-	[ -d $(archivedir) ] || mkdir $(archivedir) > /dev/null 2>&1
-
-RPMBUILD = \
-	RPMDIR=`mktemp -d`								; \
-	mkdir -p $$RPMDIR/{SPECS,SOURCES,BUILD,RPMS,SRPMS}				; \
-	rpmbuild --define "_topdir $$RPMDIR" -ta $(2) $(1) &&				  \
-	find $$RPMDIR/ -name *.rpm -exec mv -f {} $(archivedir) \;			; \
-	rm -rf $$RPMDIR
-
-distrpm: $(archivedir)$(SRCARCHIVE).bz2
-	$(call RPMBUILD,$<,--with generic)
-
-localrpm: $(archivedir)$(SRCARCHIVE).bz2
-	$(call RPMBUILD,$<)
-
 $(npwrapper_LIBRARY): $(npwrapper_OBJECTS)
 	$(CC) $(DSO_LDFLAGS) $(npwrapper_LDFLAGS) -o $@ $(npwrapper_OBJECTS) $(npwrapper_LIBS)
 
