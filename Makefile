@@ -333,23 +333,23 @@ $(nploader_PROGRAM): $(nploader_SOURCES)
 	sed -e 's|%NPW_VIEWER_DIR%|$(nptargetdir_var)|' $< > $@
 	chmod 755 $@
 
-$(LSB_OBJ_DIR)::
+$(LSB_OBJ_DIR):
 	@[ -d $(LSB_OBJ_DIR) ] || mkdir $(LSB_OBJ_DIR) > /dev/null 2>&1
 
-$(LSB_OBJ_DIR)/%.o: $(LSB_SRC_DIR)/%.c
+$(LSB_OBJ_DIR)/%.o: $(LSB_SRC_DIR)/%.c | $(LSB_OBJ_DIR)
 	$(CC) $(CFLAGS_32) -nostdinc -fno-builtin -I. -I$(LSB_INC_DIR) -c $< -o $@
 
-$(LSB_OBJ_DIR)/%.a: $(LSB_OBJ_DIR)/%.o
+$(LSB_OBJ_DIR)/%.a: $(LSB_OBJ_DIR)/%.o | $(LSB_OBJ_DIR)
 	$(AR) rc $@ $<
 
-$(LSB_OBJ_DIR)/libc.so: $(LSB_OBJ_DIR)/libc_main.so $(LSB_OBJ_DIR)/libc_nonshared.a
+$(LSB_OBJ_DIR)/libc.so: $(LSB_OBJ_DIR)/libc_main.so $(LSB_OBJ_DIR)/libc_nonshared.a | $(LSB_OBJ_DIR)
 	@echo "OUTPUT_FORMAT($(TARGET_ELF_ARCH))" > $@
 	@echo "GROUP ( $(LSB_OBJ_DIR)/libc_main.so $(LSB_OBJ_DIR)/libc_nonshared.a )" >> $@
 
-$(LSB_OBJ_DIR)/libgcc_s_32.so: $(LSB_OBJ_DIR)/libgcc_s.so
+$(LSB_OBJ_DIR)/libgcc_s_32.so: $(LSB_OBJ_DIR)/libgcc_s.so | $(LSB_OBJ_DIR)
 	$(LN_S) libgcc_s.so $@
 
-$(LSB_OBJ_DIR)/%.so: $(LSB_OBJ_DIR)/%.o
+$(LSB_OBJ_DIR)/%.so: $(LSB_OBJ_DIR)/%.o | $(LSB_OBJ_DIR)
 	$(CC) $(LDFLAGS_32) -nostdlib $(DSO_LDFLAGS) $< -o $@ \
 		-Wl,--version-script,$(patsubst $(LSB_OBJ_DIR)/%.o,$(LSB_SRC_DIR)/%.Version,$<) \
 		-Wl,-soname,`grep "$(patsubst $(LSB_OBJ_DIR)/%.o,%,$<) " $(LSB_SRC_DIR)/LibNameMap.txt | cut -f2 -d' '`
