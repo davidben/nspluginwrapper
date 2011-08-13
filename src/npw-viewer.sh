@@ -5,11 +5,9 @@
 OS="`uname -s | tr '[A-Z]' '[a-z]'`"
 ARCH="`uname -m`"
 
-case "$*" in
-    *libflashplayer*)
-	export GDK_NATIVE_WINDOWS=1
-	;;
-esac
+# Browsers are supposed to set this (both Firefox and Chromium do), but some
+# don't. Workaround this here.
+export GDK_NATIVE_WINDOWS=1
 
 if test -z "$TARGET_OS"; then
     echo "*** NSPlugin Viewer *** error, TARGET_OS not initialized"
