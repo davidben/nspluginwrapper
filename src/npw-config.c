@@ -721,13 +721,10 @@ static int do_install_plugin(const char *plugin_path, const char *plugin_dir, NP
 	  !is_root_only_accessible_plugin(plugin_dir))
 	mode = 0755;
 
-  int d_fd = open(d_plugin_path, O_CREAT | O_WRONLY, mode);
-  if (d_fd < 0)
-	return 4;
-
-  if (write(d_fd, plugin_data, w_size) != w_size)
-	return 13;
-  close(d_fd);
+  // TODO: Don't swallow the error message. Also get rid of these ridiculous
+  // return codes. They're never acted on anyway. Use GError or something.
+  if (!g_file_set_contents(d_plugin_path, plugin_data, w_size, NULL))
+    return 4;
 
   if (g_verbose)
 	printf("  into %s\n", d_plugin_path);
