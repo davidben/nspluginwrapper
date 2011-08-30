@@ -4517,7 +4517,7 @@ static int handle_NPP_HandleEvent(rpc_connection_t *connection)
 	return error;
   }
 
-  event.xany.display = x_display;
+  event.xany.display = gdk_x11_display_get_xdisplay(gdk_display_get_default());
   int16_t ret = g_NPP_HandleEvent(PLUGIN_INSTANCE_NPP(plugin), &event);
 
   return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_INVALID);
