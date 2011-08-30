@@ -1158,7 +1158,15 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 
   switch (variable) {
   case NPNVxDisplay:
-	*(void **)value = x_display;
+	if (plugin && (plugin->is_windowless || plugin->use_xembed)) {
+	  // If the plugin does not use Xt, we return the GDK display.
+	  *(void **)value = gdk_x11_display_get_xdisplay(gdk_display_get_default());
+	} else {
+	  // Otherwise, we return the Xt one. If this is called in absense
+	  // of a plugin, also return the Xt one to support nppdf. This
+	  // matches Mozilla's logic.
+	  *(void **)value = x_display;
+	}
 	break;
   case NPNVxtAppContext:
 	*(void **)value = XtDisplayToApplicationContext(x_display);
