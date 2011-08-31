@@ -43,6 +43,7 @@
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
 
+#include "gtk2xtbin.h"
 #include "utils.h"
 #include "xembed.h"
 #include "npw-common.h"
@@ -422,49 +423,6 @@ static inline NPUTF8 *npidentifier_cache_get_string_copy(NPIdentifier ident)
 
 static Display *x_display;
 static XtAppContext x_app_context;
-
-typedef struct _XtTMRec {
-    XtTranslations  translations;       /* private to Translation Manager    */
-    XtBoundActions  proc_table;         /* procedure bindings for actions    */
-    struct _XtStateRec *current_state;  /* Translation Manager state ptr     */
-    unsigned long   lastEventTime;
-} XtTMRec, *XtTM;   
-
-typedef struct _CorePart {
-    Widget          self;               /* pointer to widget itself          */
-    WidgetClass     widget_class;       /* pointer to Widget's ClassRec      */
-    Widget          parent;             /* parent widget                     */
-    XrmName         xrm_name;           /* widget resource name quarkified   */
-    Boolean         being_destroyed;    /* marked for destroy                */
-    XtCallbackList  destroy_callbacks;  /* who to call when widget destroyed */
-    XtPointer       constraints;        /* constraint record                 */
-    Position        x, y;               /* window position                   */
-    Dimension       width, height;      /* window dimensions                 */
-    Dimension       border_width;       /* window border width               */
-    Boolean         managed;            /* is widget geometry managed?       */
-    Boolean         sensitive;          /* is widget sensitive to user events*/
-    Boolean         ancestor_sensitive; /* are all ancestors sensitive?      */
-    XtEventTable    event_table;        /* private to event dispatcher       */
-    XtTMRec         tm;                 /* translation management            */
-    XtTranslations  accelerators;       /* accelerator translations          */
-    Pixel           border_pixel;       /* window border pixel               */
-    Pixmap          border_pixmap;      /* window border pixmap or NULL      */
-    WidgetList      popup_list;         /* list of popups                    */
-    Cardinal        num_popups;         /* how many popups                   */
-    String          name;               /* widget resource name              */
-    Screen          *screen;            /* window's screen                   */
-    Colormap        colormap;           /* colormap                          */
-    Window          window;             /* window ID                         */
-    Cardinal        depth;              /* number of planes in window        */
-    Pixel           background_pixel;   /* window background pixel           */
-    Pixmap          background_pixmap;  /* window background pixmap or NULL  */
-    Boolean         visible;            /* is window mapped and not occluded?*/
-    Boolean         mapped_when_managed;/* map window if it's managed?       */
-} CorePart;
-
-typedef struct _WidgetRec {
-    CorePart    core;
-} WidgetRec, CoreRec;
 
 typedef struct _TimerEventRec {
     struct timeval        te_timer_value;

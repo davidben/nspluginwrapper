@@ -106,7 +106,7 @@ npwrapper_LIBS    = $(X_LIBS) $(libpthread_LIBS) $(libsocket_LIBS)
 npwrapper_LIBS   += $(GLIB_LIBS)
 
 npviewer_PROGRAM  = npviewer.bin
-npviewer_RAWSRCS  = npw-viewer.c npw-common.c npw-malloc.c npw-rpc.c rpc.c debug.c utils.c npruntime.c
+npviewer_RAWSRCS  = npw-viewer.c npw-common.c npw-malloc.c npw-rpc.c rpc.c debug.c utils.c npruntime.c gtk2xtbin.c
 npviewer_SOURCES  = $(npviewer_RAWSRCS:%.c=$(SRC_PATH)/src/%.c)
 npviewer_OBJECTS  = $(npviewer_RAWSRCS:%.c=npviewer-%.o)
 npviewer_CFLAGS   = $(CFLAGS_32)
