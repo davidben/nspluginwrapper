@@ -4034,7 +4034,10 @@ static int handle_NPP_GetValue(rpc_connection_t *connection)
 	}
   case RPC_TYPE_BOOLEAN:
 	{
-	  NPBool b = FALSE;
+	  // Although NPAPI provides NPBool, NPPVpluginNeedsXEmbed is
+	  // documented to be a PRBool, which is an enum. Use
+	  // an int instead.
+	  int b = FALSE;
 	  ret = g_NPP_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&b);
 	  return rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_BOOLEAN, b, RPC_TYPE_INVALID);
 	}
