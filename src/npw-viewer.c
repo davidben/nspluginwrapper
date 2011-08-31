@@ -96,9 +96,8 @@ typedef struct _StreamInstance {
 
 // Xt wrapper data
 typedef struct _XtData {
-  Window browser_window;
-  Widget top_widget;
-  Widget form;
+  GtkWidget *container;
+  GtkWidget *socket;
 } XtData;
 
 // Gtk wrapper data
@@ -116,8 +115,6 @@ typedef struct _Timer {
 
 // Prototypes
 static void destroy_window(PluginInstance *plugin);
-static int xt_source_create(void);
-static void xt_source_destroy(void);
 static void timer_free(Timer *timer);
 
 
@@ -421,127 +418,18 @@ static inline NPUTF8 *npidentifier_cache_get_string_copy(NPIdentifier ident)
 /* === X Toolkit glue                                                 === */
 /* ====================================================================== */
 
-static Display *x_display;
-static XtAppContext x_app_context;
+static GtkXtBin *global_xtbin = NULL;
 
-typedef struct _TimerEventRec {
-    struct timeval        te_timer_value;
-    struct _TimerEventRec *te_next;
-    XtTimerCallbackProc   te_proc;
-    XtAppContext          app;
-    XtPointer             te_closure;
-} TimerEventRec;
-
-typedef struct _InputEvent {
-    XtInputCallbackProc   ie_proc;
-    XtPointer             ie_closure;
-    struct _InputEvent    *ie_next;
-    struct _InputEvent    *ie_oq;
-    XtAppContext          app;
-    int                   ie_source;
-    XtInputMask           ie_condition;
-} InputEvent;
-
-typedef struct _SignalEventRec {
-    XtSignalCallbackProc  se_proc;
-    XtPointer             se_closure;
-    struct _SignalEventRec *se_next;
-    XtAppContext          app;
-    Boolean               se_notice;
-} SignalEventRec;
-
-struct _XtAppStruct {
-    XtAppContext next;          /* link to next app in process context */
-    void *process;              /* back pointer to our process context */
-    void *destroy_callbacks;
-    Display **list;
-    TimerEventRec *timerQueue;
-    void *workQueue;
-    InputEvent **input_list;
-    InputEvent *outstandingQueue;
-    SignalEventRec *signalQueue;
-    XrmDatabase errorDB;
-    XtErrorMsgHandler errorMsgHandler, warningMsgHandler;
-    XtErrorHandler errorHandler, warningHandler;
-    struct _ActionListRec *action_table;
-    void *converterTable;
-    unsigned long selectionTimeout;
-    char  __maxed__nfds[3*sizeof(fd_set)+4];
-    short __maybe__count;       /* num of assigned entries in list */
-    short __maybe__max;         /* allocate size of list */
-    short __maybe__last;
-    short __maybe__input_count;
-    short __maybe__input_max;   /* elts input_list init'd with */
-    /* ... don't care about other members */
-};
-
-extern void XtResizeWidget(
-    Widget              /* widget */,
-    _XtDimension        /* width */,
-    _XtDimension        /* height */,
-    _XtDimension        /* border_width */
-);
-
-// Dummy X error handler
-static int trapped_error_code;
-static int (*old_error_handler)(Display *, XErrorEvent *);
-
-static int error_handler(Display *display, XErrorEvent *error)
+static Display *xt_get_display(void)
 {
-  trapped_error_code = error->error_code;
-  return 0;
-}
- 
-static void trap_errors(void)
-{
-  trapped_error_code = 0;
-  old_error_handler = XSetErrorHandler(error_handler);
-}
-
-static int untrap_errors(void)
-{
-  XSetErrorHandler(old_error_handler);
-  return trapped_error_code;
-}
-
-// Install the _XEMBED_INFO property
-static void xt_client_set_info(Widget w, unsigned long flags)
-{
-  Atom atom_XEMBED_INFO = XInternAtom(x_display, "_XEMBED_INFO", False);
-
-  unsigned long buffer[2];
-  buffer[1] = 0;		/* Protocol version */
-  buffer[1] = flags;
-  XChangeProperty(XtDisplay(w), XtWindow(w),
-				  atom_XEMBED_INFO,
-				  atom_XEMBED_INFO,
-				  32, PropModeReplace, (unsigned char *)buffer, 2);
-}
-
-// Send an XEMBED message to the specified window
-static void send_xembed_message(Display *display,
-								Window   window,
-								long     message,
-								long     detail,
-								long     data1,
-								long     data2)
-{
-  XEvent xevent;
-  memset(&xevent, 0, sizeof(xevent));
-  xevent.xclient.window = window;
-  xevent.xclient.type = ClientMessage;
-  xevent.xclient.message_type = XInternAtom(display, "_XEMBED", False);
-  xevent.xclient.format = 32;
-  xevent.xclient.data.l[0] = CurrentTime; // XXX: evil?
-  xevent.xclient.data.l[1] = message;
-  xevent.xclient.data.l[2] = detail;
-  xevent.xclient.data.l[3] = data1;
-  xevent.xclient.data.l[4] = data2;
-
-  trap_errors();
-  XSendEvent(display, xevent.xclient.window, False, NoEventMask, &xevent);
-  XSync(display, False);
-  untrap_errors();
+  D(bug("xt_get_display\n"));
+  if (global_xtbin == NULL) {
+	// This is really a hack. Should modify gtk2xtbin.c to allow
+	// initializing Xt without creating a widget.
+	global_xtbin = GTK_XTBIN(gtk_xtbin_new(gdk_get_default_root_window(),
+										   NULL));
+  }
+  return global_xtbin->xtdisplay;
 }
 
 /*
@@ -585,62 +473,6 @@ static void send_xembed_message(Display *display,
  *  various fields in the Flash window (e.g. menu items for [1]).
  */
 
-// Simulate client focus
-static void xt_client_simulate_focus(Widget w, int type)
-{
-  XEvent xevent;
-  memset(&xevent, 0, sizeof(xevent));
-  xevent.xfocus.type = type;
-  xevent.xfocus.window = XtWindow(w);
-  xevent.xfocus.display = XtDisplay(w);
-  xevent.xfocus.mode = NotifyNormal;
-  xevent.xfocus.detail = NotifyAncestor;
-
-  trap_errors();
-  XSendEvent(XtDisplay(w), xevent.xfocus.window, False, NoEventMask, &xevent);
-  XSync(XtDisplay(w), False);
-  untrap_errors();
-}
-
-// Various hacks for decent events filtery
-static void xt_client_event_handler(Widget w, XtPointer client_data, XEvent *event, Boolean *cont)
-{
-  XtData *toolkit = (XtData *)client_data;
-
-  switch (event->type) {
-  case ClientMessage:
-	// Handle XEMBED messages, in particular focus changes
-	if (event->xclient.message_type == XInternAtom(x_display, "_XEMBED", False)) {
-	  switch (event->xclient.data.l[1]) {
-	  case XEMBED_FOCUS_IN:
-		xt_client_simulate_focus(toolkit->form, FocusIn);
-		break;
-	  case XEMBED_FOCUS_OUT:
-		xt_client_simulate_focus(toolkit->form, FocusOut);
-		break;
-	  }
-	}
-	break;
-  case KeyPress:
-  case KeyRelease:
-	// Propagate key events down to the actual window
-	if (event->xkey.window == XtWindow(toolkit->top_widget)) {
-	  event->xkey.window = XtWindow(toolkit->form);
-	  trap_errors();
-	  XSendEvent(XtDisplay(toolkit->form), event->xfocus.window, False, NoEventMask, event);
-	  XSync(XtDisplay(toolkit->form), False);
-	  untrap_errors();
-	  *cont = False;
-	}
-	break;
-  case ButtonRelease:
-	// Notify the embedder that we want the input focus
-	send_xembed_message(XtDisplay(w), toolkit->browser_window, XEMBED_REQUEST_FOCUS, 0, 0, 0);
-	break;
-  }
-}
-
-
 /* ====================================================================== */
 /* === Window utilities                                               === */
 /* ====================================================================== */
@@ -659,7 +491,7 @@ static int create_window_attributes(NPSetWindowCallbackStruct *ws_info)
 	npw_printf("ERROR: could not reconstruct XVisual from visualID\n");
 	return -2;
   }
-  ws_info->display = x_display;
+  ws_info->display = gdk_x11_display_get_xdisplay(gdk_display_get_default());
   ws_info->visual = gdk_x11_visual_get_xvisual(gdk_visual);
   return 0;
 }
@@ -689,7 +521,8 @@ static void fixup_size_hints(PluginInstance *plugin)
   // check actual window size and commit back to plugin data
   if (window->window && (window->width == 0 || window->height == 0)) {
 	XWindowAttributes win_attr;
-	if (XGetWindowAttributes(x_display, (Window)window->window, &win_attr)) {
+	if (XGetWindowAttributes(gdk_x11_display_get_xdisplay(gdk_display_get_default()),
+							 (Window)window->window, &win_attr)) {
 	  plugin->width = window->width = win_attr.width;
 	  plugin->height = window->height = win_attr.height;
 	  return;
@@ -757,40 +590,30 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
   if (toolkit == NULL)
 	return -1;
 
-  String app_name, app_class;
-  XtGetApplicationNameAndClass(x_display, &app_name, &app_class);
-  Widget top_widget = XtVaAppCreateShell("drawingArea", app_class, topLevelShellWidgetClass, x_display,
-										 XtNoverrideRedirect, True,
-										 XtNborderWidth, 0,
-										 XtNbackgroundPixmap, None,
-										 XtNwidth, window->width,
-										 XtNheight, window->height,
-										 NULL);
+  toolkit->container = gtk_plug_new((GdkNativeWindow)window->window);
+  gtk_widget_set_size_request(toolkit->container, window->width, window->height); 
+  gtk_widget_show(toolkit->container);
 
-  Widget form = XtVaCreateManagedWidget("form", compositeWidgetClass, top_widget,
-										XtNdepth, ws_info->depth,
-										XtNvisual, ws_info->visual,
-										XtNcolormap, ws_info->colormap,
-										XtNborderWidth, 0,
-										XtNbackgroundPixmap, None,
-										XtNwidth, window->width,
-										XtNheight, window->height,
-										NULL);
+  D(bug("gtk_xtbin_new\n"));
+  toolkit->socket = gtk_xtbin_new(toolkit->container->window, NULL);
+  if (toolkit->socket == NULL) {
+	gtk_widget_destroy(toolkit->container);
+	free(toolkit);
+	return -1;
+  }
+  g_signal_connect(toolkit->socket, "destroy",
+				   G_CALLBACK(gtk_widget_destroyed), &toolkit->socket);
+  gtk_widget_set_size_request(toolkit->socket, window->width, window->height);
 
-  XtRealizeWidget(top_widget);
-  XReparentWindow(x_display, XtWindow(top_widget), (Window)window->window, 0, 0);
-  XtRealizeWidget(form);
+  GtkXtBin *xtbin = GTK_XTBIN(toolkit->socket);
+  ws_info->display = xtbin->xtdisplay;
+  ws_info->colormap = xtbin->xtclient.xtcolormap;
+  ws_info->visual = xtbin->xtclient.xtvisual;
+  ws_info->depth = xtbin->xtclient.xtdepth;
 
-  XSelectInput(x_display, XtWindow(top_widget), 0x0fffff);
-  XtAddEventHandler(top_widget, (SubstructureNotifyMask|KeyPress|KeyRelease), True, xt_client_event_handler, toolkit);
-  XtAddEventHandler(form, (ButtonReleaseMask), True, xt_client_event_handler, toolkit);
-  xt_client_set_info(form, 0);
+  plugin->window.window = (void*)xtbin->xtwindow;
 
   plugin->toolkit_data = toolkit;
-  toolkit->top_widget = top_widget;
-  toolkit->form = form;
-  toolkit->browser_window = (Window)window->window;
-  window->window = (void *)XtWindow(form);
   return 0;
 }
 
@@ -831,12 +654,24 @@ static int update_window(PluginInstance *plugin, NPWindow *window)
 	  }
 	  else {
 		XtData *toolkit = (XtData *)plugin->toolkit_data;
-		if (toolkit->form)
-		  XtResizeWidget(toolkit->form, plugin->window.width, plugin->window.height, 0);
-		if (toolkit->top_widget)
-		  XtResizeWidget(toolkit->top_widget, plugin->window.width, plugin->window.height, 0);
+		if (toolkit->socket) {
+		  gtk_xtbin_resize(toolkit->socket,
+						   plugin->window.width, plugin->window.height);
+		}
 	  }
 	}
+  }
+
+  if (!plugin->use_xembed) {
+	// FIXME: Put this somewhere more sensible.
+	XtData *toolkit = (XtData *)plugin->toolkit_data;
+	GtkXtBin *xtbin = GTK_XTBIN(toolkit->socket);
+	ws_info->display = xtbin->xtdisplay;
+	ws_info->colormap = xtbin->xtclient.xtcolormap;
+	ws_info->visual = xtbin->xtclient.xtvisual;
+	ws_info->depth = xtbin->xtclient.xtdepth;
+
+	plugin->window.window = (void*)xtbin->xtwindow;
   }
   return 0;
 }
@@ -856,12 +691,11 @@ static void destroy_window(PluginInstance *plugin)
 	}
 	else {
 	  XtData *toolkit = (XtData *)plugin->toolkit_data;
-	  if (toolkit->top_widget) {
-		XSync(x_display, False);
-		XtUnrealizeWidget(toolkit->top_widget);
-		XtDestroyWidget(toolkit->top_widget);
-		XSync(x_display, False);
-		toolkit->top_widget = None;
+	  if (toolkit->container) {
+		gdk_flush();
+		gtk_widget_destroy(toolkit->container);
+		gdk_flush();
+		toolkit->container = NULL;
 	  }
 	}
 	free(plugin->toolkit_data);
@@ -1123,11 +957,11 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 	  // Otherwise, we return the Xt one. If this is called in absense
 	  // of a plugin, also return the Xt one to support nppdf. This
 	  // matches Mozilla's logic.
-	  *(void **)value = x_display;
+	  *(void **)value = xt_get_display();
 	}
 	break;
   case NPNVxtAppContext:
-	*(void **)value = XtDisplayToApplicationContext(x_display);
+	*(void **)value = XtDisplayToApplicationContext(xt_get_display());
 	break;
   case NPNVToolkit:
 	*(NPNToolkitType *)value = NPW_TOOLKIT;
@@ -3734,12 +3568,6 @@ static NPError g_NPP_New(NPMIMEType plugin_type, uint32_t instance_id,
 	}
   }
 
-  // assume Gtk plugin (no Xt event loop) if XEMBED is used
-  if (!plugin->use_xembed) {
-	if (xt_source_create() < 0)
-	  return NPERR_GENERIC_ERROR;
-  }
-
   plugin->next_timer_id = 1;
   plugin->timers = g_hash_table_new_full(NULL, NULL, NULL,
 										 (GDestroyNotify) timer_free);
@@ -3831,9 +3659,6 @@ static NPError g_NPP_Destroy(NPP instance, NPSavedData **sdata)
   // to free it. If needbe we can track more objects, but anything
   // left here is arguably a plugin or browser bug.
   g_hash_table_foreach(plugin->npobjects, invalidate_npobject, NULL);
-
-  if (!plugin->use_xembed)
-	xt_source_destroy();
 
   npw_plugin_instance_invalidate(plugin);
   npw_plugin_instance_unref(plugin);
@@ -3955,7 +3780,14 @@ g_NPP_GetValue(NPP instance, NPPVariable variable, void *value)
 	return NPERR_INVALID_FUNCTABLE_ERROR;
 
   D(bugiI("NPP_GetValue instance=%p, variable=%d [%s]\n", instance, variable, string_of_NPPVariable(variable)));
-  NPError ret = plugin_funcs.getvalue(instance, variable, value);
+  NPError ret;
+  if (variable == NPPVpluginNeedsXEmbed) {
+	// Always request XEmbed. We'll require a GTK-based browser.
+	ret = NPERR_NO_ERROR;
+	*((int*)value) = TRUE;
+  } else {
+	ret = plugin_funcs.getvalue(instance, variable, value);
+  }
   D(bugiD("NPP_GetValue return: %d [%s]\n", ret, string_of_NPError(ret)));
   return ret;
 }
@@ -4575,264 +4407,6 @@ static int handle_NPP_GetSitesWithData(rpc_connection_t *connection)
 /* === Events processing                                              === */
 /* ====================================================================== */
 
-typedef gboolean (*GSourcePrepare)(GSource *, gint *);
-typedef gboolean (*GSourceCheckFunc)(GSource *);
-typedef gboolean (*GSourceDispatchFunc)(GSource *, GSourceFunc, gpointer);
-typedef void (*GSourceFinalizeFunc)(GSource *);
-
-// Xt events
-static GSource *xt_source = NULL;
-static int xt_source_count = 0;
-static GPollFD xt_event_poll_fd;
-static const int XT_DEFAULT_TIMEOUT = 25;
-static const int XT_MAX_DISPATCH_EVENTS = 10;
-
-static void xt_dummy_timeout_cb(XtPointer closure, XtIntervalId *id)
-{
-  /* dummy function, never called */
-  npw_printf("ERROR: xt_dummy_timeout_cb() should never be called\n");
-}
-
-static int xt_has_compatible_appcontext_timerQueue(void)
-{
-  int is_compatible;
-  XtIntervalId id;
-  TimerEventRec *tq, *tq_probe;
-
-  /* Try to determine where is the pointer to the next allocated
-	 TimerEventRec.
-
-	 Besides, XtAppAddTimeOut() shall not have been called already
-	 because we want to be sure any (libXt internal) "free"
-	 TimerEventRec pointer cache is empty. */
-  tq = XtNew(TimerEventRec);
-  XtFree((char *)tq);
-  tq_probe = XtNew(TimerEventRec);
-  XtFree((char *)tq_probe);
-  if (tq != tq_probe)
-	return 0;
-
-  id = XtAppAddTimeOut(x_app_context, 0,
-					   xt_dummy_timeout_cb,
-					   GUINT_TO_POINTER(0xdeadbeef));
-
-  tq = x_app_context->timerQueue;
-  is_compatible = tq == tq_probe
-	&& tq->app == x_app_context
-	&& tq->te_proc == xt_dummy_timeout_cb
-	&& tq->te_closure == GUINT_TO_POINTER(0xdeadbeef)
-	;
-
-  XtRemoveTimeOut(id);
-  return is_compatible;
-}
-
-static void xt_dummy_input_cb(XtPointer closure, int *source, XtInputId *id)
-{
-  /* dummy function, never called */
-  npw_printf("ERROR: xt_dummy_input_cb() should never be called\n");
-}
-
-static inline int get_appcontext_input_count_at(int offset)
-{
-  return *((short *)((char *)x_app_context + offset));
-}
-
-static inline int add_appcontext_input(int fd, int n)
-{
-  return XtAppAddInput(x_app_context,
-					   fd,
-					   GUINT_TO_POINTER(XtInputWriteMask),
-					   xt_dummy_input_cb,
-					   GUINT_TO_POINTER(0xdead0000));
-}
-
-static int get_appcontext_input_count_offset(void)
-{
-#define low_offset		offsetof(struct _XtAppStruct, __maxed__nfds)
-#define high_offset		offsetof(struct _XtAppStruct, __maybe__input_max)
-#define n_offsets_max	(high_offset - low_offset)/2
-  int i, ofs, n_offsets = 0;
-  int offsets[n_offsets_max] = { 0, };
-
-#define n_inputs_max	4 /* number of refinements/input sources */
-  int fd, id, n_inputs = 0;
-  struct { int fd, id; } inputs[n_inputs_max] = { { 0 } };
-
-  if ((fd = open("/dev/null", O_WRONLY)) < 0)
-	return 0;
-  if ((id = add_appcontext_input(fd, 0)) < 0) {
-	close(fd);
-	return 0;
-  }
-  inputs[n_inputs].fd = fd;
-  inputs[n_inputs].id = id;
-  n_inputs++;
-
-  for (ofs = low_offset; ofs < high_offset; ofs += 2) {
-	if (get_appcontext_input_count_at(ofs) == 1)
-	  offsets[n_offsets++] = ofs;
-  }
-
-  while (n_inputs < n_inputs_max) {
-	if ((fd = open("/dev/null", O_WRONLY)) < 0)
-	  break;
-	if ((id = add_appcontext_input(fd, n_inputs)) < 0) {
-	  close(fd);
-	  break;
-	}
-	inputs[n_inputs].fd = fd;
-	inputs[n_inputs].id = id;
-	n_inputs++;
-
-	int n = 0;
-	for (i = 0; i < n_offsets; i++) {
-	  if (get_appcontext_input_count_at(offsets[i]) == n_inputs)
-		offsets[n++] = offsets[i];
-	}
-	for (i = n; i < n_offsets; i++)
-	  offsets[i] = 0;
-	n_offsets = n;
-  }
-
-  for (i = 0; i < n_inputs; i++) {
-	XtRemoveInput(inputs[i].id);
-	close(inputs[i].fd);
-  }
-
-  if (n_offsets == 1)
-	return offsets[0];
-
-#undef n_fds_max
-#undef n_offsets_max
-#undef high_offset
-#undef low_offset
-  return 0;
-}
-
-static int get_appcontext_input_count(void)
-{
-  static int input_count_offset = -1;
-  if (input_count_offset < 0)
-	input_count_offset = get_appcontext_input_count_offset();
-  if (input_count_offset == 0)
-	return 1; /* fake we have input to trigger timeout */
-  return get_appcontext_input_count_at(input_count_offset);
-}
-
-static int xt_has_compatible_appcontext(void)
-{
-  return xt_has_compatible_appcontext_timerQueue();
-}
-
-static int xt_get_next_timeout(GSource *source)
-{
-  static int has_compatible_appcontext = -1;
-  if (has_compatible_appcontext < 0) {
-	if ((has_compatible_appcontext = xt_has_compatible_appcontext()) == 0)
-	  npw_printf("WARNING: xt_get_next_timeout() is not optimizable\n");
-  }
-  int timeout = XT_DEFAULT_TIMEOUT;
-  if (has_compatible_appcontext) {
-	int input_timeout, timer_timeout;
-	/* Check there is any input source to process */
-	if (get_appcontext_input_count() > 0)
-	  input_timeout = XT_DEFAULT_TIMEOUT;
-	else
-	  input_timeout = -1;
-	/* Check there is any timer to process */
-	if (x_app_context->timerQueue == NULL)
-	  timer_timeout = -1;
-	else {
-	  /* Determine delay to next timeout. Zero means timeout already expired */
-	  struct timeval *next = &x_app_context->timerQueue->te_timer_value;
-	  GTimeVal now;
-	  int64_t diff;
-	  g_source_get_current_time(source, &now);
-	  if ((diff = (int64_t)next->tv_sec - (int64_t)now.tv_sec) < 0)
-		timer_timeout = 0;
-	  else if ((diff = diff*1000 + ((int64_t)next->tv_usec - (int64_t)now.tv_usec)/1000) <= 0)
-		timer_timeout = 0;
-	  else
-		timer_timeout = diff;
-	}
-	if (input_timeout < 0)
-	  timeout = timer_timeout;
-	else if (timer_timeout < 0)
-	  timeout = input_timeout;
-	else
-	  timeout = MIN(input_timeout, timer_timeout);
-  }
-  return timeout;
-}
-
-static gboolean xt_event_prepare(GSource *source, gint *timeout)
-{
-  int mask = XtAppPending(x_app_context);
-  if (mask)
-	return TRUE;
-  /* XXX: create new GPollFD for input sources? */
-  return (*timeout = xt_get_next_timeout(source)) == 0;
-}
-
-static gboolean xt_event_check(GSource *source)
-{
-  if (xt_event_poll_fd.revents & G_IO_IN) {
-	int mask = XtAppPending(x_app_context);
-	if (mask)
-	  return TRUE;
-  }
-  return FALSE;
-}
-
-static gboolean xt_event_dispatch(GSource *source, GSourceFunc callback, gpointer user_data)
-{
-  int i;
-  for (i = 0; i < XT_MAX_DISPATCH_EVENTS; i++) {
-	int mask = XtAppPending(x_app_context);
-	if (mask == 0)
-	  break;
-	XtAppProcessEvent(x_app_context, XtIMAll);
-  }
-  return TRUE;
-}
-
-static GSourceFuncs xt_event_funcs = {
-  xt_event_prepare,
-  xt_event_check,
-  xt_event_dispatch,
-  (GSourceFinalizeFunc)g_free,
-  (GSourceFunc)NULL,
-  (GSourceDummyMarshal)NULL
-};
-
-static int xt_source_create(void)
-{
-  if (++xt_source_count > 1 && xt_source != NULL)
-	return 0;
-
-  if ((xt_source = g_source_new(&xt_event_funcs, sizeof(GSource))) == NULL) {
-	npw_printf("ERROR: failed to initialize Xt events listener\n");
-	return -1;
-  }
-  g_source_set_priority(xt_source, GDK_PRIORITY_EVENTS);
-  g_source_set_can_recurse(xt_source, TRUE);
-  g_source_attach(xt_source, NULL);
-  xt_event_poll_fd.fd = ConnectionNumber(x_display);
-  xt_event_poll_fd.events = G_IO_IN;
-  xt_event_poll_fd.revents = 0;
-  g_source_add_poll(xt_source, &xt_event_poll_fd);
-  return 0;
-}
-
-static void xt_source_destroy(void)
-{
-  if (--xt_source_count < 1 && xt_source) {
-	g_source_destroy(xt_source);
-	xt_source = NULL;
-  }
-}
-
 // RPC error callback -- kill the plugin
 static void rpc_error_callback_cb(rpc_connection_t *connection, void *user_data)
 {
@@ -4870,10 +4444,6 @@ static int do_main(int argc, char **argv, const char *connection_path)
 	unsetenv("LD_PRELOAD");
 #endif
 
-  // Xt and GTK initialization
-  XtToolkitInitialize();
-  x_app_context = XtCreateApplicationContext();
-  x_display = XtOpenDisplay(x_app_context, NULL, "npw-viewer", "npw-viewer", NULL, 0, &argc, argv);
   g_thread_init(NULL);
   gtk_init(&argc, &argv);
 
@@ -4983,9 +4553,6 @@ static int do_main(int argc, char **argv, const char *connection_path)
 #if USE_NPIDENTIFIER_CACHE
   npidentifier_cache_destroy();
 #endif
-
-  if (xt_source)
-	g_source_destroy(xt_source);
 
   if (g_user_agent)
 	free(g_user_agent);
