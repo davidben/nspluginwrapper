@@ -594,7 +594,7 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
   gtk_widget_set_size_request(toolkit->container, window->width, window->height); 
   gtk_widget_show(toolkit->container);
 
-  D(bug("gtk_xtbin_new\n"));
+  D(bug("gtk_xtbin_new(%p, NULL)\n", toolkit->container->window));
   toolkit->socket = gtk_xtbin_new(toolkit->container->window, NULL);
   if (toolkit->socket == NULL) {
 	gtk_widget_destroy(toolkit->container);
