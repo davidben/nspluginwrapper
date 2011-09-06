@@ -534,7 +534,8 @@ static bool is_wrapper_plugin(const char *plugin_path, NPW_PluginInfo *out_plugi
 	return false;
 
   bool ret = is_wrapper_plugin_handle(handle, out_plugin_info);
-  dlclose(handle);
+  /* Intentionally leak the handle; many libraries crash when unloaded. */
+  /* dlclose(handle); */
   return ret;
 }
 
