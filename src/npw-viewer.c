@@ -3998,7 +3998,7 @@ static int handle_NPP_GetValue(rpc_connection_t *connection)
 	  ret = g_NPP_GetValue(PLUGIN_INSTANCE_NPP(plugin), variable, (void *)&str);
 	  error = rpc_method_send_reply(connection, RPC_TYPE_INT32, ret, RPC_TYPE_STRING, str, RPC_TYPE_INVALID);
 	  // Eww. NPPVformValue needs to be freed, but not the others.
-	  if (variable == NPPVformValue)
+	  if (variable == NPPVformValue && str != NULL)
 		NPN_MemFree(str);
 	  return error;
 	}
