@@ -293,6 +293,7 @@ const char *string_of_NPNVariable(int variable)
 	_(NPNVSupportsWindowless);
 	_(NPNVprivateModeBool);
 	_(NPNVsupportsAdvancedKeyHandling);
+	_(NPNVdocumentOrigin);
 #undef _
   default:
 	switch (variable & 0xff) {

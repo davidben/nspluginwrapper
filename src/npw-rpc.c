@@ -49,6 +49,9 @@ int rpc_type_of_NPNVariable(int variable)
   case NPNVnetscapeWindow:
 	type = RPC_TYPE_UINT32;
 	break;
+  case NPNVdocumentOrigin:
+	type = RPC_TYPE_STRING;
+	break;
   case NPNVWindowNPObject:
   case NPNVPluginElementNPObject:
 	type = RPC_TYPE_NP_OBJECT;

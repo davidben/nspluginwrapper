@@ -1089,6 +1089,25 @@ invoke_NPN_GetValue(PluginInstance *plugin, NPNVariable variable, void *value)
 	  *((NPBool *)value) = b ? TRUE : FALSE;
 	  break;
 	}
+  case RPC_TYPE_STRING:
+	{
+	  char *str = NULL;
+	  error = rpc_method_wait_for_reply(g_rpc_connection, RPC_TYPE_INT32, &ret, RPC_TYPE_STRING, &str, RPC_TYPE_INVALID);
+	  if (error != RPC_ERROR_NO_ERROR) {
+		npw_perror("NPN_GetValue() wait for reply", error);
+		ret = NPERR_GENERIC_ERROR;
+	  }
+	  D(bug("-> value: %s\n", str ? str : "(null)"));
+	  // Reallocate with NPN_MemAlloc. Caller frees.
+	  if (ret == NPERR_NO_ERROR) {
+		char *npn_str = NULL;
+		ret = NPW_ReallocData(str, strlen(str) + 1, (void**)&npn_str);
+		free(str);
+		str = npn_str;
+	  }
+	  *((char **)value) = str;
+	  break;
+	}
   case RPC_TYPE_NP_OBJECT:
 	{
 	  NPObject *npobj = NULL;
@@ -1171,6 +1190,7 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
   case NPNVPluginElementNPObject:
   case NPNVprivateModeBool:
   case NPNVsupportsAdvancedKeyHandling:
+  case NPNVdocumentOrigin:
 	return g_NPN_GetValue_real(instance, variable, value);
   default:
 	switch (variable & 0xff) {
