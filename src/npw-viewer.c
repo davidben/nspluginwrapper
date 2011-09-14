@@ -1184,12 +1184,16 @@ g_NPN_GetValue(NPP instance, NPNVariable variable, void *value)
 	}
 	*((GdkNativeWindow *)value) = GDK_WINDOW_XWINDOW(plugin->browser_toplevel);
 	break;
+  // TODO: when AdvancedKeyHandling hooks are supported, proxy this value over
+  // from the browser.
+  case NPNVsupportsAdvancedKeyHandling:
+	*(NPBool*)value = FALSE;
+	break;
   case NPNVSupportsWindowless:
   case NPNVSupportsXEmbedBool:
   case NPNVWindowNPObject:
   case NPNVPluginElementNPObject:
   case NPNVprivateModeBool:
-  case NPNVsupportsAdvancedKeyHandling:
   case NPNVdocumentOrigin:
 	return g_NPN_GetValue_real(instance, variable, value);
   default:
