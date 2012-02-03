@@ -35,10 +35,6 @@
 #include <X11/X.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
-#include <X11/Intrinsic.h>
-#include <X11/Shell.h>
-#include <X11/StringDefs.h>
-#include <X11/extensions/XShm.h>
 
 #include <gtk/gtk.h>
 #include <gdk/gdkx.h>
