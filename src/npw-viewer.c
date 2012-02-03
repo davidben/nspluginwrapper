@@ -604,6 +604,7 @@ static int create_window(PluginInstance *plugin, NPWindow *window)
   g_signal_connect(toolkit->socket, "destroy",
 				   G_CALLBACK(gtk_widget_destroyed), &toolkit->socket);
   gtk_widget_set_size_request(toolkit->socket, window->width, window->height);
+  gtk_widget_show(GTK_WIDGET(toolkit->socket));
 
   GtkXtBin *xtbin = GTK_XTBIN(toolkit->socket);
   ws_info->display = xtbin->xtdisplay;
