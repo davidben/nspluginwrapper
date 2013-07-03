@@ -409,8 +409,11 @@ static int detect_plugin_viewer(const char *filename, NPW_PluginInfo *out_plugin
   if (!g_allow_native
 	  && out_plugin_info
 	  && out_plugin_info->target_arch && strcmp(out_plugin_info->target_arch, HOST_ARCH) == 0
-	  && out_plugin_info->target_os && strcmp(out_plugin_info->target_os, HOST_OS) == 0)
+          && out_plugin_info->target_os && strcmp(out_plugin_info->target_os, HOST_OS) == 0) {
+	  if (g_verbose)
+		  printf("Not wrapping native plugin: `%s'.\nTry -n.\n", filename);
 	return EXIT_VIEWER_NATIVE;
+  }
 
   enum { VAR_ARCH, VAR_OS, VAR_COUNT };
   Var vars[VAR_COUNT+1];
